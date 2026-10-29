@@ -24,7 +24,7 @@ const visible = computed(() => {
   <PageIntro
     eyebrow="工作台"
     title="案件類別"
-    description="選擇一種虛構類別，查看相關文件、填寫步驟，並在工作台留下草稿。這裡沒有真實案件。"
+    description="選擇一種虛構類別，查看相關文件與填寫步驟，上傳範本後即可產生文件。這裡沒有真實案件。"
   />
 
   <div class="mb-6 max-w-md">

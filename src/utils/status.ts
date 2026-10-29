@@ -1,4 +1,4 @@
-import type { DocumentKind, DraftSource, StatusTone } from '@/types/domain'
+import type { DocumentKind, StatusTone, TemplateOrigin } from '@/types/domain'
 
 export function documentTone(kind: DocumentKind): StatusTone {
   switch (kind) {
@@ -11,11 +11,20 @@ export function documentTone(kind: DocumentKind): StatusTone {
   }
 }
 
-export function draftTone(source: DraftSource): StatusTone {
-  switch (source) {
-    case '示範':
+export function templateTone(origin: TemplateOrigin): StatusTone {
+  switch (origin) {
+    case 'sample':
       return 'neutral'
-    case '本機':
+    case 'upload':
       return 'ok'
+  }
+}
+
+export function templateOriginLabel(origin: TemplateOrigin): string {
+  switch (origin) {
+    case 'sample':
+      return '示範'
+    case 'upload':
+      return '上傳'
   }
 }

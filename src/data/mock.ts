@@ -2,8 +2,6 @@ import type {
   AccessRole,
   AppRole,
   CaseCategory,
-  DemoAccount,
-  DraftFile,
   PermissionKey,
   PermissionRow,
 } from '@/types/domain'
@@ -24,7 +22,7 @@ export const permissionRows: PermissionRow[] = [
   },
   {
     key: 'upload',
-    label: '加入草稿檔紀錄',
+    label: '上傳與移除範本文件',
     roles: ['clerk', 'admin'],
   },
   {
@@ -35,8 +33,8 @@ export const permissionRows: PermissionRow[] = [
 ]
 
 const roleSummaries: Record<AppRole, string> = {
-  viewer: '可閱讀類別、文件與步驟，不能加入新的草稿紀錄。',
-  clerk: '可閱讀類別，並把草稿檔的檔名留在這個分頁。',
+  viewer: '可閱讀類別、文件與步驟，也能在本機產生文件，但不能上傳或移除範本。',
+  clerk: '可上傳範本文件，並在本機填入欄位後下載。',
   admin: '與承辦相同，並可對照角色權限。此頁不會變更真實授權。',
 }
 
@@ -54,27 +52,6 @@ export function roleAllows(role: AppRole, key: PermissionKey): boolean {
 export function permissionsFor(role: AppRole): string[] {
   return permissionRows.filter((row) => row.roles.includes(role)).map((row) => row.label)
 }
-
-export const demoAccounts: DemoAccount[] = [
-  {
-    id: 'demo-clerk',
-    displayName: '示範承辦',
-    role: 'clerk',
-    hint: '瀏覽案件類別，並在工作台留下草稿紀錄。',
-  },
-  {
-    id: 'demo-admin',
-    displayName: '示範管理員',
-    role: 'admin',
-    hint: '與承辦相同，另外可對照角色與權限。',
-  },
-  {
-    id: 'demo-viewer',
-    displayName: '示範檢視',
-    role: 'viewer',
-    hint: '只能閱讀類別、文件與步驟。',
-  },
-]
 
 export const accessRoles: AccessRole[] = roleOrder.map((id) => ({
   id,
@@ -150,13 +127,14 @@ export const caseCategories: CaseCategory[] = [
       },
       {
         id: 'general-4',
-        title: '在本頁留下草稿',
-        detail: '到上傳區選擇檔案。畫面只記錄檔名、大小與類型，不會讀取內容，也不會送到伺服器。',
+        title: '上傳範本文件',
+        detail:
+          '把含有 {{姓名}}、{{日期}} 這類欄位的 .docx 範本上傳到此類別。範本會留在這個瀏覽器，不會送到伺服器。',
       },
       {
         id: 'general-5',
-        title: '先停在草稿清單',
-        detail: '到我的草稿確認紀錄。送審、分派與結案會在後續階段才開放。',
+        title: '產生文件',
+        detail: '在產生文件填入欄位後下載。填入的內容不會被保存。送審與結案尚未開放。',
       },
     ],
   },
@@ -224,13 +202,13 @@ export const caseCategories: CaseCategory[] = [
       },
       {
         id: 'summary-4',
-        title: '上傳摘要草稿',
-        detail: '在本頁上傳區留下檔案紀錄。內容不會被讀取，也不會送到伺服器。',
+        title: '上傳摘要範本',
+        detail: '上傳這一類的 .docx 範本，並用 {{欄位名}} 標出要帶入的位置。範本會留在這個瀏覽器。',
       },
       {
         id: 'summary-5',
-        title: '回到草稿清單',
-        detail: '確認檔名與類別無誤即可。正式送件流程尚未開放。',
+        title: '產生文件',
+        detail: '填入欄位後下載套好的文件。填入內容只存在這個畫面，離開後即清除。',
       },
     ],
   },
@@ -298,13 +276,13 @@ export const caseCategories: CaseCategory[] = [
       },
       {
         id: 'training-4',
-        title: '上傳教材草稿',
-        detail: '在本頁留下檔案紀錄。系統不保存檔案內容。',
+        title: '上傳教材範本',
+        detail: '上傳 .docx 範本。練習用的欄位用 {{名稱}} 標示，不要寫入真實學員資料。',
       },
       {
         id: 'training-5',
-        title: '標記為尚未審定',
-        detail: '到草稿清單核對檔名。此階段沒有排課或結案。',
+        title: '產生文件',
+        detail: '下載前仍須人工覆核。填入的欄位不會被保存，此階段也沒有排課或結案。',
       },
     ],
   },
@@ -372,13 +350,13 @@ export const caseCategories: CaseCategory[] = [
       },
       {
         id: 'public-4',
-        title: '上傳未發布草稿',
-        detail: '在本頁留下檔案紀錄。檔案不會被上傳到伺服器。',
+        title: '上傳文案範本',
+        detail: '上傳尚未發布的 .docx 範本。範本留在這個瀏覽器，不會被送到伺服器或對外發布。',
       },
       {
         id: 'public-5',
-        title: '不要在此發布',
-        detail: '到草稿清單核對即可。後續發布仍走原有程序，此階段沒有送審。',
+        title: '產生文件',
+        detail: '填入欄位後下載即可。後續發布仍走原有程序，此階段沒有送審。',
       },
     ],
   },
@@ -446,44 +424,14 @@ export const caseCategories: CaseCategory[] = [
       },
       {
         id: 'analysis-4',
-        title: '上傳說明草稿',
-        detail: '在本頁留下檔案紀錄。請只選擇彙總結果，系統也不會把檔案送到伺服器。',
+        title: '上傳說明範本',
+        detail: '上傳只含彙總說明的 .docx 範本。範本留在這個瀏覽器，不會把檔案送到伺服器。',
       },
       {
         id: 'analysis-5',
-        title: '保留在試辦清單',
-        detail: '到我的草稿確認類別。分析報告的核定流程尚未開放。',
+        title: '產生文件',
+        detail: '填入欄位後下載。分析報告的核定流程尚未開放，填入內容也不會被保存。',
       },
     ],
-  },
-]
-
-export const seedDrafts: DraftFile[] = [
-  {
-    id: 'draft-seed-1',
-    categoryId: 'public-copy',
-    fileName: '活動問答-未發布草稿.txt',
-    sizeBytes: 48211,
-    mimeType: 'text/plain',
-    addedAt: '2026-10-26 11:18',
-    source: '示範',
-  },
-  {
-    id: 'draft-seed-2',
-    categoryId: 'doc-summary',
-    fileName: '會議要點-摘要草稿.md',
-    sizeBytes: 9200,
-    mimeType: 'text/markdown',
-    addedAt: '2026-10-22 15:05',
-    source: '示範',
-  },
-  {
-    id: 'draft-seed-3',
-    categoryId: 'general-assist',
-    fileName: '一般業務-使用目的草稿.txt',
-    sizeBytes: 18432,
-    mimeType: 'text/plain',
-    addedAt: '2026-10-20 09:40',
-    source: '示範',
   },
 ]

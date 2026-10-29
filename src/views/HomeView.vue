@@ -3,15 +3,15 @@ import PageIntro from '@/components/PageIntro.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { apiConfigured } from '@/config/env'
 import { useCategoryStore } from '@/stores/categories'
-import { useDraftStore } from '@/stores/drafts'
 import { useSessionStore } from '@/stores/session'
+import { useTemplateStore } from '@/stores/templates'
 import { formatBytes } from '@/utils/format'
-import { draftTone } from '@/utils/status'
+import { templateOriginLabel, templateTone } from '@/utils/status'
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
 const categories = useCategoryStore()
-const drafts = useDraftStore()
+const templates = useTemplateStore()
 const session = useSessionStore()
 
 const stats = computed(() => [
@@ -28,10 +28,10 @@ const stats = computed(() => [
     to: '/categories',
   },
   {
-    label: '我的草稿',
-    value: String(drafts.total),
-    hint: '含示範與本機紀錄',
-    to: '/drafts',
+    label: '範本文件',
+    value: templates.ready ? String(templates.total) : '…',
+    hint: '存在這個瀏覽器',
+    to: '/templates',
   },
   {
     label: '目前角色',
@@ -41,14 +41,14 @@ const stats = computed(() => [
   },
 ])
 
-const latestDrafts = computed(() => drafts.items.slice(0, 4))
+const latestTemplates = computed(() => templates.items.slice(0, 4))
 </script>
 
 <template>
   <PageIntro
     eyebrow="工作台"
     title="總覽"
-    description="先選擇案件類別，閱讀相關文件與填寫步驟，再把草稿檔留在這個分頁。登入的是示範身分，案件送審會在之後才接上。"
+    description="先選擇案件類別，閱讀相關文件與步驟，再上傳範本、填入欄位並下載文件。登入比對的是前端示範帳號，正式驗證會在 Phase C/D 接上。"
   >
     <RouterLink
       to="/categories"
@@ -72,6 +72,10 @@ const latestDrafts = computed(() => drafts.items.slice(0, 4))
       <p class="mt-2 text-xs text-stone-500">{{ stat.hint }}</p>
     </RouterLink>
   </section>
+
+  <p v-if="templates.error" class="mt-4 text-sm text-rose-800" role="alert">
+    {{ templates.error }}
+  </p>
 
   <div class="mt-8 grid gap-6 lg:grid-cols-5">
     <section
@@ -108,13 +112,13 @@ const latestDrafts = computed(() => drafts.items.slice(0, 4))
       class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm lg:col-span-2"
     >
       <div class="flex items-center justify-between gap-3 border-b border-stone-200 px-5 py-4">
-        <h2 class="text-base font-semibold">最近草稿</h2>
-        <RouterLink to="/drafts" class="text-sm text-orange-800 hover:underline"
+        <h2 class="text-base font-semibold">最近範本</h2>
+        <RouterLink to="/templates" class="text-sm text-orange-800 hover:underline"
           >查看全部</RouterLink
         >
       </div>
-      <ul v-if="latestDrafts.length > 0" class="divide-y divide-stone-200">
-        <li v-for="item in latestDrafts" :key="item.id" class="px-5 py-4">
+      <ul v-if="latestTemplates.length > 0" class="divide-y divide-stone-200">
+        <li v-for="item in latestTemplates" :key="item.id" class="px-5 py-4">
           <RouterLink
             :to="`/categories/${item.categoryId}`"
             class="break-all text-sm font-medium text-stone-900 hover:underline"
@@ -125,12 +129,15 @@ const latestDrafts = computed(() => drafts.items.slice(0, 4))
             {{ categories.nameOf(item.categoryId) }} · {{ formatBytes(item.sizeBytes) }}
           </p>
           <div class="mt-2 flex items-center justify-between gap-3">
-            <StatusBadge :label="item.source" :tone="draftTone(item.source)" />
+            <StatusBadge
+              :label="templateOriginLabel(item.origin)"
+              :tone="templateTone(item.origin)"
+            />
             <time class="text-xs text-stone-500">{{ item.addedAt }}</time>
           </div>
         </li>
       </ul>
-      <p v-else class="px-5 py-8 text-sm text-stone-500">還沒有草稿紀錄。</p>
+      <p v-else class="px-5 py-8 text-sm text-stone-500">還沒有範本文件。</p>
     </section>
   </div>
 

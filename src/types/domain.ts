@@ -1,14 +1,14 @@
 export type AppRole = 'admin' | 'clerk' | 'viewer'
 export type PermissionKey = 'browse' | 'upload' | 'access'
 export type DocumentKind = '說明' | '表單' | '檢核'
-export type DraftSource = '示範' | '本機'
+export type TemplateOrigin = 'sample' | 'upload'
 export type StatusTone = 'neutral' | 'warn' | 'ok' | 'danger'
 
-export interface DemoAccount {
-  id: string
+export interface MockUser {
+  username: string
+  password: string
   displayName: string
   role: AppRole
-  hint: string
 }
 
 export interface PermissionRow {
@@ -42,16 +42,6 @@ export interface CaseCategory {
   caution: string
   documents: CategoryDocument[]
   steps: CategoryStep[]
-}
-
-export interface DraftFile {
-  id: string
-  categoryId: string
-  fileName: string
-  sizeBytes: number
-  mimeType: string
-  addedAt: string
-  source: DraftSource
 }
 
 export interface AccessRole {

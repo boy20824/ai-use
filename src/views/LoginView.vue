@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { appName, appTagline } from '@/config/app'
-import { demoAccounts, roleLabels } from '@/data/mock'
+import { roleLabels } from '@/data/mock'
+import { mockUsers } from '@/data/mockUsers'
 import { useSessionStore } from '@/stores/session'
 import { safeRedirect } from '@/utils/redirect'
 import { ref } from 'vue'
@@ -9,7 +10,8 @@ import { useRoute, useRouter } from 'vue-router'
 const session = useSessionStore()
 const route = useRoute()
 const router = useRouter()
-const selectedId = ref(demoAccounts[0]?.id ?? '')
+const username = ref('')
+const password = ref('')
 const failed = ref(false)
 
 const points = [
@@ -20,25 +22,26 @@ const points = [
   },
   {
     mark: '2',
-    title: '閱讀文件與步驟',
-    detail: '每個類別附有相關文件，以及準備草稿時要跟著做的步驟。',
+    title: '上傳範本文件',
+    detail: '每個類別可以保存 .docx 範本，並用雙大括號標出要帶入的欄位。',
   },
   {
     mark: '3',
-    title: '留下草稿檔',
-    detail: '上傳只記錄檔名與大小，檔案留在這個分頁，不會送到伺服器。',
+    title: '產生文件',
+    detail: '填入欄位後下載套好的文件。填寫內容不會被保存。',
   },
 ]
 
 function submit() {
-  failed.value = !session.login(selectedId.value)
+  failed.value = !session.login(username.value, password.value)
   if (failed.value) return
+  password.value = ''
   void router.push(safeRedirect(route.query.redirect))
 }
 </script>
 
 <template>
-  <div class="grid min-h-screen lg:grid-cols-[minmax(0,1fr)_minmax(22rem,34rem)]">
+  <div class="grid min-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(22rem,34rem)]">
     <section
       class="hidden bg-stone-950 px-10 py-12 text-stone-100 lg:flex lg:flex-col lg:justify-between"
     >
@@ -54,7 +57,7 @@ function submit() {
         </span>
       </div>
       <div class="max-w-md">
-        <p class="text-3xl font-semibold tracking-tight">先選類別，再準備草稿</p>
+        <p class="text-3xl font-semibold tracking-tight">先選類別，再套範本</p>
         <ol class="mt-8 space-y-5">
           <li v-for="point in points" :key="point.mark" class="flex gap-3">
             <span
@@ -70,7 +73,7 @@ function submit() {
         </ol>
       </div>
       <p class="text-xs leading-5 text-stone-500">
-        沒有密碼欄位，也不會連線。重新整理後身分會清除。
+        目前只在前端比對示範帳號。正式登入會在 Phase C/D 改接後端。
       </p>
     </section>
 
@@ -79,53 +82,62 @@ function submit() {
         class="w-full max-w-md rounded-3xl border border-stone-200 bg-white p-6 shadow-sm sm:p-8"
       >
         <p class="text-xs font-medium tracking-wide text-orange-800 lg:hidden">{{ appName }}</p>
-        <h1 class="mt-2 text-2xl font-semibold tracking-tight text-stone-950">選擇示範身分</h1>
+        <h1 class="mt-2 text-2xl font-semibold tracking-tight text-stone-950">登入</h1>
         <p class="mt-3 text-sm leading-6 text-stone-600">
-          以角色進入工作台。此頁沒有密碼，選擇結果只留在這個分頁。
+          輸入帳號與密碼進入工作台。這個階段不會把帳號送到伺服器。
         </p>
 
-        <form class="mt-6" @submit.prevent="submit">
-          <fieldset>
-            <legend class="sr-only">示範身分</legend>
-            <div class="space-y-3">
-              <label v-for="account in demoAccounts" :key="account.id" class="block cursor-pointer">
-                <input
-                  v-model="selectedId"
-                  class="peer sr-only"
-                  type="radio"
-                  name="demo-account"
-                  :value="account.id"
-                  required
-                />
-                <span
-                  class="block rounded-2xl border border-stone-200 px-4 py-4 transition peer-checked:border-stone-900 peer-checked:bg-stone-50 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-orange-700"
-                >
-                  <span class="flex items-center justify-between gap-3">
-                    <span class="text-sm font-semibold text-stone-900">{{
-                      account.displayName
-                    }}</span>
-                    <span class="text-xs text-stone-500">{{ roleLabels[account.role] }}</span>
-                  </span>
-                  <span class="mt-1 block text-sm leading-6 text-stone-600">{{
-                    account.hint
-                  }}</span>
-                </span>
-              </label>
-            </div>
-          </fieldset>
-
+        <form class="mt-6 space-y-4" @submit.prevent="submit">
+          <div>
+            <label for="username" class="block text-sm font-medium text-stone-800">帳號</label>
+            <input
+              id="username"
+              v-model="username"
+              type="text"
+              name="username"
+              autocomplete="username"
+              required
+              class="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+            />
+          </div>
+          <div>
+            <label for="password" class="block text-sm font-medium text-stone-800">密碼</label>
+            <input
+              id="password"
+              v-model="password"
+              type="password"
+              name="password"
+              autocomplete="current-password"
+              required
+              class="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+            />
+          </div>
+          <p v-if="failed" class="text-sm text-rose-800" role="alert">帳號或密碼不正確。</p>
           <button
             type="submit"
-            class="mt-6 w-full rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
+            class="w-full rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
           >
-            進入工作台
+            登入
           </button>
         </form>
 
-        <p v-if="failed" class="mt-4 text-sm text-rose-800" role="alert">找不到這個示範身分。</p>
-        <p class="mt-4 text-xs leading-5 text-stone-500">
-          案件送審會在後續階段才接上。現在只準備類別與草稿。
-        </p>
+        <details class="mt-6 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
+          <summary class="cursor-pointer text-sm font-medium text-stone-800">示範帳號</summary>
+          <ul class="mt-3 space-y-2">
+            <li
+              v-for="user in mockUsers"
+              :key="user.username"
+              class="text-sm leading-6 text-stone-600"
+            >
+              <span class="font-medium text-stone-900">{{ user.username }}</span>
+              <span> / {{ user.password }}</span>
+              <span class="text-stone-500">（{{ roleLabels[user.role] }}）</span>
+            </li>
+          </ul>
+          <p class="mt-3 text-xs leading-5 text-stone-500">
+            這些密碼只寫在前端程式裡，不是正式密鑰。Phase C/D 會改接真正的登入，不再使用這份清單。
+          </p>
+        </details>
       </div>
     </section>
   </div>

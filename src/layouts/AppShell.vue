@@ -39,9 +39,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen text-stone-900">
-    <aside class="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-white/10 md:block">
-      <SideNav id="desktop-nav" />
+  <div class="flex min-h-dvh items-stretch bg-[#f6f4f1] text-stone-900">
+    <aside class="hidden w-64 shrink-0 bg-stone-950 md:block">
+      <div class="sticky top-0 flex h-dvh flex-col">
+        <SideNav id="desktop-nav" />
+      </div>
     </aside>
 
     <div
@@ -51,13 +53,13 @@ onUnmounted(() => {
     ></div>
 
     <aside
-      class="fixed inset-y-0 left-0 z-50 w-64 transition-transform duration-200 md:hidden"
+      class="fixed inset-y-0 left-0 z-50 flex h-dvh w-64 flex-col bg-stone-950 transition-transform duration-200 md:hidden"
       :class="menuOpen ? 'translate-x-0' : '-translate-x-full'"
     >
       <SideNav id="mobile-nav" @navigate="menuOpen = false" />
     </aside>
 
-    <div class="md:pl-64">
+    <div class="flex min-w-0 flex-1 flex-col">
       <header
         class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-stone-200/80 bg-[#f6f4f1]/90 px-4 backdrop-blur md:px-8"
       >
@@ -99,7 +101,7 @@ onUnmounted(() => {
         </div>
       </header>
 
-      <main class="px-4 py-8 md:px-8 md:py-10">
+      <main class="flex-1 px-4 py-8 md:px-8 md:py-10">
         <div class="mx-auto max-w-6xl">
           <RouterView />
         </div>

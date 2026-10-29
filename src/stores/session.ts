@@ -1,32 +1,34 @@
-import { demoAccounts, roleAllows, roleLabels } from '@/data/mock'
+import { roleAllows, roleLabels } from '@/data/mock'
+import { mockUsers } from '@/data/mockUsers'
 import type { AppRole } from '@/types/domain'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 export const useSessionStore = defineStore('session', () => {
-  const accountId = ref<string | null>(null)
+  const username = ref<string | null>(null)
 
-  const account = computed(() => demoAccounts.find((item) => item.id === accountId.value) ?? null)
+  const account = computed(() => mockUsers.find((item) => item.username === username.value) ?? null)
   const authenticated = computed(() => account.value !== null)
   const displayName = computed(() => account.value?.displayName ?? '訪客')
   const role = computed<AppRole | null>(() => account.value?.role ?? null)
   const roleLabel = computed(() => (role.value ? roleLabels[role.value] : '未登入'))
   const canUpload = computed(() => (role.value ? roleAllows(role.value, 'upload') : false))
 
-  function login(id: string) {
-    const next = demoAccounts.find((item) => item.id === id)
-    if (!next) return false
-    accountId.value = next.id
+  function login(name: string, password: string) {
+    const usernameValue = name.trim()
+    const match = mockUsers.find(
+      (item) => item.username === usernameValue && item.password === password,
+    )
+    if (!match) return false
+    username.value = match.username
     return true
   }
 
   function logout() {
-    accountId.value = null
+    username.value = null
   }
 
   return {
-    accountId,
-    account,
     authenticated,
     displayName,
     role,

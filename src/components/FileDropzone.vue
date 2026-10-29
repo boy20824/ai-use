@@ -4,6 +4,9 @@ import { ref } from 'vue'
 defineProps<{
   enabled: boolean
   disabledReason: string
+  title: string
+  hint: string
+  accept?: string
 }>()
 
 const emit = defineEmits<{
@@ -60,10 +63,8 @@ function onChange(event: Event) {
     @dragleave="onDragLeave"
     @drop.prevent="onDrop"
   >
-    <input type="file" class="sr-only" multiple @change="onChange" />
-    <p class="text-sm font-medium text-stone-900">將檔案拖到這裡，或選擇檔案</p>
-    <p class="mx-auto mt-2 max-w-sm text-sm leading-6 text-stone-600">
-      可一次選擇多個檔案。這裡只記錄檔名、大小與類型，不會讀取內容，也不會送到伺服器。
-    </p>
+    <input type="file" class="sr-only" multiple :accept="accept" @change="onChange" />
+    <p class="text-sm font-medium text-stone-900">{{ title }}</p>
+    <p class="mx-auto mt-2 max-w-sm text-sm leading-6 text-stone-600">{{ hint }}</p>
   </label>
 </template>

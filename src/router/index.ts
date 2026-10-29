@@ -47,10 +47,14 @@ export const router = createRouter({
           meta: { title: '類別工作台' },
         },
         {
+          path: 'templates',
+          name: 'templates',
+          component: () => import('@/views/TemplatesView.vue'),
+          meta: { title: '範本文件' },
+        },
+        {
           path: 'drafts',
-          name: 'drafts',
-          component: () => import('@/views/DraftsView.vue'),
-          meta: { title: '我的草稿' },
+          redirect: (to) => ({ name: 'templates', query: to.query }),
         },
         {
           path: 'access',

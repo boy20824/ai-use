@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import EmptyState from '@/components/EmptyState.vue'
 import PageIntro from '@/components/PageIntro.vue'
+import PlaceholderGuide from '@/components/PlaceholderGuide.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { useCategoryStore } from '@/stores/categories'
-import { useDraftStore } from '@/stores/drafts'
-import { formatBytes, formatMime } from '@/utils/format'
-import { draftTone } from '@/utils/status'
+import { useSessionStore } from '@/stores/session'
+import { useTemplateStore } from '@/stores/templates'
+import { formatBytes } from '@/utils/format'
+import { templateOriginLabel, templateTone } from '@/utils/status'
 import { computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
 const router = useRouter()
 const categories = useCategoryStore()
-const drafts = useDraftStore()
+const templates = useTemplateStore()
+const session = useSessionStore()
 
 const requestedCategory = computed(() => {
   const raw = route.query.category
@@ -23,8 +26,8 @@ const requestedCategory = computed(() => {
 
 const visible = computed(() => {
   const categoryId = requestedCategory.value
-  if (!categoryId) return drafts.items
-  return drafts.items.filter((item) => item.categoryId === categoryId)
+  if (!categoryId) return templates.items
+  return templates.items.filter((item) => item.categoryId === categoryId)
 })
 
 function onFilter(event: Event) {
@@ -36,23 +39,31 @@ function showAll() {
   void router.replace({ query: {} })
 }
 
-function removeDraft(id: string) {
-  drafts.remove(id)
+function removeTemplate(id: string) {
+  void templates.remove(id)
 }
 </script>
 
 <template>
   <PageIntro
     eyebrow="工作台"
-    title="我的草稿"
-    description="這裡列出這個分頁裡的草稿紀錄，包含一開始的示範項目。重新整理後，本機加入的紀錄會消失。移出只影響目前清單。"
+    title="範本文件"
+    description="這裡是各案件類別的 Word 範本。檔案存在這個瀏覽器，重新整理後仍會保留，不會送到伺服器。之後 Phase C 可改把同一份清單接到後端。"
   />
+
+  <div class="mb-6">
+    <PlaceholderGuide />
+  </div>
+
+  <p v-if="templates.error" class="mb-6 text-sm text-rose-800" role="alert">
+    {{ templates.error }}
+  </p>
 
   <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
     <div class="w-full max-w-xs">
-      <label for="draft-category" class="block text-sm font-medium text-stone-800">類別</label>
+      <label for="template-category" class="block text-sm font-medium text-stone-800">類別</label>
       <select
-        id="draft-category"
+        id="template-category"
         class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
         :value="requestedCategory"
         @change="onFilter"
@@ -67,9 +78,9 @@ function removeDraft(id: string) {
   </div>
 
   <EmptyState
-    v-if="visible.length === 0 && drafts.total === 0"
-    title="還沒有草稿"
-    description="到案件類別的工作台選擇檔案。畫面只會留下檔名、大小與類型。"
+    v-if="templates.ready && visible.length === 0 && templates.total === 0"
+    title="還沒有範本文件"
+    description="到案件類別的工作台上傳 .docx。範本會留在這個瀏覽器。"
   >
     <RouterLink
       to="/categories"
@@ -80,18 +91,20 @@ function removeDraft(id: string) {
   </EmptyState>
 
   <EmptyState
-    v-else-if="visible.length === 0"
-    title="這個類別還沒有草稿"
-    description="可以改看全部類別，或回到該類別的工作台加入紀錄。"
+    v-else-if="templates.ready && visible.length === 0"
+    title="這個類別還沒有範本"
+    description="可以改看全部類別，或回到該類別的工作台上傳。"
   >
     <button
       type="button"
       class="inline-flex rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
       @click="showAll"
     >
-      看全部草稿
+      看全部範本
     </button>
   </EmptyState>
+
+  <p v-else-if="!templates.ready" class="text-sm text-stone-500">正在讀取這個瀏覽器裡的範本。</p>
 
   <section v-else class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
     <ul class="divide-y divide-stone-200">
@@ -109,19 +122,25 @@ function removeDraft(id: string) {
             >
               {{ categories.nameOf(item.categoryId) }}
             </RouterLink>
-            · {{ formatBytes(item.sizeBytes) }} · {{ formatMime(item.mimeType) }} ·
-            {{ item.addedAt }}
+            · {{ formatBytes(item.sizeBytes) }} · {{ item.addedAt }}
+          </p>
+          <p class="mt-1 text-xs leading-5 text-stone-500">
+            {{ item.placeholders.length > 0 ? item.placeholders.join('、') : '沒有偵測到欄位' }}
           </p>
         </div>
         <div class="flex items-center gap-3">
-          <StatusBadge :label="item.source" :tone="draftTone(item.source)" />
+          <StatusBadge
+            :label="templateOriginLabel(item.origin)"
+            :tone="templateTone(item.origin)"
+          />
           <button
+            v-if="session.canUpload"
             type="button"
             class="text-sm text-stone-600 hover:text-rose-800"
-            :aria-label="`移出 ${item.fileName}`"
-            @click="removeDraft(item.id)"
+            :aria-label="`移除 ${item.fileName}`"
+            @click="removeTemplate(item.id)"
           >
-            移出
+            移除
           </button>
         </div>
       </li>

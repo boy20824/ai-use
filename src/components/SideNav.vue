@@ -29,7 +29,7 @@ function onNavigate(
 </script>
 
 <template>
-  <div class="flex h-full flex-col bg-stone-950 text-stone-100">
+  <div class="flex h-full min-h-0 flex-1 flex-col bg-stone-950 text-stone-100">
     <div class="border-b border-white/10 px-5 py-5">
       <div class="flex items-center gap-3">
         <span
@@ -77,7 +77,7 @@ function onNavigate(
     </nav>
 
     <p class="border-t border-white/10 px-5 py-4 text-xs leading-5 text-stone-500">
-      示範資料只留在這個分頁。重新整理後需重新選擇身分。
+      重新整理後需重新登入。範本文件會留在這個瀏覽器。
     </p>
   </div>
 </template>

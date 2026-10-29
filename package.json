@@ -9,10 +9,14 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
-    "lint": "eslint . --max-warnings 0 && prettier --check ."
+    "lint": "eslint . --max-warnings 0 && prettier --check .",
+    "check:sample": "node --experimental-strip-types scripts/check-sample-docx.ts"
   },
   "dependencies": {
+    "docxtemplater": "^3.71.1",
+    "jszip": "^3.10.2",
     "pinia": "^4.1.0",
+    "pizzip": "^3.3.0",
     "vue": "^3.5.44",
     "vue-router": "^5.4.0"
   },
