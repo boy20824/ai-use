@@ -31,6 +31,7 @@ const steps = ref<DraftStep[]>([])
 const populated = ref(false)
 const saving = ref(false)
 const formError = ref('')
+const formNotice = ref('')
 
 const editingId = computed(() => {
   if (route.name !== 'category-edit') return ''
@@ -83,6 +84,7 @@ watch(
   () => route.fullPath,
   () => {
     formError.value = ''
+    formNotice.value = ''
     const category = existing.value
     if (category) {
       fillFrom(category)
@@ -186,6 +188,7 @@ async function onUpload(index: number, files: File[]) {
   const current = steps.value[index]
   if (!current) return
   const result = await templates.addFiles(files, current.id)
+  formNotice.value = result.formatNotice
   if (result.ids.length === 0) {
     formError.value = result.rejected[0] ?? '沒有可保存的 .docx 範本。'
     return
@@ -197,7 +200,7 @@ async function onUpload(index: number, files: File[]) {
   }
   next[index] = { ...current, templateIds, pickerOpen: true }
   steps.value = next
-  formError.value = ''
+  formError.value = result.rejected.length > 0 ? result.rejected.join('。') : ''
 }
 
 async function submit() {
@@ -475,6 +478,13 @@ async function submit() {
       </button>
     </fieldset>
 
+    <p
+      v-if="formNotice"
+      class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-950"
+      role="status"
+    >
+      {{ formNotice }}
+    </p>
     <p v-if="formError" class="mt-4 text-sm text-rose-800" role="alert">{{ formError }}</p>
     <div class="mt-6 flex flex-wrap gap-3">
       <button

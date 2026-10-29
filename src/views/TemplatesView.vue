@@ -99,10 +99,12 @@ async function onFiles(files: File[]) {
     feedback.value = result.rejected[0] ?? '沒有可保存的 .docx 範本。'
     return
   }
-  feedbackTone.value = result.rejected.length > 0 || result.skipped > 0 ? 'warn' : 'ok'
+  feedbackTone.value =
+    result.rejected.length > 0 || result.skipped > 0 || result.formatNotice ? 'warn' : 'ok'
   const notes = [`已上傳 ${result.added} 份到範本庫。可在案件類別工作台選取。`]
   if (result.skipped > 0) notes.push(`另有 ${result.skipped} 份因筆數上限未加入。`)
   if (result.rejected.length > 0) notes.push(`${result.rejected.join('。')}。`)
+  if (result.formatNotice) notes.push(result.formatNotice)
   feedback.value = notes.join('')
 }
 </script>

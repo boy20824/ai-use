@@ -41,9 +41,17 @@ export function createApiTemplateRepository(): TemplateRepository {
       body.set('file', new File([record.data], record.fileName, { type: record.mimeType }))
       const response = await apiRequest('/api/templates', { method: 'POST', body })
       if (!response.ok) throw new Error(await apiErrorMessage(response, '無法上傳範本。'))
-      const payload = (await response.json()) as { template?: { id?: string } }
+      const payload = (await response.json()) as {
+        template?: { id?: string }
+        formatNotices?: unknown
+      }
       if (!payload.template?.id) throw new Error('無法上傳範本。')
-      return payload.template.id
+      const formatNotices = Array.isArray(payload.formatNotices)
+        ? payload.formatNotices.filter(
+            (item): item is string => typeof item === 'string' && item.trim().length > 0,
+          )
+        : []
+      return { id: payload.template.id, formatNotices }
     },
     async delete(id) {
       const response = await apiRequest(`/api/templates/${encodeURIComponent(id)}`, {

@@ -1,14 +1,14 @@
 import Docxtemplater from 'docxtemplater'
 import PizZip from 'pizzip'
 import JSZip from 'jszip'
+import { docxZipLimits, normalizeDocx } from './docxXml.ts'
 
 const docxMimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-const placeholderPattern = /\{\{\s*([^{}]+?)\s*\}\}/g
-const textNodePattern = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g
-const wordPartPattern = /^word\/(document|header\d+|footer\d+)\.xml$/
 
 export const templateMimeType = docxMimeType
 export const maxTemplateBytes = 8 * 1024 * 1024
+
+export { listPlaceholders, placeholdersInText } from './docxXml.ts'
 
 export function safeFileName(name: string): string {
   const base = name.replace(/\\/g, '/').split('/').pop() ?? ''
@@ -26,47 +26,13 @@ export function hasZipHeader(data: ArrayBuffer): boolean {
   return bytes[0] === 0x50 && bytes[1] === 0x4b
 }
 
-function decodeXml(value: string): string {
-  return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&')
-}
-
-export function placeholdersInText(text: string): string[] {
-  const names: string[] = []
-  const seen = new Set<string>()
-  for (const match of text.matchAll(placeholderPattern)) {
-    const name = (match[1] ?? '').trim()
-    if (!name || /^[#/!@]/.test(name) || seen.has(name)) continue
-    seen.add(name)
-    names.push(name)
-  }
-  return names
-}
-
-function textFromWordXml(xml: string): string {
-  return [...xml.matchAll(textNodePattern)].map((match) => decodeXml(match[1] ?? '')).join('')
-}
-
-export function listPlaceholders(data: ArrayBuffer | Uint8Array): string[] {
-  const zip = new PizZip(data)
-  const document = zip.file('word/document.xml')
-  if (!document) {
-    throw new Error('missing-document')
-  }
-  const parts = zip.file(wordPartPattern)
-  const text = parts.map((part) => textFromWordXml(part.asText())).join('\n')
-  return placeholdersInText(text)
-}
-
 export function renderDocx(
   data: ArrayBuffer | Uint8Array,
   values: Record<string, string>,
 ): Uint8Array {
-  const zip = new PizZip(data)
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
+  const normalized = normalizeDocx(bytes, docxZipLimits)
+  const zip = new PizZip(normalized.data)
   const doc = new Docxtemplater(zip, {
     delimiters: { start: '{{', end: '}}' },
     paragraphLoop: true,

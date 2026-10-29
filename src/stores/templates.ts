@@ -1,3 +1,4 @@
+import { docxZipLimits, normalizeDocx, splitFormatNotice } from '@/services/docxXml'
 import {
   hasZipHeader,
   listPlaceholders,
@@ -22,6 +23,8 @@ export interface AddTemplatesResult {
   skipped: number
   rejected: string[]
   ids: string[]
+  formatNotices: string[]
+  formatNotice: string
 }
 
 function toSummary(record: StoredTemplate): TemplateSummary {
@@ -92,9 +95,25 @@ export const useTemplateStore = defineStore('templates', () => {
     await load()
     const rejected: string[] = []
     const ids: string[] = []
+    const formatNotices: string[] = []
+    const seenNotices = new Set<string>()
+    const note = (tags: string[]) => {
+      for (const tag of tags) {
+        if (!tag || seenNotices.has(tag)) continue
+        seenNotices.add(tag)
+        formatNotices.push(tag)
+      }
+    }
     const room = templateLimit - items.value.length
     if (room <= 0) {
-      return { added: 0, skipped: files.length, rejected, ids }
+      return {
+        added: 0,
+        skipped: files.length,
+        rejected,
+        ids,
+        formatNotices,
+        formatNotice: '',
+      }
     }
 
     const accepted = files.slice(0, room)
@@ -116,29 +135,43 @@ export const useTemplateStore = defineStore('templates', () => {
         rejected.push(`${fileName} 不是有效的 Word 檔`)
         continue
       }
+      let payload = data
+      let sizeBytes = data.byteLength
       let placeholders: string[]
+      const localNotices: string[] = []
       try {
-        placeholders = listPlaceholders(data)
+        if (templateStorageMode() === 'indexeddb') {
+          const normalized = normalizeDocx(new Uint8Array(data), docxZipLimits)
+          localNotices.push(...normalized.notices)
+          const copy = new Uint8Array(normalized.data.byteLength)
+          copy.set(normalized.data)
+          payload = copy.buffer
+          sizeBytes = copy.byteLength
+          placeholders = listPlaceholders(copy)
+        } else {
+          placeholders = listPlaceholders(data)
+        }
       } catch {
         rejected.push(`${fileName} 無法讀取`)
         continue
       }
       try {
-        const createdId = await repository.put(
+        const created = await repository.put(
           {
             id: crypto.randomUUID(),
             fileName,
             mimeType: templateMimeType,
-            sizeBytes: data.byteLength,
+            sizeBytes,
             addedAt: formatStamp(new Date()),
             placeholders,
             origin: 'upload',
             usages: [],
-            data,
+            data: payload,
           },
           stepId,
         )
-        ids.push(createdId)
+        ids.push(created.id)
+        note([...localNotices, ...created.formatNotices])
         added += 1
       } catch (cause) {
         rejected.push(cause instanceof Error ? cause.message : `${fileName} 無法上傳`)
@@ -146,7 +179,14 @@ export const useTemplateStore = defineStore('templates', () => {
     }
 
     if (added > 0) await reload()
-    return { added, skipped, rejected, ids }
+    return {
+      added,
+      skipped,
+      rejected,
+      ids,
+      formatNotices,
+      formatNotice: splitFormatNotice(formatNotices),
+    }
   }
 
   async function remove(id: string) {

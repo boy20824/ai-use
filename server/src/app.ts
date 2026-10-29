@@ -9,10 +9,10 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { AppConfig } from './config.ts'
 import {
-  assertSafeZip,
   hasZipHeader,
   isAllowedDocxMime,
   listPlaceholders,
+  normalizeDocx,
   sanitizeTemplateFileName,
 } from './docx.ts'
 import {
@@ -797,12 +797,16 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const data = await file.toBuffer()
     if (!hasZipHeader(data)) return fail(reply, 400, 'bad-upload', '檔案內容不是 Word 文件。')
     let placeholders: string[]
+    let storedBytes = data
+    let formatNotices: string[] = []
     try {
-      assertSafeZip(data, {
+      const normalized = normalizeDocx(data, {
         maxEntries: config.maxZipEntries,
         maxUncompressedBytes: config.maxZipUncompressedBytes,
       })
-      placeholders = listPlaceholders(data)
+      storedBytes = Buffer.from(normalized.data)
+      formatNotices = normalized.notices
+      placeholders = listPlaceholders(storedBytes)
     } catch {
       return fail(reply, 400, 'bad-upload', '無法讀取這份 Word 範本。')
     }
@@ -811,14 +815,14 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       id: randomBytes(16).toString('hex'),
       fileName,
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      sizeBytes: data.byteLength,
+      sizeBytes: storedBytes.byteLength,
       addedAt: stamp(),
       placeholders,
       origin: 'upload' as const,
       usages: [],
-      data,
+      data: storedBytes,
     }
-    writeTemplateFile(config.uploadDir, record.id, data)
+    writeTemplateFile(config.uploadDir, record.id, storedBytes)
     try {
       queries.insertTemplate(record, linkedStepId ?? undefined)
     } catch (error) {
@@ -828,7 +832,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     queries.insertAudit(user.username, 'upload', record.id, record.fileName, linkedCategoryId)
     const stored = queries.getTemplateFile(record.id)
     if (!stored) return fail(reply, 500, 'internal', '伺服器暫時無法完成這項操作。')
-    return reply.code(201).send({ template: publicTemplate(stored) })
+    return reply.code(201).send({ template: publicTemplate(stored), formatNotices })
   })
 
   app.delete('/api/templates/:id', async (request, reply) => {

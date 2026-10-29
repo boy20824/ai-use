@@ -57,6 +57,42 @@ export function formatRocLong(date: RocDate): string {
   return `${date.rocYear}年${date.month}月${date.day}日`
 }
 
+const derivedDateTags = new Set(['日期_民國', '年', '月', '日'])
+
+export function isDerivedDateTag(name: string): boolean {
+  return derivedDateTags.has(name)
+}
+
+function taipeiPart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): number {
+  const value = Number(parts.find((part) => part.type === type)?.value)
+  if (!Number.isInteger(value)) throw new Error('taipei-date')
+  return value
+}
+
+/** Gregorian year, month, and day in Asia/Taipei. Does not use the browser's local zone. */
+export function taipeiCalendarDate(now: Date = new Date()): {
+  year: number
+  month: number
+  day: number
+} {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(now)
+  return {
+    year: taipeiPart(parts, 'year'),
+    month: taipeiPart(parts, 'month'),
+    day: taipeiPart(parts, 'day'),
+  }
+}
+
+export function defaultRocDateSlash(now: Date = new Date()): string {
+  const date = taipeiCalendarDate(now)
+  return formatRocSlash({ rocYear: rocYearFromAd(date.year), month: date.month, day: date.day })
+}
+
 export function formatStoredDate(value: string): string {
   const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2}))?/)
   if (!match) return value
@@ -74,7 +110,11 @@ export function applyRocDateFields(fields: Record<string, string>): Record<strin
   const parsed = raw.trim().length > 0 ? parseRocDate(raw) : null
   if (raw.trim().length > 0 && !parsed) return null
   const next = { ...fields }
+  // 月、日不補零，與既有 {{日期}}、{{日期_民國}} 相同。
   next['日期'] = parsed ? formatRocLong(parsed) : ''
   next['日期_民國'] = parsed ? formatRocSlash(parsed) : ''
+  next['年'] = parsed ? String(parsed.rocYear) : ''
+  next['月'] = parsed ? String(parsed.month) : ''
+  next['日'] = parsed ? String(parsed.day) : ''
   return next
 }

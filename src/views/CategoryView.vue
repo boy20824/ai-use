@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import EmptyState from '@/components/EmptyState.vue'
 import PageIntro from '@/components/PageIntro.vue'
+import PlaceholderGuide from '@/components/PlaceholderGuide.vue'
 import RocDateField from '@/components/RocDateField.vue'
 import { appName } from '@/config/app'
 import { renderDocx, templateMimeType, zipGeneratedFiles } from '@/services/docxTemplates'
@@ -11,10 +12,12 @@ import type { CategoryStep } from '@/types/domain'
 import { downloadBlob, downloadBytes } from '@/utils/download'
 import { displayFileName } from '@/utils/fileName'
 import { applyRocDateFields, parseRocDate } from '@/utils/rocDate'
+import { initialDraftValues } from '@/workbench/draft'
 import {
   checkedTemplates,
   dedupedIds,
   inputFields,
+  manualFieldsFromPlaceholders,
   missingOverviewFields,
   overviewCatalog,
   overviewDownloadName,
@@ -28,7 +31,7 @@ const router = useRouter()
 const categories = useCategoryStore()
 const templates = useTemplateStore()
 const session = useSessionStore()
-const values = ref<Record<string, string>>({})
+const values = ref<Record<string, string>>(initialDraftValues())
 const done = ref<Record<string, boolean>>({})
 const busy = ref(false)
 const message = ref('')
@@ -68,18 +71,12 @@ function fieldPlaceholder(name: string) {
   return `請輸入${name}`
 }
 
-const fieldNames = computed(() => {
-  const names = ['姓名', '日期']
-  const seen = new Set(names)
-  for (const template of linkedTemplates.value) {
-    for (const placeholder of template.placeholders) {
-      if (seen.has(placeholder) || placeholder === '日期_民國') continue
-      seen.add(placeholder)
-      names.push(placeholder)
-    }
-  }
-  return names
-})
+const fieldNames = computed(() =>
+  manualFieldsFromPlaceholders(
+    linkedTemplates.value.flatMap((template) => template.placeholders),
+    ['姓名', '日期'],
+  ),
+)
 
 const missingFields = computed(() => {
   const missing: string[] = []
@@ -103,6 +100,9 @@ const generateHint = computed(() => {
 
 const dateToken = '{{日期}}'
 const dateSlashToken = '{{日期_民國}}'
+const yearToken = '{{年}}'
+const monthToken = '{{月}}'
+const dayToken = '{{日}}'
 
 const dateValue = computed({
   get: () => values.value['日期'] ?? '',
@@ -132,7 +132,7 @@ watch(
 )
 
 function clearDraft() {
-  values.value = {}
+  values.value = initialDraftValues()
   done.value = {}
   message.value = ''
   messageStepId.value = ''
@@ -191,7 +191,7 @@ async function produceOne(stepId: string, templateId: string) {
     message.value =
       error instanceof Error && error.message === 'invalid-date'
         ? '日期不是有效的民國日期。'
-        : '無法產生這份文件。請確認範本裡的欄位寫成雙大括號，且括號在同一段文字中。'
+        : '無法產生這份文件。請確認範本裡的欄位寫成雙大括號。'
   } finally {
     busy.value = false
   }
@@ -510,9 +510,11 @@ onUnmounted(clearDraft)
           <div class="min-w-0 flex-1 pb-8">
             <h3 class="text-sm font-semibold text-stone-900">基本資料</h3>
             <p class="mt-1 text-sm leading-6 text-stone-600">
-              姓名與日期會套進這個類別各步驟的範本。日期用民國年，{{ dateToken }} 會寫成
-              115年10月29日，{{ dateSlashToken }} 會寫成 115/10/29。
+              姓名與日期會套進這個類別各步驟的範本。日期預設為台北今天。
             </p>
+            <div class="mt-4 max-w-3xl">
+              <PlaceholderGuide />
+            </div>
             <div class="mt-4 grid max-w-xl gap-4">
               <div v-for="(name, index) in fieldNames" :key="name">
                 <label class="block text-sm font-medium text-stone-800" :for="`draft-${index}`">
@@ -729,10 +731,10 @@ onUnmounted(clearDraft)
         <div>
           <h3 class="text-sm font-semibold text-stone-900">基本資料</h3>
           <p class="mt-1 text-sm leading-6 text-stone-600">
-            已勾選範本裡的每個欄位只出現一次。日期用民國年，{{ dateToken }} 會寫成 115年10月29日，{{
-              dateSlashToken
-            }}
-            會寫成 115/10/29。
+            已勾選範本裡的每個欄位只出現一次。日期與填寫步驟共用，預設為台北今天。{{
+              yearToken
+            }}、{{ monthToken }}、{{ dayToken }}、{{ dateToken }}、{{ dateSlashToken }}
+            都跟這個日期走，不會另外出現輸入欄。
           </p>
           <p v-if="overviewFields.length === 0" class="mt-4 text-sm text-stone-500">
             勾選文件後，這裡會列出要填的欄位。
