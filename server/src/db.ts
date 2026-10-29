@@ -116,6 +116,24 @@ export function migrate(db: AppDatabase) {
       origin TEXT NOT NULL CHECK (origin IN ('sample', 'upload')),
       data BLOB NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at TEXT NOT NULL,
+      actor_username TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('upload', 'delete')),
+      template_id TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      category_id TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS login_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL,
+      ip TEXT NOT NULL,
+      success INTEGER NOT NULL CHECK (success IN (0, 1)),
+      created_at INTEGER NOT NULL
+    );
   `)
 }
 
@@ -164,6 +182,20 @@ export function createQueries(db: AppDatabase) {
     'SELECT id, category_id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data FROM templates WHERE id = ?',
   )
   const deleteTemplate = db.prepare('DELETE FROM templates WHERE id = ?')
+  const deleteUserSessions = db.prepare('DELETE FROM sessions WHERE user_id = ?')
+  const insertAudit = db.prepare(
+    'INSERT INTO audit_log (created_at, actor_username, action, template_id, file_name, category_id) VALUES (?, ?, ?, ?, ?, ?)',
+  )
+  const insertLoginEvent = db.prepare(
+    'INSERT INTO login_events (username, ip, success, created_at) VALUES (?, ?, ?, ?)',
+  )
+  const countFailures = db.prepare(
+    'SELECT COUNT(*) AS count FROM login_events WHERE username = ? AND success = 0 AND created_at > ?',
+  )
+  const countAttempts = db.prepare(
+    'SELECT COUNT(*) AS count FROM login_events WHERE ip = ? AND created_at > ?',
+  )
+  const clearFailures = db.prepare('DELETE FROM login_events WHERE username = ? AND success = 0')
 
   return {
     countUsers() {
@@ -243,6 +275,39 @@ export function createQueries(db: AppDatabase) {
     },
     deleteTemplate(id: string) {
       return deleteTemplate.run(id).changes
+    },
+    deleteUserSessions(userId: string) {
+      deleteUserSessions.run(userId)
+    },
+    insertAudit(
+      actorUsername: string,
+      action: 'upload' | 'delete',
+      templateId: string,
+      fileName: string,
+      categoryId: string,
+    ) {
+      insertAudit.run(
+        new Date().toISOString(),
+        actorUsername,
+        action,
+        templateId,
+        fileName,
+        categoryId,
+      )
+    },
+    recordLogin(username: string, ip: string, success: boolean) {
+      insertLoginEvent.run(username, ip, success ? 1 : 0, Date.now())
+    },
+    recentFailures(username: string, since: number) {
+      const row = countFailures.get(username, since) as { count: number }
+      return row.count
+    },
+    recentAttempts(ip: string, since: number) {
+      const row = countAttempts.get(ip, since) as { count: number }
+      return row.count
+    },
+    clearFailures(username: string) {
+      clearFailures.run(username)
     },
   }
 }

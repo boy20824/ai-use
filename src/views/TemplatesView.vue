@@ -7,6 +7,7 @@ import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { formatBytes } from '@/utils/format'
+import { displayFileName } from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
 import { templateOriginLabel, templateTone } from '@/utils/status'
 import { computed } from 'vue'
@@ -115,7 +116,9 @@ function removeTemplate(id: string) {
         class="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
       >
         <div class="min-w-0">
-          <p class="break-all text-sm font-medium text-stone-900">{{ item.fileName }}</p>
+          <p class="break-all text-sm font-medium text-stone-900">
+            {{ displayFileName(item.fileName) }}
+          </p>
           <p class="mt-1 text-xs leading-5 text-stone-500">
             <RouterLink
               :to="`/categories/${item.categoryId}`"
@@ -138,7 +141,7 @@ function removeTemplate(id: string) {
             v-if="session.canDelete"
             type="button"
             class="text-sm text-stone-600 hover:text-rose-800"
-            :aria-label="`移除 ${item.fileName}`"
+            :aria-label="`移除 ${displayFileName(item.fileName)}`"
             @click="removeTemplate(item.id)"
           >
             移除

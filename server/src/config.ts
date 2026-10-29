@@ -24,10 +24,29 @@ export interface AppConfig {
   databasePath: string
   sessionTtlHours: number
   cookieSecure: boolean
-  corsOrigin: string
+  corsOrigins: string[]
   maxUploadBytes: number
+  maxZipEntries: number
+  maxZipUncompressedBytes: number
+  loginMaxFailures: number
+  loginLockoutMinutes: number
+  loginRatePerMinute: number
   sampleTemplatePath: string
   passwords: SeedPasswords
+}
+
+export function cookieSecureFromEnv(
+  nodeEnv: string | undefined,
+  flag: string | undefined,
+): boolean {
+  return nodeEnv === 'production' || flag === 'true'
+}
+
+function listEnv(name: string): string[] {
+  return (process.env[name] ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
 }
 
 function requiredEnv(name: string): string {
@@ -36,6 +55,14 @@ function requiredEnv(name: string): string {
     throw new Error(`缺少環境變數 ${name}。請把 .env.example 複製成 .env。`)
   }
   return value
+}
+
+function corsOriginsFromEnv(): string[] {
+  const listed = listEnv('CORS_ORIGINS')
+  if (listed.length > 0) return listed
+  const single = process.env.CORS_ORIGIN?.trim()
+  if (single) return [single]
+  return ['http://localhost:5173', 'http://127.0.0.1:5173']
 }
 
 function numberEnv(name: string, fallback: number): number {
@@ -59,9 +86,14 @@ export function loadConfig(): AppConfig {
       process.env.DATABASE_PATH?.trim() || 'data/app.sqlite',
     ),
     sessionTtlHours: numberEnv('SESSION_TTL_HOURS', 12),
-    cookieSecure: process.env.COOKIE_SECURE === 'true',
-    corsOrigin: process.env.CORS_ORIGIN?.trim() || 'http://localhost:5173',
+    cookieSecure: cookieSecureFromEnv(process.env.NODE_ENV, process.env.COOKIE_SECURE),
+    corsOrigins: corsOriginsFromEnv(),
     maxUploadBytes: numberEnv('MAX_UPLOAD_BYTES', 8 * 1024 * 1024),
+    maxZipEntries: numberEnv('MAX_ZIP_ENTRIES', 64),
+    maxZipUncompressedBytes: numberEnv('MAX_ZIP_UNCOMPRESSED_BYTES', 32 * 1024 * 1024),
+    loginMaxFailures: numberEnv('LOGIN_MAX_FAILURES', 5),
+    loginLockoutMinutes: numberEnv('LOGIN_LOCKOUT_MINUTES', 15),
+    loginRatePerMinute: numberEnv('LOGIN_RATE_PER_MINUTE', 20),
     sampleTemplatePath: path.resolve(sourceDir, '../../public/samples/field-note.docx'),
     passwords: {
       clerk: requiredEnv('SEED_USER_CLERK_PASSWORD'),

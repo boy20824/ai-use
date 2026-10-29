@@ -10,6 +10,7 @@ import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { formatBytes } from '@/utils/format'
+import { displayFileName } from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
 import { documentTone, templateOriginLabel, templateTone } from '@/utils/status'
 import { computed, ref, watch } from 'vue'
@@ -230,7 +231,7 @@ function removeTemplate(id: string) {
           >
             <span class="min-w-0">
               <span class="block break-all text-sm font-medium text-stone-900">{{
-                item.fileName
+                displayFileName(item.fileName)
               }}</span>
               <span class="mt-1 block text-xs leading-5 text-stone-500">
                 {{ formatBytes(item.sizeBytes) }} · {{ formatStoredDate(item.addedAt) }}
@@ -249,7 +250,7 @@ function removeTemplate(id: string) {
               v-if="session.canDelete"
               type="button"
               class="shrink-0 text-sm text-stone-600 hover:text-rose-800"
-              :aria-label="`移除 ${item.fileName}`"
+              :aria-label="`移除 ${displayFileName(item.fileName)}`"
               @click="removeTemplate(item.id)"
             >
               移除

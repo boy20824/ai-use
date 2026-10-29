@@ -1,12 +1,20 @@
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
+import helmet from '@fastify/helmet'
 import multipart from '@fastify/multipart'
 import bcrypt from 'bcryptjs'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
+import { z } from 'zod'
 import { categoryIds } from './categories.ts'
 import type { AppConfig } from './config.ts'
-import { hasZipHeader, isAllowedDocxMime, listPlaceholders } from './docx.ts'
+import {
+  assertSafeZip,
+  hasZipHeader,
+  isAllowedDocxMime,
+  listPlaceholders,
+  sanitizeTemplateFileName,
+} from './docx.ts'
 import { createQueries, type AppDatabase, type AppQueries, type Role } from './db.ts'
 
 export interface AuthUser {
@@ -22,15 +30,51 @@ declare module 'fastify' {
   }
 }
 
-const cookieName = 'session'
+const sessionCookieName = 'session'
+const csrfCookieName = 'csrf'
 const dummyHash = bcrypt.hashSync(randomBytes(16).toString('hex'), 10)
+const mutatingMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+const loginSchema = z
+  .object({
+    username: z
+      .string()
+      .trim()
+      .min(1)
+      .max(80)
+      .regex(/^[\w.-]+$/),
+    password: z.string().min(1).max(200),
+  })
+  .strict()
+
+const categoryQuerySchema = z
+  .object({
+    categoryId: z
+      .string()
+      .regex(/^[a-z0-9-]{1,64}$/)
+      .optional(),
+  })
+  .strict()
+
+const templateIdSchema = z.string().regex(/^[a-zA-Z0-9-]{1,64}$/)
 
 function publicUser(user: AuthUser) {
   return { username: user.username, displayName: user.displayName, role: user.role }
 }
 
+function fail(reply: FastifyReply, status: number, error: string, message: string) {
+  return reply.code(status).send({ error, message })
+}
+
+function tokensMatch(left: string, right: string) {
+  const a = Buffer.from(left)
+  const b = Buffer.from(right)
+  if (a.length !== b.length) return false
+  return timingSafeEqual(a, b)
+}
+
 function readSession(queries: AppQueries, token: string | undefined): AuthUser | null {
-  if (!token) return null
+  if (!token || !/^[a-f0-9]{64}$/.test(token)) return null
   const row = queries.findSession(token)
   if (!row) return null
   if (Date.parse(row.expires_at) <= Date.now()) {
@@ -40,26 +84,64 @@ function readSession(queries: AppQueries, token: string | undefined): AuthUser |
   return { id: row.id, username: row.username, displayName: row.display_name, role: row.role }
 }
 
-function setSessionCookie(reply: FastifyReply, config: AppConfig, token: string) {
-  reply.setCookie(cookieName, token, {
-    httpOnly: true,
-    sameSite: 'strict',
+function cookieOptions(config: AppConfig, httpOnly: boolean) {
+  return {
+    httpOnly,
+    sameSite: 'strict' as const,
     path: '/',
     secure: config.cookieSecure,
     maxAge: config.sessionTtlHours * 60 * 60,
-  })
+  }
+}
+
+function setSessionCookie(reply: FastifyReply, config: AppConfig, token: string) {
+  reply.setCookie(sessionCookieName, token, cookieOptions(config, true))
+}
+
+function setCsrfCookie(reply: FastifyReply, config: AppConfig, token: string) {
+  reply.setCookie(csrfCookieName, token, cookieOptions(config, false))
 }
 
 function clearSessionCookie(reply: FastifyReply, config: AppConfig) {
-  reply.clearCookie(cookieName, { path: '/', sameSite: 'strict', secure: config.cookieSecure })
+  reply.clearCookie(sessionCookieName, {
+    path: '/',
+    sameSite: 'strict',
+    secure: config.cookieSecure,
+  })
 }
 
 function requireUser(request: FastifyRequest, reply: FastifyReply) {
   if (!request.authUser) {
-    reply.code(401).send({ message: '請先登入。' })
+    fail(reply, 401, 'unauthorized', '請先登入。')
     return null
   }
   return request.authUser
+}
+
+function originAllowed(request: FastifyRequest, config: AppConfig) {
+  const origin = request.headers.origin
+  if (typeof origin === 'string') return config.corsOrigins.includes(origin)
+  const referer = request.headers.referer
+  if (typeof referer === 'string') {
+    try {
+      return config.corsOrigins.includes(new URL(referer).origin)
+    } catch {
+      return false
+    }
+  }
+  return request.headers['sec-fetch-site'] !== 'cross-site'
+}
+
+function csrfOk(request: FastifyRequest) {
+  const cookie = request.cookies?.[csrfCookieName]
+  const header = request.headers['x-csrf-token']
+  if (typeof cookie !== 'string' || typeof header !== 'string') return false
+  return tokensMatch(cookie, header)
+}
+
+function contentDisposition(fileName: string) {
+  const ascii = fileName.replace(/[^\w.\-]+/g, '_') || 'template.docx'
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
 }
 
 export async function buildApp(db: AppDatabase, config: AppConfig) {
@@ -67,32 +149,90 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   const app = Fastify({ logger: false })
   app.decorateRequest('authUser', null)
 
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'none'"],
+        baseUri: ["'none'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'none'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'"],
+        imgSrc: ["'self'"],
+        connectSrc: ["'self'"],
+        objectSrc: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: 'same-site' },
+  })
   await app.register(cookie)
-  await app.register(cors, { origin: config.corsOrigin, credentials: true })
+  await app.register(cors, {
+    origin(origin, callback) {
+      if (!origin || config.corsOrigins.includes(origin)) {
+        callback(null, true)
+        return
+      }
+      callback(null, false)
+    },
+    credentials: true,
+  })
   await app.register(multipart, { limits: { fileSize: config.maxUploadBytes, files: 1 } })
 
-  app.addHook('onRequest', async (request) => {
-    request.authUser = readSession(queries, request.cookies?.[cookieName])
+  app.addHook('onRequest', async (request, reply) => {
+    request.authUser = readSession(queries, request.cookies?.[sessionCookieName])
+    if (!request.cookies?.[csrfCookieName]) {
+      setCsrfCookie(reply, config, randomBytes(32).toString('hex'))
+    }
+    if (!mutatingMethods.has(request.method)) return
+    if (!originAllowed(request, config)) {
+      return fail(reply, 403, 'csrf', '這個來源不能變更資料。')
+    }
+    if (request.url === '/api/auth/login') return
+    if (!csrfOk(request)) {
+      return fail(reply, 403, 'csrf', '缺少或不相符的驗證權杖。')
+    }
   })
 
   app.setErrorHandler((error: { code?: string }, _request, reply) => {
-    if (error.code === 'FST_REQ_FILE_TOO_LARGE') {
-      return reply.code(413).send({ message: '檔案超過大小限制。' })
+    if (reply.sent) return
+    const code = error.code ?? ''
+    if (code === 'FST_REQ_FILE_TOO_LARGE') {
+      return fail(reply, 413, 'payload-too-large', '檔案超過大小限制。')
     }
-    return reply.code(500).send({ message: '伺服器暫時無法完成這項操作。' })
+    if (code.startsWith('FST_ERR_CTP')) {
+      return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+    }
+    return fail(reply, 500, 'internal', '伺服器暫時無法完成這項操作。')
   })
 
   app.post('/api/auth/login', async (request, reply) => {
-    const body = request.body as { username?: unknown; password?: unknown }
-    const username = typeof body?.username === 'string' ? body.username.trim() : ''
-    const password = typeof body?.password === 'string' ? body.password : ''
-    const user = username ? queries.findUserByUsername(username) : null
-    const matches = bcrypt.compareSync(password, user?.passwordHash ?? dummyHash)
-    if (!user || !matches) {
-      return reply.code(401).send({ message: '帳號或密碼不正確。' })
+    const parsed = loginSchema.safeParse(request.body)
+    if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+    const ip = request.ip || 'unknown'
+    const username = parsed.data.username
+    const now = Date.now()
+    if (queries.recentAttempts(ip, now - 60_000) >= config.loginRatePerMinute) {
+      return fail(reply, 429, 'rate-limited', '登入嘗試過多，請稍後再試。')
     }
+    const lockoutAfter = now - config.loginLockoutMinutes * 60_000
+    if (queries.recentFailures(username, lockoutAfter) >= config.loginMaxFailures) {
+      return fail(reply, 429, 'locked', '登入嘗試過多，請稍後再試。')
+    }
+
+    const user = queries.findUserByUsername(username)
+    const matches = bcrypt.compareSync(parsed.data.password, user?.passwordHash ?? dummyHash)
+    if (!user || !matches) {
+      queries.recordLogin(username, ip, false)
+      return fail(reply, 401, 'unauthorized', '帳號或密碼不正確。')
+    }
+
+    queries.clearFailures(username)
+    queries.recordLogin(username, ip, true)
+    queries.deleteUserSessions(user.id)
     const token = randomBytes(32).toString('hex')
-    const expiresAt = new Date(Date.now() + config.sessionTtlHours * 60 * 60 * 1000).toISOString()
+    const expiresAt = new Date(now + config.sessionTtlHours * 60 * 60 * 1000).toISOString()
     queries.insertSession(token, user.id, expiresAt)
     setSessionCookie(reply, config, token)
     return { user: publicUser(user) }
@@ -105,7 +245,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   })
 
   app.post('/api/auth/logout', async (request, reply) => {
-    const token = request.cookies?.[cookieName]
+    const token = request.cookies?.[sessionCookieName]
     if (token) queries.deleteSession(token)
     clearSessionCookie(reply, config)
     return reply.code(204).send()
@@ -120,13 +260,13 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   app.get('/api/templates', async (request, reply) => {
     const user = requireUser(request, reply)
     if (!user) return
-    const query = request.query as { categoryId?: unknown }
-    const categoryId = typeof query.categoryId === 'string' ? query.categoryId : undefined
-    if (categoryId && !categoryIds.has(categoryId)) {
-      return reply.code(400).send({ message: '找不到這個案件類別。' })
+    const parsed = categoryQuerySchema.safeParse(request.query)
+    if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+    if (parsed.data.categoryId && !categoryIds.has(parsed.data.categoryId)) {
+      return fail(reply, 400, 'invalid-input', '找不到這個案件類別。')
     }
     return {
-      templates: queries.listTemplates(categoryId).map((item) => ({
+      templates: queries.listTemplates(parsed.data.categoryId).map((item) => ({
         id: item.id,
         categoryId: item.categoryId,
         fileName: item.fileName,
@@ -142,15 +282,13 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   app.get('/api/templates/:id/file', async (request, reply) => {
     const user = requireUser(request, reply)
     if (!user) return
-    const { id } = request.params as { id: string }
-    const template = queries.getTemplateFile(id)
-    if (!template?.data) return reply.code(404).send({ message: '找不到這份範本。' })
+    const parsed = templateIdSchema.safeParse((request.params as { id?: unknown }).id)
+    if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+    const template = queries.getTemplateFile(parsed.data)
+    if (!template?.data) return fail(reply, 404, 'not-found', '找不到這份範本。')
     return reply
       .header('content-type', template.mimeType)
-      .header(
-        'content-disposition',
-        `attachment; filename*=UTF-8''${encodeURIComponent(template.fileName)}`,
-      )
+      .header('content-disposition', contentDisposition(template.fileName))
       .send(template.data)
   })
 
@@ -158,38 +296,44 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const user = requireUser(request, reply)
     if (!user) return
     if (user.role === 'viewer') {
-      return reply.code(403).send({ message: '唯讀身分不能上傳範本。' })
+      return fail(reply, 403, 'forbidden', '唯讀身分不能上傳範本。')
     }
 
     const file = await request.file()
-    if (!file) return reply.code(400).send({ message: '請選擇 .docx 檔案。' })
+    if (!file) return fail(reply, 400, 'invalid-input', '請選擇 .docx 檔案。')
     const categoryField = file.fields.categoryId
-    const categoryId =
+    const rawCategory =
       categoryField && typeof categoryField === 'object' && 'value' in categoryField
-        ? String(categoryField.value)
+        ? categoryField.value
         : ''
-    if (!categoryIds.has(categoryId)) {
-      return reply.code(400).send({ message: '找不到這個案件類別。' })
+    const categoryId = z
+      .string()
+      .regex(/^[a-z0-9-]{1,64}$/)
+      .safeParse(rawCategory)
+    if (!categoryId.success || !categoryIds.has(categoryId.data)) {
+      return fail(reply, 400, 'invalid-input', '找不到這個案件類別。')
     }
-    const fileName = file.filename.replace(/[/\\]/g, '_').replace(/\0/g, '').trim().slice(0, 180)
-    if (!fileName.toLowerCase().endsWith('.docx') || !isAllowedDocxMime(file.mimetype)) {
-      return reply.code(400).send({ message: '只接受 Word .docx 範本。' })
+    const fileName = sanitizeTemplateFileName(file.filename)
+    if (!fileName || !isAllowedDocxMime(file.mimetype)) {
+      return fail(reply, 400, 'bad-upload', '只接受 Word .docx 範本。')
     }
 
     const data = await file.toBuffer()
-    if (!hasZipHeader(data)) {
-      return reply.code(400).send({ message: '檔案內容不是 Word 文件。' })
-    }
+    if (!hasZipHeader(data)) return fail(reply, 400, 'bad-upload', '檔案內容不是 Word 文件。')
     let placeholders: string[]
     try {
+      assertSafeZip(data, {
+        maxEntries: config.maxZipEntries,
+        maxUncompressedBytes: config.maxZipUncompressedBytes,
+      })
       placeholders = listPlaceholders(data)
     } catch {
-      return reply.code(400).send({ message: '無法讀取這份 Word 範本。' })
+      return fail(reply, 400, 'bad-upload', '無法讀取這份 Word 範本。')
     }
 
     const record = {
       id: randomBytes(16).toString('hex'),
-      categoryId,
+      categoryId: categoryId.data,
       fileName,
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       sizeBytes: data.byteLength,
@@ -199,6 +343,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       data,
     }
     queries.insertTemplate(record)
+    queries.insertAudit(user.username, 'upload', record.id, record.fileName, record.categoryId)
     return reply.code(201).send({
       template: {
         id: record.id,
@@ -217,11 +362,20 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const user = requireUser(request, reply)
     if (!user) return
     if (user.role !== 'admin') {
-      return reply.code(403).send({ message: '只有管理員可以移除範本。' })
+      return fail(reply, 403, 'forbidden', '只有管理員可以移除範本。')
     }
-    const { id } = request.params as { id: string }
-    const changes = queries.deleteTemplate(id)
-    if (changes === 0) return reply.code(404).send({ message: '找不到這份範本。' })
+    const parsed = templateIdSchema.safeParse((request.params as { id?: unknown }).id)
+    if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+    const existing = queries.getTemplateFile(parsed.data)
+    if (!existing) return fail(reply, 404, 'not-found', '找不到這份範本。')
+    queries.deleteTemplate(parsed.data)
+    queries.insertAudit(
+      user.username,
+      'delete',
+      existing.id,
+      existing.fileName,
+      existing.categoryId,
+    )
     return reply.code(204).send()
   })
 

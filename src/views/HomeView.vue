@@ -6,6 +6,7 @@ import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { formatBytes } from '@/utils/format'
+import { displayFileName } from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
 import { templateOriginLabel, templateTone } from '@/utils/status'
 import { computed } from 'vue'
@@ -124,7 +125,7 @@ const latestTemplates = computed(() => templates.items.slice(0, 4))
             :to="`/categories/${item.categoryId}`"
             class="break-all text-sm font-medium text-stone-900 hover:underline"
           >
-            {{ item.fileName }}
+            {{ displayFileName(item.fileName) }}
           </RouterLink>
           <p class="mt-1 text-xs text-stone-500">
             {{ categories.nameOf(item.categoryId) }} · {{ formatBytes(item.sizeBytes) }}

@@ -11,8 +11,13 @@ export const templateMimeType = docxMimeType
 export const maxTemplateBytes = 8 * 1024 * 1024
 
 export function safeFileName(name: string): string {
-  const base = name.replace(/[/\\]/g, '_').replace(/\0/g, '').trim()
-  return base.slice(0, 180)
+  const base = name.replace(/\\/g, '/').split('/').pop() ?? ''
+  const cleaned = base
+    .replace(/\0/g, '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .trim()
+  if (!cleaned || cleaned.includes('..')) return ''
+  return cleaned.slice(0, 180)
 }
 
 export function hasZipHeader(data: ArrayBuffer): boolean {

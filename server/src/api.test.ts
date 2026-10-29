@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import PizZip from 'pizzip'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildApp } from './app.ts'
-import type { SeedPasswords } from './config.ts'
+import type { AppConfig, SeedPasswords } from './config.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
 import { seedReferenceData } from './seed.ts'
 
@@ -69,21 +69,33 @@ function multipart(
   }
 }
 
-async function createApp() {
-  const db = openDatabase(':memory:')
-  migrate(db)
-  seedReferenceData(createQueries(db), passwords, samplePath)
-  const app = await buildApp(db, {
+const allowedOrigin = 'http://localhost:5173'
+
+function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
+  return {
     host: '127.0.0.1',
     port: 0,
     databasePath: ':memory:',
     sessionTtlHours: 1,
     cookieSecure: false,
-    corsOrigin: 'http://localhost:5173',
+    corsOrigins: [allowedOrigin],
     maxUploadBytes: 1024 * 1024,
+    maxZipEntries: 32,
+    maxZipUncompressedBytes: 8 * 1024 * 1024,
+    loginMaxFailures: 5,
+    loginLockoutMinutes: 15,
+    loginRatePerMinute: 30,
     sampleTemplatePath: samplePath,
     passwords,
-  })
+    ...overrides,
+  }
+}
+
+async function createApp() {
+  const db = openDatabase(':memory:')
+  migrate(db)
+  seedReferenceData(createQueries(db), passwords, samplePath)
+  const app = await buildApp(db, testConfig())
   return { app, db }
 }
 
@@ -106,6 +118,15 @@ function sessionCookie(response: {
   return response.cookies.find((cookie) => cookie.name === 'session')
 }
 
+function authFrom(response: { cookies: { name: string; value: string }[] }) {
+  const session = response.cookies.find((cookie) => cookie.name === 'session')?.value ?? ''
+  const csrf = response.cookies.find((cookie) => cookie.name === 'csrf')?.value ?? ''
+  return {
+    cookies: { session, csrf },
+    headers: { origin: allowedOrigin, 'x-csrf-token': csrf },
+  }
+}
+
 describe('api', () => {
   const databases: AppDatabase[] = []
 
@@ -121,7 +142,8 @@ describe('api', () => {
     expect(stored?.passwordHash).not.toContain(passwords.clerk)
 
     const failed = await login(app, "' OR 1=1 --", passwords.clerk)
-    expect(failed.statusCode).toBe(401)
+    expect(failed.statusCode).toBe(400)
+    expect(JSON.stringify(failed.json())).not.toContain('stack')
 
     const loggedIn = await login(app, 'clerk', passwords.clerk)
     expect(loggedIn.statusCode).toBe(200)
@@ -146,7 +168,7 @@ describe('api', () => {
     const loggedOut = await app.inject({
       method: 'POST',
       url: '/api/auth/logout',
-      cookies: { session: cookie!.value },
+      ...authFrom(loggedIn),
     })
     expect(loggedOut.statusCode).toBe(204)
     const after = await app.inject({
@@ -166,9 +188,10 @@ describe('api', () => {
     const clerk = await login(app, 'clerk', passwords.clerk)
     const admin = await login(app, 'admin', passwords.admin)
     const viewer = await login(app, 'viewer', passwords.viewer)
-    const clerkToken = sessionCookie(clerk)!.value
-    const adminToken = sessionCookie(admin)!.value
-    const viewerToken = sessionCookie(viewer)!.value
+    const clerkAuth = authFrom(clerk)
+    const adminAuth = authFrom(admin)
+    const viewerAuth = authFrom(viewer)
+    const viewerToken = viewerAuth.cookies.session
 
     const categories = await app.inject({
       method: 'GET',
@@ -201,16 +224,18 @@ describe('api', () => {
     const viewerUpload = await app.inject({
       method: 'POST',
       url: '/api/templates',
-      cookies: { session: viewerToken },
-      ...upload,
+      cookies: viewerAuth.cookies,
+      headers: { ...upload.headers, ...viewerAuth.headers },
+      payload: upload.payload,
     })
     expect(viewerUpload.statusCode).toBe(403)
 
     const clerkUpload = await app.inject({
       method: 'POST',
       url: '/api/templates',
-      cookies: { session: clerkToken },
-      ...upload,
+      cookies: clerkAuth.cookies,
+      headers: { ...upload.headers, ...clerkAuth.headers },
+      payload: upload.payload,
     })
     expect(clerkUpload.statusCode).toBe(201)
     const templateId = clerkUpload.json().template.id as string
@@ -223,8 +248,9 @@ describe('api', () => {
     const rejectedType = await app.inject({
       method: 'POST',
       url: '/api/templates',
-      cookies: { session: clerkToken },
-      ...badType,
+      cookies: clerkAuth.cookies,
+      headers: { ...badType.headers, ...clerkAuth.headers },
+      payload: badType.payload,
     })
     expect(rejectedType.statusCode).toBe(400)
 
@@ -239,8 +265,9 @@ describe('api', () => {
     const rejectedMagic = await app.inject({
       method: 'POST',
       url: '/api/templates',
-      cookies: { session: adminToken },
-      ...badMagic,
+      cookies: adminAuth.cookies,
+      headers: { ...badMagic.headers, ...adminAuth.headers },
+      payload: badMagic.payload,
     })
     expect(rejectedMagic.statusCode).toBe(400)
 
@@ -255,14 +282,14 @@ describe('api', () => {
     const clerkDelete = await app.inject({
       method: 'DELETE',
       url: `/api/templates/${templateId}`,
-      cookies: { session: clerkToken },
+      ...clerkAuth,
     })
     expect(clerkDelete.statusCode).toBe(403)
 
     const adminDelete = await app.inject({
       method: 'DELETE',
       url: `/api/templates/${templateId}`,
-      cookies: { session: adminToken },
+      ...adminAuth,
     })
     expect(adminDelete.statusCode).toBe(204)
 
@@ -277,30 +304,23 @@ describe('api', () => {
     const db = openDatabase(':memory:')
     migrate(db)
     seedReferenceData(createQueries(db), passwords, samplePath)
-    const app = await buildApp(db, {
-      host: '127.0.0.1',
-      port: 0,
-      databasePath: ':memory:',
-      sessionTtlHours: 1,
-      cookieSecure: false,
-      corsOrigin: 'http://localhost:5173',
-      maxUploadBytes: 32,
-      sampleTemplatePath: samplePath,
-      passwords,
-    })
+    const app = await buildApp(db, testConfig({ maxUploadBytes: 32 }))
     const loggedIn = await login(app, 'admin', passwords.admin)
+    const adminAuth = authFrom(loggedIn)
+    const body = multipart(
+      { categoryId: 'general-assist' },
+      {
+        name: 'big.docx',
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        data: Buffer.alloc(64, 1),
+      },
+    )
     const response = await app.inject({
       method: 'POST',
       url: '/api/templates',
-      cookies: { session: sessionCookie(loggedIn)!.value },
-      ...multipart(
-        { categoryId: 'general-assist' },
-        {
-          name: 'big.docx',
-          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          data: Buffer.alloc(64, 1),
-        },
-      ),
+      cookies: adminAuth.cookies,
+      headers: { ...body.headers, ...adminAuth.headers },
+      payload: body.payload,
     })
     expect(response.statusCode).toBe(413)
     await app.close()

@@ -3,6 +3,7 @@ import RocDateField from '@/components/RocDateField.vue'
 import { renderDocx, templateMimeType, zipGeneratedFiles } from '@/services/docxTemplates'
 import { useTemplateStore } from '@/stores/templates'
 import { downloadBlob, downloadBytes } from '@/utils/download'
+import { displayFileName } from '@/utils/fileName'
 import { applyRocDateFields } from '@/utils/rocDate'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
@@ -74,7 +75,7 @@ async function renderOne(id: string) {
     throw new Error('missing-template')
   }
   return {
-    name: `產生-${template.fileName}`,
+    name: `產生-${displayFileName(template.fileName)}`,
     data: renderDocx(bytes, filled),
   }
 }
@@ -109,7 +110,7 @@ async function downloadAll() {
     try {
       rendered.push(await renderOne(template.id))
     } catch {
-      failed.push(template.fileName)
+      failed.push(displayFileName(template.fileName))
     }
   }
   try {
@@ -200,7 +201,7 @@ onUnmounted(clearValues)
           >
             <span class="min-w-0">
               <span class="block break-all text-sm font-medium text-stone-900">{{
-                template.fileName
+                displayFileName(template.fileName)
               }}</span>
               <span class="mt-1 block text-xs text-stone-500">
                 {{
