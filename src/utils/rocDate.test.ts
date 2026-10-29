@@ -63,14 +63,24 @@ describe('rocDate', () => {
     expect(formatStoredDate('2026-02-29')).toBe('2026-02-29')
   })
 
-  it('maps the date field into both document placeholders', () => {
+  it('maps the date field into document placeholders without zero padding', () => {
     const input = { 姓名: '測試者', 日期: '115/10/29' }
     expect(applyRocDateFields(input)).toEqual({
       姓名: '測試者',
       日期: '115年10月29日',
       日期_民國: '115/10/29',
+      年: '115',
+      月: '10',
+      日: '29',
     })
     expect(input).toEqual({ 姓名: '測試者', 日期: '115/10/29' })
+    expect(applyRocDateFields({ 日期: '115/2/5' })).toEqual({
+      日期: '115年2月5日',
+      日期_民國: '115/2/5',
+      年: '115',
+      月: '2',
+      日: '5',
+    })
   })
 
   it('leaves an empty date blank and rejects an invalid one', () => {
@@ -78,6 +88,9 @@ describe('rocDate', () => {
       姓名: '測試者',
       日期: '',
       日期_民國: '',
+      年: '',
+      月: '',
+      日: '',
     })
     expect(applyRocDateFields({ 日期: '115/02/29' })).toBeNull()
   })

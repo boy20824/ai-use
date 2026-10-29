@@ -1,5 +1,5 @@
 import { displayFileName } from '@/utils/fileName'
-import { parseRocDate } from '@/utils/rocDate'
+import { isDerivedDateTag, parseRocDate } from '@/utils/rocDate'
 
 export interface OverviewTemplate {
   id: string
@@ -47,28 +47,32 @@ export function checkedTemplates<T extends { id: string }>(
   return templates.filter((item) => unchecked[item.id] !== true)
 }
 
-export function inputFields(templates: { placeholders: string[] }[]): string[] {
-  const ordered: string[] = []
-  const seen = new Set<string>()
-  let needsDate = false
-  for (const template of templates) {
-    for (const placeholder of template.placeholders) {
-      const name = placeholder.trim()
-      if (!name) continue
-      if (name === '日期' || name === '日期_民國') {
-        needsDate = true
-        continue
-      }
-      if (seen.has(name)) continue
-      seen.add(name)
-      ordered.push(name)
+export function manualFieldsFromPlaceholders(
+  placeholders: string[],
+  base: string[] = [],
+): string[] {
+  const names = [...base]
+  const seen = new Set(names)
+  let needsDate = names.includes('日期')
+  for (const placeholder of placeholders) {
+    const name = placeholder.trim()
+    if (!name || /^[#/!@]/.test(name)) continue
+    if (name === '日期' || isDerivedDateTag(name)) {
+      needsDate = true
+      continue
     }
+    if (seen.has(name)) continue
+    seen.add(name)
+    names.push(name)
   }
-  if (!needsDate) return ordered
-  const fields = [...ordered]
-  const nameIndex = fields.indexOf('姓名')
-  fields.splice(nameIndex >= 0 ? nameIndex + 1 : 0, 0, '日期')
-  return fields
+  if (!needsDate || seen.has('日期')) return names
+  const nameIndex = names.indexOf('姓名')
+  names.splice(nameIndex >= 0 ? nameIndex + 1 : 0, 0, '日期')
+  return names
+}
+
+export function inputFields(templates: { placeholders: string[] }[]): string[] {
+  return manualFieldsFromPlaceholders(templates.flatMap((template) => template.placeholders))
 }
 
 export function valuesForFields(

@@ -139,7 +139,7 @@ export function createIndexedDbTemplateRepository(): TemplateRepository {
       await write('templates', (store) => {
         store.put(normalize(record, stepId))
       })
-      return record.id
+      return { id: record.id, formatNotices: [] }
     },
     async delete(id) {
       await write('templates', (store) => {

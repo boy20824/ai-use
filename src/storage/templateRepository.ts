@@ -23,10 +23,15 @@ export interface StoredTemplate extends TemplateSummary {
   data: ArrayBuffer
 }
 
+export interface PutTemplateResult {
+  id: string
+  formatNotices: string[]
+}
+
 export interface TemplateRepository {
   list(): Promise<StoredTemplate[]>
   get(id: string): Promise<StoredTemplate | null>
-  put(record: StoredTemplate, stepId?: string): Promise<string>
+  put(record: StoredTemplate, stepId?: string): Promise<PutTemplateResult>
   delete(id: string): Promise<void>
   getMeta(key: string): Promise<string | null>
   setMeta(key: string, value: string): Promise<void>

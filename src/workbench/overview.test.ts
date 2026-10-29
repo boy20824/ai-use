@@ -63,6 +63,9 @@ describe('全部文件總覽', () => {
       案號: 'A1',
       地點: '公園',
       日期_民國: '115/10/29',
+      年: '115',
+      月: '10',
+      日: '29',
     })
 
     const zip = await zipGeneratedFiles(
@@ -92,5 +95,18 @@ describe('全部文件總覽', () => {
     const fields = inputFields(selected)
     expect(fields).toEqual(['姓名', '日期', '案號', '物品'])
     expect(new Set(fields).size).toBe(fields.length)
+  })
+
+  it('年、月、日與日期_民國不另外出現輸入欄，仍共用一個日期', () => {
+    const fields = inputFields([
+      { placeholders: ['姓名', '年', '月', '日', '日期', '日期_民國', '案號'] },
+      { placeholders: ['月', '物品'] },
+    ])
+    expect(fields).toEqual(['姓名', '日期', '案號', '物品'])
+    expect(fields).not.toContain('年')
+    expect(fields).not.toContain('月')
+    expect(fields).not.toContain('日')
+    expect(fields).not.toContain('日期_民國')
+    expect(inputFields([{ placeholders: ['年', '月', '日'] }])).toEqual(['日期'])
   })
 })
