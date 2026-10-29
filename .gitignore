@@ -9,6 +9,9 @@ dist-ssr
 !.env.example
 
 *.log
+*.sqlite
+*.sqlite-*
+server/data/
 npm-debug.log*
 pnpm-debug.log*
 

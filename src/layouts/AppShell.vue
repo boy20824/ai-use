@@ -1,19 +1,14 @@
 <script setup lang="ts">
 import SideNav from '@/components/SideNav.vue'
-import { apiConfigured } from '@/config/env'
+import { appName, appTagline } from '@/config/app'
 import { useSessionStore } from '@/stores/session'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { RouterView, useRoute } from 'vue-router'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { RouterView, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
+const router = useRouter()
 const session = useSessionStore()
 const menuOpen = ref(false)
-
-const pageTitle = computed(() =>
-  typeof route.meta.title === 'string' ? route.meta.title : 'AI 使用管理',
-)
-
-const apiLabel = computed(() => (apiConfigured ? 'API 位址已設定，此階段不連線' : 'API 位址未設定'))
 
 watch(
   () => route.fullPath,
@@ -28,6 +23,12 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
+async function logout() {
+  await session.logout()
+  menuOpen.value = false
+  void router.push({ name: 'login' })
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
 })
@@ -38,27 +39,29 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-stone-100 text-stone-900">
-    <aside class="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-stone-800 md:block">
-      <SideNav id="desktop-nav" />
+  <div class="flex min-h-dvh items-stretch bg-[#f6f4f1] text-stone-900">
+    <aside class="hidden w-64 shrink-0 bg-stone-950 md:block">
+      <div class="sticky top-0 flex h-dvh flex-col">
+        <SideNav id="desktop-nav" />
+      </div>
     </aside>
 
     <div
       v-if="menuOpen"
-      class="fixed inset-0 z-40 bg-stone-950/40 md:hidden"
+      class="fixed inset-0 z-40 bg-stone-950/50 md:hidden"
       @click="menuOpen = false"
     ></div>
 
     <aside
-      class="fixed inset-y-0 left-0 z-50 w-64 transition md:hidden"
+      class="fixed inset-y-0 left-0 z-50 flex h-dvh w-64 flex-col bg-stone-950 transition-transform duration-200 md:hidden"
       :class="menuOpen ? 'translate-x-0' : '-translate-x-full'"
     >
       <SideNav id="mobile-nav" @navigate="menuOpen = false" />
     </aside>
 
-    <div class="md:pl-64">
+    <div class="flex min-w-0 flex-1 flex-col">
       <header
-        class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-stone-200 bg-stone-100/90 px-4 backdrop-blur md:px-8"
+        class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-stone-200/80 bg-[#f6f4f1]/90 px-4 backdrop-blur md:px-8"
       >
         <div class="flex min-w-0 items-center gap-3">
           <button
@@ -79,33 +82,26 @@ onUnmounted(() => {
             </svg>
             <span class="sr-only">{{ menuOpen ? '關閉選單' : '開啟選單' }}</span>
           </button>
-          <div class="min-w-0">
-            <p class="truncate text-xs text-stone-500">工作區</p>
-            <p class="truncate text-sm font-semibold">{{ pageTitle }}</p>
-          </div>
+          <p class="truncate text-sm font-semibold md:hidden">{{ appName }}</p>
+          <p class="hidden truncate text-sm text-stone-500 md:block">{{ appTagline }}</p>
         </div>
 
-        <div class="flex items-center gap-2 sm:gap-3">
-          <p
-            class="hidden rounded-full border border-stone-300 bg-white px-3 py-1 text-xs text-stone-600 sm:block"
-          >
-            {{ apiLabel }}
-          </p>
-          <p class="max-w-28 truncate text-sm text-stone-700 sm:max-w-none">
-            {{ session.displayName }}
-          </p>
+        <div class="flex items-center gap-3">
+          <div class="min-w-0 text-right">
+            <p class="truncate text-sm font-medium text-stone-900">{{ session.displayName }}</p>
+            <p class="truncate text-xs text-stone-500">{{ session.roleLabel }}</p>
+          </div>
           <button
-            v-if="session.entered"
             type="button"
             class="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 hover:bg-stone-50"
-            @click="session.leave()"
+            @click="logout"
           >
-            離開示範
+            登出
           </button>
         </div>
       </header>
 
-      <main class="px-4 py-6 md:px-8">
+      <main class="flex-1 px-4 py-8 md:px-8 md:py-10">
         <div class="mx-auto max-w-6xl">
           <RouterView />
         </div>

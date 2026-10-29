@@ -5,7 +5,7 @@ import pluginVue from 'eslint-plugin-vue'
 export default withVueTs(
   {
     name: 'app/files-to-ignore',
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**'],
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'server/data/**'],
   },
   pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
