@@ -10,6 +10,8 @@
 | 登入速率與鎖定         | 同一 IP 每分鐘有次數上限；同一帳號連續失敗達到門檻後鎖定                                                                 | 失敗兩次後正確密碼仍是 429；另測每分鐘上限                                     |
 | 階段到期與輪替         | 登入會刪除該使用者舊階段並發出新 cookie；過期階段會被拒絕                                                                | 第二次登入後，第一個 cookie 不能再讀 `/api/auth/me`                            |
 | 正式環境 Secure cookie | `NODE_ENV=production` 或 `COOKIE_SECURE=true` 時加上 `Secure`                                                            | `cookieSecureFromEnv` 與 `cookie.secure`                                       |
+| 正式環境階段密鑰       | `SESSION_SECRET` 至少 32 字元，拒絕示範值，並用來簽署 session cookie。種子密碼也不能是 `.env.example` 的示範值           | `server/src/deploy.test.ts`                                                    |
+| 同源部署               | 正式環境由同一個來源提供畫面與 `/api`。變更請求的 `Origin` 若等於這個請求的 Host，視為允許                               | 同一測試對 `https://ai-use.fly.dev` 登入，並拒絕 `https://evil.example`        |
 | 每個路由的輸入結構     | Zod：登入本文、類別查詢、範本編號、上傳的類別欄位                                                                        | SQL 字串與不合法編號得到 400，回應沒有 `stack`                                 |
 | 一致的錯誤回應         | `{ error, message }`，錯誤處理不把堆疊送出                                                                               | 鎖定與驗證失敗的 JSON 不含 `stack` 或 `SQLITE`                                 |
 | 稽核紀錄               | `audit_log` 只記誰上傳或刪除了哪份範本與類別                                                                             | 檔案內文的測試字串不會出現在稽核列                                             |

@@ -2,6 +2,7 @@ import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
 import multipart from '@fastify/multipart'
+import fastifyStatic from '@fastify/static'
 import bcrypt from 'bcryptjs'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
@@ -16,6 +17,7 @@ import {
   sanitizeTemplateFileName,
 } from './docx.ts'
 import { createQueries, type AppDatabase, type AppQueries, type Role } from './db.ts'
+import { readTemplateBytes, removeTemplateFile, writeTemplateFile } from './files.ts'
 
 export interface AuthUser {
   id: string
@@ -73,6 +75,20 @@ function tokensMatch(left: string, right: string) {
   return timingSafeEqual(a, b)
 }
 
+function sessionToken(request: FastifyRequest, config: AppConfig): string | undefined {
+  const raw = request.cookies?.[sessionCookieName]
+  if (!raw) return undefined
+  if (!config.sessionSecret) return raw
+  const unsigned = request.unsignCookie(raw)
+  return unsigned.valid && unsigned.value ? unsigned.value : undefined
+}
+
+function sameOrigin(request: FastifyRequest, origin: string) {
+  const host = request.headers.host
+  if (typeof host !== 'string' || host.length === 0) return false
+  return origin === `${request.protocol}://${host}`
+}
+
 function readSession(queries: AppQueries, token: string | undefined): AuthUser | null {
   if (!token || !/^[a-f0-9]{64}$/.test(token)) return null
   const row = queries.findSession(token)
@@ -95,7 +111,10 @@ function cookieOptions(config: AppConfig, httpOnly: boolean) {
 }
 
 function setSessionCookie(reply: FastifyReply, config: AppConfig, token: string) {
-  reply.setCookie(sessionCookieName, token, cookieOptions(config, true))
+  reply.setCookie(sessionCookieName, token, {
+    ...cookieOptions(config, true),
+    signed: config.sessionSecret.length > 0,
+  })
 }
 
 function setCsrfCookie(reply: FastifyReply, config: AppConfig, token: string) {
@@ -120,7 +139,9 @@ function requireUser(request: FastifyRequest, reply: FastifyReply) {
 
 function originAllowed(request: FastifyRequest, config: AppConfig) {
   const origin = request.headers.origin
-  if (typeof origin === 'string') return config.corsOrigins.includes(origin)
+  if (typeof origin === 'string') {
+    return config.corsOrigins.includes(origin) || sameOrigin(request, origin)
+  }
   const referer = request.headers.referer
   if (typeof referer === 'string') {
     try {
@@ -146,7 +167,10 @@ function contentDisposition(fileName: string) {
 
 export async function buildApp(db: AppDatabase, config: AppConfig) {
   const queries = createQueries(db)
-  const app = Fastify({ logger: false })
+  const app = Fastify({
+    logger: false,
+    trustProxy: config.trustProxy,
+  })
   app.decorateRequest('authUser', null)
 
   await app.register(helmet, {
@@ -156,7 +180,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
         defaultSrc: ["'none'"],
         baseUri: ["'none'"],
         frameAncestors: ["'none'"],
-        formAction: ["'none'"],
+        formAction: ["'self'"],
         scriptSrc: ["'self'"],
         styleSrc: ["'self'"],
         imgSrc: ["'self'"],
@@ -167,7 +191,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: 'same-site' },
   })
-  await app.register(cookie)
+  await app.register(cookie, config.sessionSecret ? { secret: config.sessionSecret } : {})
   await app.register(cors, {
     origin(origin, callback) {
       if (!origin || config.corsOrigins.includes(origin)) {
@@ -181,7 +205,11 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   await app.register(multipart, { limits: { fileSize: config.maxUploadBytes, files: 1 } })
 
   app.addHook('onRequest', async (request, reply) => {
-    request.authUser = readSession(queries, request.cookies?.[sessionCookieName])
+    const pathOnly = request.url.split('?')[0] ?? ''
+    if (pathOnly === '/healthz') return
+    const last = pathOnly.split('/').pop() ?? ''
+    if (last.includes('.')) return
+    request.authUser = readSession(queries, sessionToken(request, config))
     if (!request.cookies?.[csrfCookieName]) {
       setCsrfCookie(reply, config, randomBytes(32).toString('hex'))
     }
@@ -205,6 +233,15 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
     }
     return fail(reply, 500, 'internal', '伺服器暫時無法完成這項操作。')
+  })
+
+  app.get('/healthz', async (_request, reply) => {
+    try {
+      db.prepare('SELECT 1 AS ok').get()
+    } catch {
+      return reply.code(503).send({ ok: false })
+    }
+    return { ok: true }
   })
 
   app.post('/api/auth/login', async (request, reply) => {
@@ -245,7 +282,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   })
 
   app.post('/api/auth/logout', async (request, reply) => {
-    const token = request.cookies?.[sessionCookieName]
+    const token = sessionToken(request, config)
     if (token) queries.deleteSession(token)
     clearSessionCookie(reply, config)
     return reply.code(204).send()
@@ -285,11 +322,14 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const parsed = templateIdSchema.safeParse((request.params as { id?: unknown }).id)
     if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
     const template = queries.getTemplateFile(parsed.data)
-    if (!template?.data) return fail(reply, 404, 'not-found', '找不到這份範本。')
+    const data = template
+      ? readTemplateBytes(config.uploadDir, template.id, template.data)
+      : undefined
+    if (!template || !data) return fail(reply, 404, 'not-found', '找不到這份範本。')
     return reply
       .header('content-type', template.mimeType)
       .header('content-disposition', contentDisposition(template.fileName))
-      .send(template.data)
+      .send(data)
   })
 
   app.post('/api/templates', async (request, reply) => {
@@ -342,7 +382,13 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       origin: 'upload' as const,
       data,
     }
-    queries.insertTemplate(record)
+    writeTemplateFile(config.uploadDir, record.id, data)
+    try {
+      queries.insertTemplate(record)
+    } catch (error) {
+      removeTemplateFile(config.uploadDir, record.id)
+      throw error
+    }
     queries.insertAudit(user.username, 'upload', record.id, record.fileName, record.categoryId)
     return reply.code(201).send({
       template: {
@@ -369,6 +415,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const existing = queries.getTemplateFile(parsed.data)
     if (!existing) return fail(reply, 404, 'not-found', '找不到這份範本。')
     queries.deleteTemplate(parsed.data)
+    removeTemplateFile(config.uploadDir, parsed.data)
     queries.insertAudit(
       user.username,
       'delete',
@@ -378,6 +425,32 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     )
     return reply.code(204).send()
   })
+
+  if (config.staticDir) {
+    await app.register(fastifyStatic, {
+      root: config.staticDir,
+      wildcard: false,
+      index: ['index.html'],
+      setHeaders(reply, filePath) {
+        if (filePath.endsWith('.html')) reply.header('cache-control', 'no-cache')
+      },
+    })
+    app.setNotFoundHandler((request, reply) => {
+      const urlPath = request.url.split('?')[0] ?? '/'
+      const last = urlPath.split('/').pop() ?? ''
+      if (
+        urlPath === '/healthz' ||
+        urlPath === '/api' ||
+        urlPath.startsWith('/api/') ||
+        (request.method !== 'GET' && request.method !== 'HEAD') ||
+        last.includes('.')
+      ) {
+        return fail(reply, 404, 'not-found', '找不到這個路徑。')
+      }
+      reply.header('cache-control', 'no-cache')
+      return reply.sendFile('index.html')
+    })
+  }
 
   return app
 }

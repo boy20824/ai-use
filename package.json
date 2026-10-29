@@ -14,6 +14,7 @@
     "dev": "concurrently -k -n web,api \"vite\" \"pnpm --filter @ai-use/server dev\"",
     "build": "vue-tsc --noEmit && vite build && pnpm --filter @ai-use/server typecheck",
     "preview": "vite preview",
+    "start": "node server/src/index.ts",
     "typecheck": "vue-tsc --noEmit && pnpm --filter @ai-use/server typecheck",
     "test": "vitest run",
     "lint": "eslint . --max-warnings 0 && prettier --check .",

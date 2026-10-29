@@ -4,6 +4,7 @@ import { categories } from './categories.ts'
 import type { SeedPasswords } from './config.ts'
 import { listPlaceholders } from './docx.ts'
 import type { AppQueries } from './db.ts'
+import { writeTemplateFile } from './files.ts'
 
 const users = [
   { id: 'user-clerk', username: 'clerk', displayName: '示範承辦', role: 'clerk' },
@@ -15,17 +16,17 @@ export function seedReferenceData(
   queries: AppQueries,
   passwords: SeedPasswords,
   samplePath: string,
+  uploadDir: string,
 ) {
-  if (queries.countUsers() === 0) {
-    for (const user of users) {
-      queries.insertUser(
-        user.id,
-        user.username,
-        bcrypt.hashSync(passwords[user.role], 10),
-        user.displayName,
-        user.role,
-      )
-    }
+  for (const user of users) {
+    if (queries.findUserByUsername(user.username)) continue
+    queries.insertUser(
+      user.id,
+      user.username,
+      bcrypt.hashSync(passwords[user.role], 10),
+      user.displayName,
+      user.role,
+    )
   }
 
   for (const category of categories) {
@@ -41,6 +42,7 @@ export function seedReferenceData(
 
   if (!queries.hasTemplate('sample-field-note')) {
     const data = readFileSync(samplePath)
+    writeTemplateFile(uploadDir, 'sample-field-note', data)
     queries.insertTemplate({
       id: 'sample-field-note',
       categoryId: 'general-assist',

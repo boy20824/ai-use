@@ -47,6 +47,8 @@ pnpm dev
 
 `VITE_` 變數會進前端。請不要把正式密鑰放進去。`VITE_TEMPLATE_STORAGE=api` 時範本存在服務；改成 `indexeddb` 時範本只留在這個瀏覽器，登入仍走服務。
 
+`DATABASE_PATH` 與 `UPLOAD_DIR` 在開發時相對 `server/`。`SESSION_SECRET` 用來簽署 session cookie；正式環境少了它，或仍是 `.env.example` 的示範值，服務會拒絕啟動。
+
 預設示範帳號（密碼以 `.env.example` 為準）：
 
 | 帳號   | 角色       | 可以做的事                   |
@@ -56,6 +58,10 @@ pnpm dev
 | viewer | 唯讀檢視   | 閱讀與產生文件，不能改範本   |
 
 登入使用 httpOnly、`SameSite=Strict` 的階段 cookie。重新整理後會向 `/api/auth/me` 恢復身分。
+
+## 部署
+
+正式環境由 Fastify 在同一個來源提供建置後的畫面與 `/api`。Fly.io 的指令、volume、機密與費用見 [docs/DEPLOY-fly.md](docs/DEPLOY-fly.md)。
 
 ## 路由
 
@@ -85,6 +91,8 @@ pnpm dev
 src/             畫面
 server/          Fastify 與 SQLite
 public/samples/  虛構的 .docx 範本
+Dockerfile       正式映像
+fly.toml         Fly.io app
 ```
 
 ## 範圍
