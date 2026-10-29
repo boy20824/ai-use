@@ -1,0 +1,46 @@
+{
+  "name": "ai-use",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.33.4",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "scripts": {
+    "dev": "concurrently -k -n web,api \"vite\" \"pnpm --filter @ai-use/server dev\"",
+    "build": "vue-tsc --noEmit && vite build && pnpm --filter @ai-use/server typecheck",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit && pnpm --filter @ai-use/server typecheck",
+    "test": "vitest run",
+    "lint": "eslint . --max-warnings 0 && prettier --check .",
+    "check:sample": "node --experimental-strip-types scripts/check-sample-docx.ts"
+  },
+  "dependencies": {
+    "docxtemplater": "^3.71.1",
+    "jszip": "^3.10.2",
+    "pinia": "^4.1.0",
+    "pizzip": "^3.3.0",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^22.20.5",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "@vue/eslint-config-prettier": "^10.2.0",
+    "@vue/eslint-config-typescript": "^14.9.0",
+    "concurrently": "^10.0.6",
+    "eslint": "^10.13.0",
+    "eslint-plugin-vue": "^10.12.0",
+    "prettier": "^3.9.10",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "vue-tsc": "^3.3.13"
+  }
+}
