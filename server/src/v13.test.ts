@@ -11,9 +11,8 @@ import {
   paragraph,
   run,
   wordDocument,
-} from '../../src/services/docxFixture.ts'
-import { renderDocx } from '../../src/services/docxTemplates.ts'
-import { applyRocDateFields } from '../../src/utils/rocDate.ts'
+} from '../../shared/docxFixture.ts'
+import { renderDocx } from '../../shared/docxRender.ts'
 import { buildApp } from './app.ts'
 import type { AppConfig, SeedPasswords } from './config.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
@@ -166,8 +165,7 @@ describe('v1.3 docx normalization', () => {
     expect(stored).toContain('w:bookmarkStart')
     expect(stored).not.toContain('<w:t>{{</w:t>')
 
-    const filled = applyRocDateFields({ 日期: '115/10/29' })
-    const rendered = new PizZip(renderDocx(file.rawPayload, filled!))
+    const rendered = new PizZip(renderDocx(file.rawPayload, { 年: '115' }))
       .file('word/document.xml')
       ?.asText()
     const output = runContaining(rendered ?? '', '115')
