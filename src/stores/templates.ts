@@ -10,25 +10,19 @@ import {
   safeFileName,
   templateMimeType,
 } from '@/services/docxTemplates'
-import { createTemplateRepository, type StoredTemplate, type TemplateRepository } from '@/storage'
-import type { TemplateOrigin } from '@/types/domain'
+import {
+  createTemplateRepository,
+  templateStorageMode,
+  type StoredTemplate,
+  type TemplateRepository,
+  type TemplateSummary,
+} from '@/storage'
 import { formatStamp } from '@/utils/format'
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 
 const templateLimit = 30
 const sampleSeedKey = 'sample-field-note-seeded'
-
-export interface TemplateSummary {
-  id: string
-  categoryId: string
-  fileName: string
-  mimeType: string
-  sizeBytes: number
-  addedAt: string
-  placeholders: string[]
-  origin: TemplateOrigin
-}
 
 export interface AddTemplatesResult {
   added: number
@@ -86,7 +80,9 @@ export const useTemplateStore = defineStore('templates', () => {
 
   function remember(records: StoredTemplate[]) {
     const next = new Map<string, ArrayBuffer>()
-    for (const record of records) next.set(record.id, record.data)
+    for (const record of records) {
+      if (record.data.byteLength > 0) next.set(record.id, record.data)
+    }
     bytes.value = next
     items.value = sortNewest(records).map(toSummary)
   }
@@ -98,11 +94,11 @@ export const useTemplateStore = defineStore('templates', () => {
   function load() {
     pending ??= (async () => {
       try {
-        await ensureSample(repository)
+        if (templateStorageMode() === 'indexeddb') await ensureSample(repository)
         await reload()
         error.value = ''
       } catch {
-        error.value = '無法讀取這個瀏覽器裡的範本文件。'
+        error.value = '無法讀取範本文件。'
       } finally {
         ready.value = true
       }
@@ -144,18 +140,22 @@ export const useTemplateStore = defineStore('templates', () => {
         rejected.push(`${fileName} 無法讀取`)
         continue
       }
-      await repository.put({
-        id: crypto.randomUUID(),
-        categoryId,
-        fileName,
-        mimeType: templateMimeType,
-        sizeBytes: data.byteLength,
-        addedAt: formatStamp(new Date()),
-        placeholders,
-        origin: 'upload',
-        data,
-      })
-      added += 1
+      try {
+        await repository.put({
+          id: crypto.randomUUID(),
+          categoryId,
+          fileName,
+          mimeType: templateMimeType,
+          sizeBytes: data.byteLength,
+          addedAt: formatStamp(new Date()),
+          placeholders,
+          origin: 'upload',
+          data,
+        })
+        added += 1
+      } catch (error) {
+        rejected.push(error instanceof Error ? error.message : `${fileName} 無法上傳`)
+      }
     }
 
     if (added > 0) await reload()
@@ -168,10 +168,15 @@ export const useTemplateStore = defineStore('templates', () => {
     await reload()
   }
 
-  function bytesFor(id: string): ArrayBuffer | null {
-    const data = bytes.value.get(id)
-    if (!data) return null
-    return data.slice(0)
+  async function bytesFor(id: string): Promise<ArrayBuffer | null> {
+    const cached = bytes.value.get(id)
+    if (cached && cached.byteLength > 0) return cached.slice(0)
+    const record = await repository.get(id)
+    if (!record || record.data.byteLength === 0) return null
+    const next = new Map(bytes.value)
+    next.set(id, record.data)
+    bytes.value = next
+    return record.data.slice(0)
   }
 
   void load()

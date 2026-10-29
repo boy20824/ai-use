@@ -73,8 +73,9 @@ export const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const session = useSessionStore()
+  await session.restore()
 
   if (to.name === 'login') {
     if (session.authenticated) {

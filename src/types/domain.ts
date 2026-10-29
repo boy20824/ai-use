@@ -1,15 +1,8 @@
 export type AppRole = 'admin' | 'clerk' | 'viewer'
-export type PermissionKey = 'browse' | 'upload' | 'access'
+export type PermissionKey = 'browse' | 'upload' | 'remove' | 'access'
 export type DocumentKind = '說明' | '表單' | '檢核'
 export type TemplateOrigin = 'sample' | 'upload'
 export type StatusTone = 'neutral' | 'warn' | 'ok' | 'danger'
-
-export interface MockUser {
-  username: string
-  password: string
-  displayName: string
-  role: AppRole
-}
 
 export interface PermissionRow {
   key: PermissionKey

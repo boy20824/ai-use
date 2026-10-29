@@ -1,6 +1,6 @@
 import type { TemplateOrigin } from '@/types/domain'
 
-export interface StoredTemplate {
+export interface TemplateSummary {
   id: string
   categoryId: string
   fileName: string
@@ -9,6 +9,9 @@ export interface StoredTemplate {
   addedAt: string
   placeholders: string[]
   origin: TemplateOrigin
+}
+
+export interface StoredTemplate extends TemplateSummary {
   data: ArrayBuffer
 }
 

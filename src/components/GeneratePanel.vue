@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { useTemplateStore } from '@/stores/templates'
+import RocDateField from '@/components/RocDateField.vue'
 import { renderDocx, templateMimeType, zipGeneratedFiles } from '@/services/docxTemplates'
+import { useTemplateStore } from '@/stores/templates'
 import { downloadBlob, downloadBytes } from '@/utils/download'
+import { applyRocDateFields } from '@/utils/rocDate'
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 
@@ -15,6 +17,7 @@ const values = ref<Record<string, string>>({})
 const message = ref('')
 const messageTone = ref<'ok' | 'warn'>('ok')
 const busy = ref(false)
+const dateInvalid = computed(() => currentValues() === null)
 
 const categoryTemplates = computed(() =>
   templatesStore.items.filter((item) => item.categoryId === props.categoryId),
@@ -25,13 +28,23 @@ const fieldNames = computed(() => {
   const seen = new Set(names)
   for (const template of categoryTemplates.value) {
     for (const placeholder of template.placeholders) {
-      if (seen.has(placeholder)) continue
+      if (seen.has(placeholder) || placeholder === '日期_民國') continue
       seen.add(placeholder)
       names.push(placeholder)
     }
   }
   return names
 })
+
+const dateValue = computed({
+  get: () => values.value['日期'] ?? '',
+  set: (value: string) => {
+    values.value = { ...values.value, 日期: value }
+  },
+})
+
+const dateHint = '{{日期}}'
+const dateSlashHint = '{{日期_民國}}'
 
 function fieldValue(name: string) {
   return values.value[name] ?? ''
@@ -44,11 +57,7 @@ function onFieldInput(name: string, event: Event) {
 }
 
 function currentValues() {
-  const data: Record<string, string> = {}
-  for (const name of fieldNames.value) {
-    data[name] = values.value[name] ?? ''
-  }
-  return data
+  return applyRocDateFields(values.value)
 }
 
 function clearValues() {
@@ -56,30 +65,35 @@ function clearValues() {
   message.value = ''
 }
 
-function renderOne(id: string) {
+async function renderOne(id: string) {
+  const filled = currentValues()
+  if (!filled) throw new Error('invalid-date')
   const template = categoryTemplates.value.find((item) => item.id === id)
-  const bytes = templatesStore.bytesFor(id)
+  const bytes = await templatesStore.bytesFor(id)
   if (!template || !bytes) {
     throw new Error('missing-template')
   }
   return {
     name: `產生-${template.fileName}`,
-    data: renderDocx(bytes, currentValues()),
+    data: renderDocx(bytes, filled),
   }
 }
 
 async function downloadOne(id: string) {
-  if (busy.value) return
+  if (busy.value || dateInvalid.value) return
   busy.value = true
   message.value = ''
   try {
-    const rendered = renderOne(id)
+    const rendered = await renderOne(id)
     downloadBytes(rendered.data, rendered.name, templateMimeType)
     messageTone.value = 'ok'
     message.value = `已下載「${rendered.name}」。填寫內容沒有被保存。`
-  } catch {
+  } catch (error) {
     messageTone.value = 'warn'
-    message.value = '無法產生這份文件。請確認範本裡的欄位寫成 {{名稱}}，且括號在同一段文字中。'
+    message.value =
+      error instanceof Error && error.message === 'invalid-date'
+        ? '日期不是有效的民國日期。'
+        : '無法產生這份文件。請確認範本裡的欄位寫成雙大括號，且括號在同一段文字中。'
   } finally {
     busy.value = false
   }
@@ -93,7 +107,7 @@ async function downloadAll() {
   const failed: string[] = []
   for (const template of categoryTemplates.value) {
     try {
-      rendered.push(renderOne(template.id))
+      rendered.push(await renderOne(template.id))
     } catch {
       failed.push(template.fileName)
     }
@@ -101,7 +115,7 @@ async function downloadAll() {
   try {
     if (rendered.length === 0) {
       messageTone.value = 'warn'
-      message.value = '沒有可以下載的文件。請確認範本裡的欄位寫成 {{名稱}}。'
+      message.value = '沒有可以下載的文件。請確認日期有效，且範本欄位寫成雙大括號。'
       return
     }
     const zip = await zipGeneratedFiles(rendered)
@@ -142,7 +156,7 @@ onUnmounted(clearValues)
       <button
         type="button"
         class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
-        :disabled="busy || categoryTemplates.length === 0"
+        :disabled="busy || categoryTemplates.length === 0 || dateInvalid"
         @click="downloadAll"
       >
         下載全部（zip）
@@ -155,17 +169,22 @@ onUnmounted(clearValues)
           <label class="block text-sm font-medium text-stone-800" :for="`generate-field-${index}`">
             {{ name }}
           </label>
+          <RocDateField v-if="name === '日期'" v-model="dateValue" />
           <input
+            v-else
             :id="`generate-field-${index}`"
             :value="fieldValue(name)"
-            :type="name === '日期' ? 'date' : 'text'"
+            type="text"
             autocomplete="off"
             class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
             @input="onFieldInput(name, $event)"
           />
         </div>
         <p class="text-xs leading-5 text-stone-500">
-          未填的欄位會以空白帶入。至少會詢問姓名與日期。
+          未填的欄位會以空白帶入。日期用民國年選擇，{{ dateHint }} 會寫成 115年10月29日，{{
+            dateSlashHint
+          }}
+          會寫成 115/10/29。
         </p>
       </div>
 
@@ -194,7 +213,7 @@ onUnmounted(clearValues)
             <button
               type="button"
               class="shrink-0 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 hover:bg-stone-50 disabled:cursor-not-allowed disabled:text-stone-400"
-              :disabled="busy"
+              :disabled="busy || dateInvalid"
               @click="downloadOne(template.id)"
             >
               下載

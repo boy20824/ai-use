@@ -6,6 +6,7 @@ import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { formatBytes } from '@/utils/format'
+import { formatStoredDate } from '@/utils/rocDate'
 import { templateOriginLabel, templateTone } from '@/utils/status'
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
@@ -100,7 +101,7 @@ const latestTemplates = computed(() => templates.items.slice(0, 4))
               </span>
             </span>
             <time class="shrink-0 text-xs text-stone-500" :datetime="item.updatedAt">{{
-              item.updatedAt
+              formatStoredDate(item.updatedAt)
             }}</time>
           </RouterLink>
         </li>
@@ -133,7 +134,7 @@ const latestTemplates = computed(() => templates.items.slice(0, 4))
               :label="templateOriginLabel(item.origin)"
               :tone="templateTone(item.origin)"
             />
-            <time class="text-xs text-stone-500">{{ item.addedAt }}</time>
+            <time class="text-xs text-stone-500">{{ formatStoredDate(item.addedAt) }}</time>
           </div>
         </li>
       </ul>

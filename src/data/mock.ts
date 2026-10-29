@@ -22,8 +22,13 @@ export const permissionRows: PermissionRow[] = [
   },
   {
     key: 'upload',
-    label: '上傳與移除範本文件',
+    label: '上傳範本文件',
     roles: ['clerk', 'admin'],
+  },
+  {
+    key: 'remove',
+    label: '移除範本文件',
+    roles: ['admin'],
   },
   {
     key: 'access',
@@ -33,9 +38,9 @@ export const permissionRows: PermissionRow[] = [
 ]
 
 const roleSummaries: Record<AppRole, string> = {
-  viewer: '可閱讀類別、文件與步驟，也能在本機產生文件，但不能上傳或移除範本。',
-  clerk: '可上傳範本文件，並在本機填入欄位後下載。',
-  admin: '與承辦相同，並可對照角色權限。此頁不會變更真實授權。',
+  viewer: '可閱讀類別、文件與範本，也能在本機產生文件，但不能上傳或移除範本。',
+  clerk: '可上傳範本文件，並在本機填入欄位後下載。不能移除範本。',
+  admin: '可上傳與移除範本，並可對照角色權限。此頁不會變更真實授權。',
 }
 
 const roleMembers: Record<AppRole, number> = {

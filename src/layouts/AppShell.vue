@@ -23,8 +23,8 @@ function onKeydown(event: KeyboardEvent) {
   }
 }
 
-function logout() {
-  session.logout()
+async function logout() {
+  await session.logout()
   menuOpen.value = false
   void router.push({ name: 'login' })
 }

@@ -10,6 +10,7 @@ import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { formatBytes } from '@/utils/format'
+import { formatStoredDate } from '@/utils/rocDate'
 import { documentTone, templateOriginLabel, templateTone } from '@/utils/status'
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
@@ -133,7 +134,9 @@ function removeTemplate(id: string) {
                 }}</span>
                 <span class="mt-2 block text-xs text-stone-500">
                   更新
-                  <time :datetime="document.updatedAt">{{ document.updatedAt }}</time>
+                  <time :datetime="document.updatedAt">{{
+                    formatStoredDate(document.updatedAt)
+                  }}</time>
                   · {{ expandedId === document.id ? '收合重點' : '展開重點' }}
                 </span>
               </button>
@@ -230,7 +233,7 @@ function removeTemplate(id: string) {
                 item.fileName
               }}</span>
               <span class="mt-1 block text-xs leading-5 text-stone-500">
-                {{ formatBytes(item.sizeBytes) }} · {{ item.addedAt }}
+                {{ formatBytes(item.sizeBytes) }} · {{ formatStoredDate(item.addedAt) }}
               </span>
               <span class="mt-1 block text-xs leading-5 text-stone-500">
                 {{ item.placeholders.length > 0 ? item.placeholders.join('、') : '沒有偵測到欄位' }}
@@ -243,7 +246,7 @@ function removeTemplate(id: string) {
               </span>
             </span>
             <button
-              v-if="session.canUpload"
+              v-if="session.canDelete"
               type="button"
               class="shrink-0 text-sm text-stone-600 hover:text-rose-800"
               :aria-label="`移除 ${item.fileName}`"

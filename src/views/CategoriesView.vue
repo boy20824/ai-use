@@ -2,6 +2,7 @@
 import EmptyState from '@/components/EmptyState.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import { useCategoryStore } from '@/stores/categories'
+import { formatStoredDate } from '@/utils/rocDate'
 import { computed, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -54,7 +55,9 @@ const visible = computed(() => {
     >
       <span class="flex items-center justify-between gap-3">
         <span class="font-mono text-xs text-stone-500">{{ item.code }}</span>
-        <time class="text-xs text-stone-500" :datetime="item.updatedAt">{{ item.updatedAt }}</time>
+        <time class="text-xs text-stone-500" :datetime="item.updatedAt">{{
+          formatStoredDate(item.updatedAt)
+        }}</time>
       </span>
       <h2 class="mt-3 text-lg font-semibold tracking-tight text-stone-950">{{ item.name }}</h2>
       <p class="mt-2 flex-1 text-sm leading-6 text-stone-600">{{ item.summary }}</p>

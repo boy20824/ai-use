@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { appName, appTagline } from '@/config/app'
 import { roleLabels } from '@/data/mock'
-import { mockUsers } from '@/data/mockUsers'
 import { useSessionStore } from '@/stores/session'
+import type { AppRole } from '@/types/domain'
 import { safeRedirect } from '@/utils/redirect'
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -13,6 +13,13 @@ const router = useRouter()
 const username = ref('')
 const password = ref('')
 const failed = ref(false)
+const offline = ref(false)
+
+const demoAccounts: { username: string; role: AppRole }[] = [
+  { username: 'clerk', role: 'clerk' },
+  { username: 'admin', role: 'admin' },
+  { username: 'viewer', role: 'viewer' },
+]
 
 const points = [
   {
@@ -32,10 +39,19 @@ const points = [
   },
 ]
 
-function submit() {
-  failed.value = !session.login(username.value, password.value)
-  if (failed.value) return
+async function submit() {
+  failed.value = false
+  offline.value = false
+  const result = await session.login(username.value, password.value)
   password.value = ''
+  if (result === 'invalid') {
+    failed.value = true
+    return
+  }
+  if (result !== 'ok') {
+    offline.value = true
+    return
+  }
   void router.push(safeRedirect(route.query.redirect))
 }
 </script>
@@ -73,7 +89,7 @@ function submit() {
         </ol>
       </div>
       <p class="text-xs leading-5 text-stone-500">
-        目前只在前端比對示範帳號。正式登入會在 Phase C/D 改接後端。
+        登入由本機服務核對。重新整理後會恢復這個階段的身分。
       </p>
     </section>
 
@@ -84,7 +100,7 @@ function submit() {
         <p class="text-xs font-medium tracking-wide text-orange-800 lg:hidden">{{ appName }}</p>
         <h1 class="mt-2 text-2xl font-semibold tracking-tight text-stone-950">登入</h1>
         <p class="mt-3 text-sm leading-6 text-stone-600">
-          輸入帳號與密碼進入工作台。這個階段不會把帳號送到伺服器。
+          輸入帳號與密碼進入工作台。密碼只用於這次核對，不會留在瀏覽器裡。
         </p>
 
         <form class="mt-6 space-y-4" @submit.prevent="submit">
@@ -113,6 +129,9 @@ function submit() {
             />
           </div>
           <p v-if="failed" class="text-sm text-rose-800" role="alert">帳號或密碼不正確。</p>
+          <p v-if="offline" class="text-sm text-rose-800" role="alert">
+            無法連線。請確認服務已啟動。
+          </p>
           <button
             type="submit"
             class="w-full rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
@@ -125,17 +144,17 @@ function submit() {
           <summary class="cursor-pointer text-sm font-medium text-stone-800">示範帳號</summary>
           <ul class="mt-3 space-y-2">
             <li
-              v-for="user in mockUsers"
-              :key="user.username"
+              v-for="account in demoAccounts"
+              :key="account.username"
               class="text-sm leading-6 text-stone-600"
             >
-              <span class="font-medium text-stone-900">{{ user.username }}</span>
-              <span> / {{ user.password }}</span>
-              <span class="text-stone-500">（{{ roleLabels[user.role] }}）</span>
+              <span class="font-medium text-stone-900">{{ account.username }}</span>
+              <span class="text-stone-500">（{{ roleLabels[account.role] }}）</span>
             </li>
           </ul>
           <p class="mt-3 text-xs leading-5 text-stone-500">
-            這些密碼只寫在前端程式裡，不是正式密鑰。Phase C/D 會改接真正的登入，不再使用這份清單。
+            密碼只放在伺服器環境變數，請看
+            .env.example。前端不會保存密碼，重新整理後會用登入階段恢復身分。
           </p>
         </details>
       </div>

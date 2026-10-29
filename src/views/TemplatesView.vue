@@ -7,6 +7,7 @@ import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { formatBytes } from '@/utils/format'
+import { formatStoredDate } from '@/utils/rocDate'
 import { templateOriginLabel, templateTone } from '@/utils/status'
 import { computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -122,7 +123,7 @@ function removeTemplate(id: string) {
             >
               {{ categories.nameOf(item.categoryId) }}
             </RouterLink>
-            · {{ formatBytes(item.sizeBytes) }} · {{ item.addedAt }}
+            · {{ formatBytes(item.sizeBytes) }} · {{ formatStoredDate(item.addedAt) }}
           </p>
           <p class="mt-1 text-xs leading-5 text-stone-500">
             {{ item.placeholders.length > 0 ? item.placeholders.join('、') : '沒有偵測到欄位' }}
@@ -134,7 +135,7 @@ function removeTemplate(id: string) {
             :tone="templateTone(item.origin)"
           />
           <button
-            v-if="session.canUpload"
+            v-if="session.canDelete"
             type="button"
             class="text-sm text-stone-600 hover:text-rose-800"
             :aria-label="`移除 ${item.fileName}`"
