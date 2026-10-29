@@ -218,7 +218,7 @@ describe('api', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/categories',
-      ...clerkAuth,
+      ...adminAuth,
       payload: { name: '文件摘要', code: 'SUM', summary: '摘要用', steps: [{ body: '核對原文' }] },
     })
     expect(created.statusCode).toBe(201)
@@ -256,9 +256,19 @@ describe('api', () => {
       headers: { ...upload.headers, ...clerkAuth.headers },
       payload: upload.payload,
     })
-    expect(clerkUpload.statusCode).toBe(201)
-    const templateId = clerkUpload.json().template.id as string
-    expect(clerkUpload.json().template.placeholders).toEqual(['姓名', '日期'])
+    expect(clerkUpload.statusCode).toBe(403)
+    expect(clerkUpload.json().error).toBe('forbidden')
+
+    const adminUpload = await app.inject({
+      method: 'POST',
+      url: '/api/templates',
+      cookies: adminAuth.cookies,
+      headers: { ...upload.headers, ...adminAuth.headers },
+      payload: upload.payload,
+    })
+    expect(adminUpload.statusCode).toBe(201)
+    const templateId = adminUpload.json().template.id as string
+    expect(adminUpload.json().template.placeholders).toEqual(['姓名', '日期'])
 
     const badType = multipart(
       { categoryId },
@@ -267,8 +277,8 @@ describe('api', () => {
     const rejectedType = await app.inject({
       method: 'POST',
       url: '/api/templates',
-      cookies: clerkAuth.cookies,
-      headers: { ...badType.headers, ...clerkAuth.headers },
+      cookies: adminAuth.cookies,
+      headers: { ...badType.headers, ...adminAuth.headers },
       payload: badType.payload,
     })
     expect(rejectedType.statusCode).toBe(400)

@@ -7,6 +7,7 @@ declare module 'vue-router' {
   interface RouteMeta {
     title?: string
     requiresAuth?: boolean
+    requiresAdmin?: boolean
     public?: boolean
   }
 }
@@ -44,13 +45,13 @@ export const router = createRouter({
           path: 'categories/new',
           name: 'category-new',
           component: () => import('@/views/CategoryFormView.vue'),
-          meta: { title: '新增案件類別' },
+          meta: { title: '新增案件類別', requiresAdmin: true },
         },
         {
           path: 'categories/:id/edit',
           name: 'category-edit',
           component: () => import('@/views/CategoryFormView.vue'),
-          meta: { title: '編輯案件類別' },
+          meta: { title: '編輯案件類別', requiresAdmin: true },
         },
         {
           path: 'categories/:id',
@@ -99,6 +100,16 @@ router.beforeEach(async (to) => {
   const needsAuth = to.matched.some((record) => record.meta.requiresAuth === true)
   if (needsAuth && !session.authenticated) {
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+
+  const needsAdmin = to.matched.some((record) => record.meta.requiresAdmin === true)
+  if (needsAdmin && session.role !== 'admin') {
+    const raw = to.params.id
+    const categoryId = Array.isArray(raw) ? raw[0] : raw
+    if (to.name === 'category-edit' && categoryId) {
+      return { name: 'category', params: { id: categoryId } }
+    }
+    return { name: 'categories' }
   }
 })
 

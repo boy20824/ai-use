@@ -27,7 +27,7 @@ const visible = computed(() => {
   <PageIntro
     eyebrow="工作台"
     title="案件類別"
-    description="類別由單位自行建立，例如竊盜案、毀損案。進入工作台後可寫下填寫步驟，並從範本庫選取要套用的文件。"
+    description="類別由系統管理員建立，例如竊盜案、毀損案。進入工作台後可依步驟產生文件，或在全部文件總覽一次勾選。"
   >
     <RouterLink
       v-if="session.canEditCategory && categories.total > 0"
@@ -46,7 +46,7 @@ const visible = computed(() => {
   <EmptyState
     v-else-if="categories.total === 0"
     title="還沒有案件類別"
-    description="建立第一個類別後，就可以寫下填寫步驟，並從範本庫選取或上傳 Word 範本。範本會集中保存，刪除類別不會刪除檔案。"
+    description="建立第一個類別後，就可以寫下填寫步驟，並從範本庫選取 Word 範本。範本會集中保存，刪除類別不會刪除檔案。"
   >
     <RouterLink
       v-if="session.canEditCategory"
@@ -55,7 +55,7 @@ const visible = computed(() => {
     >
       新增案件類別
     </RouterLink>
-    <p v-else class="text-sm text-stone-600">請由類別承辦或系統管理員新增。</p>
+    <p v-else class="text-sm text-stone-600">請由系統管理員新增。</p>
   </EmptyState>
 
   <template v-else>

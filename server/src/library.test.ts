@@ -191,7 +191,7 @@ describe('category library', () => {
     const blank = await app.inject({
       method: 'POST',
       url: '/api/categories',
-      ...clerk,
+      ...admin,
       payload: { name: '   ' },
     })
     expect(blank.statusCode).toBe(400)
@@ -200,7 +200,7 @@ describe('category library', () => {
     const extra = await app.inject({
       method: 'POST',
       url: '/api/categories',
-      ...clerk,
+      ...admin,
       payload: { name: '竊盜案', audience: '不該有' },
     })
     expect(extra.statusCode).toBe(400)
@@ -209,7 +209,7 @@ describe('category library', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/api/categories',
-      ...clerk,
+      ...admin,
       payload: {
         name: injectedName,
         summary: '財物遭竊',
@@ -239,7 +239,7 @@ describe('category library', () => {
     const renamed = await app.inject({
       method: 'PATCH',
       url: `/api/categories/${theftId}`,
-      ...clerk,
+      ...admin,
       payload: {
         name: '竊盜案',
         code: 'A-01',
@@ -277,8 +277,8 @@ describe('category library', () => {
     const first = await app.inject({
       method: 'POST',
       url: '/api/templates',
-      cookies: clerk.cookies,
-      headers: { ...firstUpload.headers, ...clerk.headers },
+      cookies: admin.cookies,
+      headers: { ...firstUpload.headers, ...admin.headers },
       payload: firstUpload.payload,
     })
     expect(first.statusCode).toBe(201)
@@ -318,7 +318,7 @@ describe('category library', () => {
     const missingTemplate = await app.inject({
       method: 'PATCH',
       url: `/api/categories/${theftId}`,
-      ...clerk,
+      ...admin,
       payload: {
         name: '竊盜案',
         steps: [
@@ -331,7 +331,7 @@ describe('category library', () => {
     const duplicates = await app.inject({
       method: 'PATCH',
       url: `/api/categories/${theftId}`,
-      ...clerk,
+      ...admin,
       payload: {
         name: '竊盜案',
         steps: [{ id: theftSteps[0]?.id, body: '通知事主', templateIds: [firstId, firstId] }],
@@ -342,7 +342,7 @@ describe('category library', () => {
     const linked = await app.inject({
       method: 'PATCH',
       url: `/api/categories/${theftId}`,
-      ...clerk,
+      ...admin,
       payload: {
         name: '竊盜案',
         code: 'A-01',
@@ -451,11 +451,14 @@ describe('category library', () => {
     }[]
     expect(tables.map((table) => table.name)).not.toContain('case_values')
 
-    const audit = db.prepare('SELECT action, detail FROM audit_log ORDER BY id').all() as {
+    const audit = db.prepare('SELECT action, detail, result FROM audit_log ORDER BY id').all() as {
       action: string
       detail: string
+      result: string
     }[]
-    expect(audit.map((row) => row.action)).toEqual([
+    const allowed = audit.filter((row) => row.result === 'allowed')
+    const denied = audit.filter((row) => row.result === 'denied')
+    expect(allowed.map((row) => row.action)).toEqual([
       'category_create',
       'category_update',
       'category_create',
@@ -466,7 +469,10 @@ describe('category library', () => {
       'category_delete',
       'delete',
     ])
+    expect(denied.length).toBeGreaterThan(0)
+    expect(denied.every((row) => row.detail === '')).toBe(true)
     expect(JSON.stringify(audit)).not.toContain('步驟密語XYZ')
-    expect(JSON.stringify(audit)).toContain('竊盜案')
+    expect(JSON.stringify(denied)).not.toContain('不行')
+    expect(JSON.stringify(allowed)).toContain('竊盜案')
   })
 })

@@ -10,6 +10,8 @@ export type Role = 'admin' | 'clerk' | 'viewer'
 export type AuditAction =
   'upload' | 'delete' | 'category_create' | 'category_update' | 'category_delete'
 
+export type AuditResult = 'allowed' | 'denied'
+
 /**
  * Ids of the removed built-in categories. Migration deletes only these rows.
  * User-created categories use generated ids and are left in place.
@@ -293,7 +295,8 @@ const auditTable = `
     template_id TEXT NOT NULL DEFAULT '',
     file_name TEXT NOT NULL DEFAULT '',
     category_id TEXT NOT NULL DEFAULT '',
-    detail TEXT NOT NULL DEFAULT ''
+    detail TEXT NOT NULL DEFAULT '',
+    result TEXT NOT NULL DEFAULT 'allowed'
   );
 `
 
@@ -384,7 +387,8 @@ function upgradeLegacySchema(db: AppDatabase) {
           template_id TEXT NOT NULL DEFAULT '',
           file_name TEXT NOT NULL DEFAULT '',
           category_id TEXT NOT NULL DEFAULT '',
-          detail TEXT NOT NULL DEFAULT ''
+          detail TEXT NOT NULL DEFAULT '',
+          result TEXT NOT NULL DEFAULT 'allowed'
         );
         INSERT INTO audit_log_next (
           id, created_at, actor_username, action, template_id, file_name, category_id, detail
@@ -523,6 +527,12 @@ function upgradeStepLinks(db: AppDatabase) {
   }
 }
 
+function ensureAuditResult(db: AppDatabase) {
+  if (!tableExists(db, 'audit_log')) return
+  if (columnNames(db, 'audit_log').includes('result')) return
+  db.exec("ALTER TABLE audit_log ADD COLUMN result TEXT NOT NULL DEFAULT 'allowed'")
+}
+
 function deleteSeededCategories(db: AppDatabase) {
   const removeStepLinks = db.prepare(`
     DELETE FROM step_templates
@@ -550,6 +560,7 @@ export function migrate(db: AppDatabase) {
   if (needsStepLinkMigration(db)) upgradeStepLinks(db)
   db.exec(stepTable + linkTable)
   deleteSeededCategories(db)
+  ensureAuditResult(db)
 }
 
 function isUniqueConstraint(error: unknown): boolean {
@@ -697,7 +708,7 @@ export function createQueries(db: AppDatabase) {
   )
 
   const insertAudit = db.prepare(
-    'INSERT INTO audit_log (created_at, actor_username, action, template_id, file_name, category_id, detail) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO audit_log (created_at, actor_username, action, template_id, file_name, category_id, detail, result) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
   )
   const insertLoginEvent = db.prepare(
     'INSERT INTO login_events (username, ip, success, created_at) VALUES (?, ?, ?, ?)',
@@ -781,15 +792,18 @@ export function createQueries(db: AppDatabase) {
     fileName: string,
     categoryId: string,
     detail: string,
+    result: AuditResult = 'allowed',
   ) {
+    const denied = result === 'denied'
     insertAudit.run(
       new Date().toISOString(),
       actorUsername,
       action,
       templateId,
-      fileName,
+      denied ? '' : fileName,
       categoryId,
-      detail,
+      denied ? '' : detail,
+      denied ? 'denied' : 'allowed',
     )
   }
 
@@ -937,8 +951,9 @@ export function createQueries(db: AppDatabase) {
       fileName: string,
       categoryId: string,
       detail = '',
+      result: AuditResult = 'allowed',
     ) {
-      writeAudit(actorUsername, action, templateId, fileName, categoryId, detail)
+      writeAudit(actorUsername, action, templateId, fileName, categoryId, detail, result)
     },
     recordLogin(username: string, ip: string, success: boolean) {
       insertLoginEvent.run(username, ip, success ? 1 : 0, Date.now())

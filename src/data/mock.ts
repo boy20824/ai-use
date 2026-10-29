@@ -16,8 +16,8 @@ export const permissionRows: PermissionRow[] = [
   },
   {
     key: 'editCategory',
-    label: '建立與編輯案件類別',
-    roles: ['clerk', 'admin'],
+    label: '建立與編輯案件類別（含步驟與範本連結）',
+    roles: ['admin'],
   },
   {
     key: 'deleteCategory',
@@ -27,11 +27,11 @@ export const permissionRows: PermissionRow[] = [
   {
     key: 'upload',
     label: '上傳範本文件',
-    roles: ['clerk', 'admin'],
+    roles: ['admin'],
   },
   {
     key: 'remove',
-    label: '移除範本文件',
+    label: '刪除範本文件',
     roles: ['admin'],
   },
   {
@@ -42,9 +42,11 @@ export const permissionRows: PermissionRow[] = [
 ]
 
 const roleSummaries: Record<AppRole, string> = {
-  viewer: '可閱讀類別、填寫步驟與範本庫，也能在本機產生文件。不能建立類別或變更範本。',
-  clerk: '可建立與編輯案件類別、上傳範本並調整連結。不能刪除類別或範本檔。',
-  admin: '可建立、編輯與刪除案件類別，也可上傳與移除範本。刪除類別不會刪除範本檔。',
+  viewer: '可閱讀類別、填寫步驟與範本，也能在工作台產生文件。不能建立類別或變更範本。',
+  clerk:
+    '可閱讀類別、填寫步驟與範本，並在工作台產生文件。不能建立、編輯或刪除類別，也不能上傳或刪除範本。',
+  admin:
+    '可建立、編輯與刪除案件類別（含步驟與範本連結），也可上傳與刪除範本。刪除類別不會刪除範本檔。',
 }
 
 const roleMembers: Record<AppRole, number> = {
