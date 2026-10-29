@@ -127,7 +127,7 @@ fly volumes snapshots list <volume-id>
 
 ## GitHub Actions
 
-`.github/workflows/fly-deploy.yml` 在推上 `main` 時部署。它讀 repository secret `FLY_API_TOKEN`。沒有這個 secret 時，job 會略過，不會把檢查弄紅。
+`.github/workflows/fly-deploy.yml` 在推上 `main`，或於 Actions 手動執行（`workflow_dispatch`）時部署。它讀 repository secret `FLY_API_TOKEN`。沒有這個 secret 時，部署步驟會略過並成功結束，不會因為缺 token 失敗。有 token 時執行 `flyctl deploy --remote-only --ha=false`，避免再開第二台機器。部署步驟結束後會重試 `https://ai-use.fly.dev/healthz`，回應不是 ok 就讓這個 job 失敗。
 
 在本機建立 deploy token（不要把 token 貼進 repo）：
 
