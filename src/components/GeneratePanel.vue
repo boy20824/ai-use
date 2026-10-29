@@ -11,6 +11,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 const props = defineProps<{
   categoryId: string
   categoryCode: string
+  categoryName: string
 }>()
 
 const templatesStore = useTemplateStore()
@@ -20,9 +21,12 @@ const messageTone = ref<'ok' | 'warn'>('ok')
 const busy = ref(false)
 const dateInvalid = computed(() => currentValues() === null)
 
-const categoryTemplates = computed(() =>
-  templatesStore.items.filter((item) => item.categoryId === props.categoryId),
-)
+const categoryTemplates = computed(() => templatesStore.forCategory(props.categoryId))
+
+const zipName = computed(() => {
+  const base = (props.categoryCode || props.categoryName || '範本').replace(/[\\/:*?"<>|]/g, '_')
+  return `${base}-範本文件.zip`
+})
 
 const fieldNames = computed(() => {
   const names = ['姓名', '日期']
@@ -120,7 +124,7 @@ async function downloadAll() {
       return
     }
     const zip = await zipGeneratedFiles(rendered)
-    downloadBlob(zip, `${props.categoryCode}-範本文件.zip`)
+    downloadBlob(zip, zipName.value)
     messageTone.value = failed.length > 0 ? 'warn' : 'ok'
     message.value =
       failed.length > 0
@@ -151,7 +155,7 @@ onUnmounted(clearValues)
       <div>
         <h2 class="text-base font-semibold text-stone-950">產生文件</h2>
         <p class="mt-2 max-w-3xl text-sm leading-6 text-stone-600">
-          填入欄位後，套用到此類別的每一份範本。這些內容只留在這個畫面，離開或重新整理後會清除，也不會寫進瀏覽器儲存。
+          填入欄位後，套用到此類別連結的每一份範本。這些內容只留在這個畫面，離開或重新整理後會清除，也不會寫進服務。
         </p>
       </div>
       <button
@@ -191,7 +195,7 @@ onUnmounted(clearValues)
 
       <div>
         <p v-if="categoryTemplates.length === 0" class="text-sm leading-6 text-stone-500">
-          此類別還沒有 .docx 範本。上傳範本後才能產生文件。
+          此類別還沒有連結的 .docx 範本。從範本庫選取或上傳後才能產生文件。
         </p>
         <ul v-else class="divide-y divide-stone-200 rounded-2xl border border-stone-200">
           <li

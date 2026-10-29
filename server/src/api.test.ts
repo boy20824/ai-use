@@ -86,6 +86,7 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     loginLockoutMinutes: 15,
     loginRatePerMinute: 30,
     sampleTemplatePath: samplePath,
+    seedSampleData: false,
     passwords,
     ...overrides,
   }
@@ -94,7 +95,7 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 async function createApp() {
   const db = openDatabase(':memory:')
   migrate(db)
-  seedReferenceData(createQueries(db), passwords, samplePath)
+  seedReferenceData(createQueries(db), passwords, { samplePath, seedSample: false })
   const app = await buildApp(db, testConfig())
   return { app, db }
 }
@@ -199,9 +200,16 @@ describe('api', () => {
       cookies: { session: viewerToken },
     })
     expect(categories.statusCode).toBe(200)
-    expect(categories.json().categories.map((item: { id: string }) => item.id)).toContain(
-      'general-assist',
-    )
+    expect(categories.json().categories).toEqual([])
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/categories',
+      ...clerkAuth,
+      payload: { name: '文件摘要', code: 'SUM', summary: '摘要用', steps: ['核對原文'] },
+    })
+    expect(created.statusCode).toBe(201)
+    const categoryId = created.json().category.id as string
 
     const seeded = await app.inject({
       method: 'GET',
@@ -209,12 +217,10 @@ describe('api', () => {
       cookies: { session: viewerToken },
     })
     expect(seeded.statusCode).toBe(200)
-    expect(
-      seeded.json().templates.some((item: { id: string }) => item.id === 'sample-field-note'),
-    ).toBe(true)
+    expect(seeded.json().templates).toEqual([])
 
     const upload = multipart(
-      { categoryId: 'doc-summary' },
+      { categoryId },
       {
         name: 'summary.docx',
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -242,7 +248,7 @@ describe('api', () => {
     expect(clerkUpload.json().template.placeholders).toEqual(['姓名', '日期'])
 
     const badType = multipart(
-      { categoryId: 'doc-summary' },
+      { categoryId },
       { name: 'notes.txt', type: 'text/plain', data: Buffer.from('hello') },
     )
     const rejectedType = await app.inject({
@@ -255,7 +261,7 @@ describe('api', () => {
     expect(rejectedType.statusCode).toBe(400)
 
     const badMagic = multipart(
-      { categoryId: 'doc-summary' },
+      { categoryId },
       {
         name: 'fake.docx',
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -303,12 +309,12 @@ describe('api', () => {
   it('rejects an oversized upload', async () => {
     const db = openDatabase(':memory:')
     migrate(db)
-    seedReferenceData(createQueries(db), passwords, samplePath)
+    seedReferenceData(createQueries(db), passwords, { samplePath, seedSample: false })
     const app = await buildApp(db, testConfig({ maxUploadBytes: 32 }))
     const loggedIn = await login(app, 'admin', passwords.admin)
     const adminAuth = authFrom(loggedIn)
     const body = multipart(
-      { categoryId: 'general-assist' },
+      {},
       {
         name: 'big.docx',
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

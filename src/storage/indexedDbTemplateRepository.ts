@@ -80,25 +80,55 @@ async function write(storeName: 'templates' | 'meta', run: (store: IDBObjectStor
   }
 }
 
+function normalize(row: StoredTemplate & { categoryId?: string }): StoredTemplate {
+  const legacyId = row.categoryId
+  const categories = Array.isArray(row.categories)
+    ? row.categories
+    : legacyId
+      ? [{ id: legacyId, name: '', sortOrder: 0 }]
+      : []
+  return {
+    id: row.id,
+    fileName: row.fileName,
+    mimeType: row.mimeType,
+    sizeBytes: row.sizeBytes,
+    addedAt: row.addedAt,
+    placeholders: Array.isArray(row.placeholders) ? row.placeholders : [],
+    origin: row.origin,
+    categories,
+    data: row.data,
+  }
+}
+
 export function createIndexedDbTemplateRepository(): TemplateRepository {
   return {
     async list() {
       const rows = await read('templates', (store) => store.getAll())
-      return rows as StoredTemplate[]
+      return (rows as StoredTemplate[]).map((row) => normalize(row))
     },
     async get(id) {
       const row = await read('templates', (store) => store.get(id))
-      return (row as StoredTemplate | undefined) ?? null
+      return row ? normalize(row as StoredTemplate) : null
     },
     async put(record) {
       await write('templates', (store) => {
-        store.put(record)
+        store.put(normalize(record))
       })
     },
     async delete(id) {
       await write('templates', (store) => {
         store.delete(id)
       })
+    },
+    async setCategoryTemplates(categoryId, templateIds) {
+      const rows = await this.list()
+      for (const row of rows) {
+        const without = row.categories.filter((link) => link.id !== categoryId)
+        const index = templateIds.indexOf(row.id)
+        const categories =
+          index === -1 ? without : [...without, { id: categoryId, name: '', sortOrder: index }]
+        await this.put({ ...row, categories })
+      }
     },
     async getMeta(key) {
       const row = await read('meta', (store) => store.get(key))

@@ -24,13 +24,13 @@ const demoAccounts: { username: string; role: AppRole }[] = [
 const points = [
   {
     mark: '1',
-    title: '選擇案件類別',
-    detail: '從虛構的類別進入工作台，而不是建立一筆案件紀錄。',
+    title: '建立案件類別',
+    detail: '由承辦或管理員新增，例如竊盜案、毀損案，並寫下填寫步驟。',
   },
   {
     mark: '2',
-    title: '上傳範本文件',
-    detail: '每個類別可以保存 .docx 範本，並用雙大括號標出要帶入的欄位。',
+    title: '從範本庫選取',
+    detail: 'Word 範本只保存一份。多個類別可以連結同一份範本。',
   },
   {
     mark: '3',

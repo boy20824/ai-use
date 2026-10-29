@@ -32,6 +32,7 @@ export interface AppConfig {
   loginLockoutMinutes: number
   loginRatePerMinute: number
   sampleTemplatePath: string
+  seedSampleData: boolean
   passwords: SeedPasswords
 }
 
@@ -40,6 +41,19 @@ export function cookieSecureFromEnv(
   flag: string | undefined,
 ): boolean {
   return nodeEnv === 'production' || flag === 'true'
+}
+
+function envFlag(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === 'true'
+}
+
+export function seedSampleEnabled(
+  nodeEnv: string | undefined,
+  sampleFlag: string | undefined,
+  demoUsersFlag: string | undefined,
+): boolean {
+  if (nodeEnv === 'production') return false
+  return envFlag(sampleFlag) || envFlag(demoUsersFlag)
 }
 
 function listEnv(name: string): string[] {
@@ -95,6 +109,11 @@ export function loadConfig(): AppConfig {
     loginLockoutMinutes: numberEnv('LOGIN_LOCKOUT_MINUTES', 15),
     loginRatePerMinute: numberEnv('LOGIN_RATE_PER_MINUTE', 20),
     sampleTemplatePath: path.resolve(sourceDir, '../../public/samples/field-note.docx'),
+    seedSampleData: seedSampleEnabled(
+      process.env.NODE_ENV,
+      process.env.SEED_SAMPLE_DATA,
+      process.env.SEED_DEMO_USERS,
+    ),
     passwords: {
       clerk: requiredEnv('SEED_USER_CLERK_PASSWORD'),
       admin: requiredEnv('SEED_USER_ADMIN_PASSWORD'),

@@ -41,6 +41,18 @@ export const router = createRouter({
           meta: { title: '案件類別' },
         },
         {
+          path: 'categories/new',
+          name: 'category-new',
+          component: () => import('@/views/CategoryFormView.vue'),
+          meta: { title: '新增案件類別' },
+        },
+        {
+          path: 'categories/:id/edit',
+          name: 'category-edit',
+          component: () => import('@/views/CategoryFormView.vue'),
+          meta: { title: '編輯案件類別' },
+        },
+        {
           path: 'categories/:id',
           name: 'category',
           component: () => import('@/views/CategoryView.vue'),
@@ -50,7 +62,7 @@ export const router = createRouter({
           path: 'templates',
           name: 'templates',
           component: () => import('@/views/TemplatesView.vue'),
-          meta: { title: '範本文件' },
+          meta: { title: '範本庫' },
         },
         {
           path: 'drafts',

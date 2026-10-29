@@ -3,6 +3,7 @@ import { createIndexedDbTemplateRepository } from '@/storage/indexedDbTemplateRe
 import type { TemplateRepository } from '@/storage/templateRepository'
 
 export type {
+  CategoryLink,
   StoredTemplate,
   TemplateRepository,
   TemplateSummary,

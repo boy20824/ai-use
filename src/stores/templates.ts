@@ -1,8 +1,4 @@
-import {
-  sampleTemplateCategoryId,
-  sampleTemplateFileName,
-  sampleTemplateId,
-} from '@/data/sampleTemplate'
+import { sampleTemplateFileName, sampleTemplateId } from '@/data/sampleTemplate'
 import {
   hasZipHeader,
   listPlaceholders,
@@ -30,16 +26,24 @@ export interface AddTemplatesResult {
   rejected: string[]
 }
 
+function sampleSeedEnabled() {
+  if (!import.meta.env.DEV) return false
+  return (
+    import.meta.env.VITE_SEED_SAMPLE_DATA === 'true' ||
+    import.meta.env.VITE_SEED_DEMO_USERS === 'true'
+  )
+}
+
 function toSummary(record: StoredTemplate): TemplateSummary {
   return {
     id: record.id,
-    categoryId: record.categoryId,
     fileName: record.fileName,
     mimeType: record.mimeType,
     sizeBytes: record.sizeBytes,
     addedAt: record.addedAt,
     placeholders: [...record.placeholders],
     origin: record.origin,
+    categories: record.categories.map((link) => ({ ...link })),
   }
 }
 
@@ -50,19 +54,20 @@ function sortNewest(records: StoredTemplate[]) {
 }
 
 async function ensureSample(repository: TemplateRepository) {
+  if (!sampleSeedEnabled()) return
   if ((await repository.getMeta(sampleSeedKey)) === '1') return
   const response = await fetch(`${import.meta.env.BASE_URL}samples/field-note.docx`)
   if (!response.ok) return
   const data = await response.arrayBuffer()
   await repository.put({
     id: sampleTemplateId,
-    categoryId: sampleTemplateCategoryId,
     fileName: sampleTemplateFileName,
     mimeType: templateMimeType,
     sizeBytes: data.byteLength,
     addedAt: '2026-10-29 09:00',
     placeholders: listPlaceholders(data),
     origin: 'sample',
+    categories: [],
     data,
   })
   await repository.setMeta(sampleSeedKey, '1')
@@ -106,7 +111,17 @@ export const useTemplateStore = defineStore('templates', () => {
     return pending
   }
 
-  async function addFiles(categoryId: string, files: File[]): Promise<AddTemplatesResult> {
+  function forCategory(categoryId: string) {
+    return items.value
+      .filter((item) => item.categories.some((link) => link.id === categoryId))
+      .sort((left, right) => {
+        const leftOrder = left.categories.find((link) => link.id === categoryId)?.sortOrder ?? 0
+        const rightOrder = right.categories.find((link) => link.id === categoryId)?.sortOrder ?? 0
+        return leftOrder - rightOrder || left.fileName.localeCompare(right.fileName, 'zh-Hant')
+      })
+  }
+
+  async function addFiles(files: File[], categoryId?: string): Promise<AddTemplatesResult> {
     await load()
     const rejected: string[] = []
     const room = templateLimit - items.value.length
@@ -141,25 +156,34 @@ export const useTemplateStore = defineStore('templates', () => {
         continue
       }
       try {
-        await repository.put({
-          id: crypto.randomUUID(),
+        await repository.put(
+          {
+            id: crypto.randomUUID(),
+            fileName,
+            mimeType: templateMimeType,
+            sizeBytes: data.byteLength,
+            addedAt: formatStamp(new Date()),
+            placeholders,
+            origin: 'upload',
+            categories: [],
+            data,
+          },
           categoryId,
-          fileName,
-          mimeType: templateMimeType,
-          sizeBytes: data.byteLength,
-          addedAt: formatStamp(new Date()),
-          placeholders,
-          origin: 'upload',
-          data,
-        })
+        )
         added += 1
-      } catch (error) {
-        rejected.push(error instanceof Error ? error.message : `${fileName} 無法上傳`)
+      } catch (cause) {
+        rejected.push(cause instanceof Error ? cause.message : `${fileName} 無法上傳`)
       }
     }
 
     if (added > 0) await reload()
     return { added, skipped, rejected }
+  }
+
+  async function setLinks(categoryId: string, templateIds: string[]) {
+    await load()
+    await repository.setCategoryTemplates(categoryId, templateIds)
+    await reload()
   }
 
   async function remove(id: string) {
@@ -181,5 +205,18 @@ export const useTemplateStore = defineStore('templates', () => {
 
   void load()
 
-  return { items, total, ready, error, limit: templateLimit, load, addFiles, remove, bytesFor }
+  return {
+    items,
+    total,
+    ready,
+    error,
+    limit: templateLimit,
+    load,
+    reload,
+    forCategory,
+    addFiles,
+    setLinks,
+    remove,
+    bytesFor,
+  }
 })

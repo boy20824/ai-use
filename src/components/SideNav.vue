@@ -77,7 +77,7 @@ function onNavigate(
     </nav>
 
     <p class="border-t border-white/10 px-5 py-4 text-xs leading-5 text-stone-500">
-      重新整理後需重新登入。範本文件會留在這個瀏覽器。
+      範本集中在範本庫。產生文件的欄位不會被保存。
     </p>
   </div>
 </template>

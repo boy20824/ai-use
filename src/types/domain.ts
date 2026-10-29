@@ -1,6 +1,6 @@
 export type AppRole = 'admin' | 'clerk' | 'viewer'
-export type PermissionKey = 'browse' | 'upload' | 'remove' | 'access'
-export type DocumentKind = '說明' | '表單' | '檢核'
+export type PermissionKey =
+  'browse' | 'editCategory' | 'deleteCategory' | 'upload' | 'remove' | 'access'
 export type TemplateOrigin = 'sample' | 'upload'
 export type StatusTone = 'neutral' | 'warn' | 'ok' | 'danger'
 
@@ -10,31 +10,21 @@ export interface PermissionRow {
   roles: AppRole[]
 }
 
-export interface CategoryDocument {
-  id: string
-  title: string
-  kind: DocumentKind
-  summary: string
-  updatedAt: string
-  points: string[]
-}
-
-export interface CategoryStep {
-  id: string
-  title: string
-  detail: string
-}
-
 export interface CaseCategory {
   id: string
   code: string
   name: string
   summary: string
-  audience: string
   updatedAt: string
-  caution: string
-  documents: CategoryDocument[]
-  steps: CategoryStep[]
+  steps: string[]
+  templateCount: number
+}
+
+export interface CategoryInput {
+  name: string
+  code: string
+  summary: string
+  steps: string[]
 }
 
 export interface AccessRole {
