@@ -55,6 +55,9 @@ function appConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     loginMaxFailures: 5,
     loginLockoutMinutes: 15,
     loginRatePerMinute: 20,
+    registerIpLimit: 5,
+    registerGlobalLimit: 30,
+    registerWindowMs: 60 * 60 * 1000,
     sampleTemplatePath: samplePath,
     seedSampleData: false,
     staticDir: undefined,
@@ -295,7 +298,14 @@ describe('deployment config', () => {
     migrate(db)
     const queries = createQueries(db)
     const uploadDir = mkdtempSync(path.join(scratch, 'noseed-'))
-    queries.insertUser('user-kept', 'kept', 'hash-kept', '既有使用者', 'admin')
+    queries.insertUser({
+      id: 'user-kept',
+      username: 'kept',
+      passwordHash: 'hash-kept',
+      displayName: '既有使用者',
+      nickname: '既有',
+      role: 'sysadmin',
+    })
     seedReferenceData(queries, undefined, samplePath, uploadDir, true)
     expect(queries.countUsers()).toBe(1)
     expect(queries.findUserByUsername('kept')?.passwordHash).toBe('hash-kept')

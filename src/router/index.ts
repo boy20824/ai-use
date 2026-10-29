@@ -7,7 +7,8 @@ declare module 'vue-router' {
   interface RouteMeta {
     title?: string
     requiresAuth?: boolean
-    requiresAdmin?: boolean
+    requiresCategoryManager?: boolean
+    requiresSysadmin?: boolean
     public?: boolean
   }
 }
@@ -23,6 +24,12 @@ export const router = createRouter({
       name: 'login',
       component: () => import('@/views/LoginView.vue'),
       meta: { title: '登入', public: true },
+    },
+    {
+      path: '/register',
+      name: 'register',
+      component: () => import('@/views/RegisterView.vue'),
+      meta: { title: '註冊帳號', public: true },
     },
     {
       path: '/',
@@ -45,13 +52,13 @@ export const router = createRouter({
           path: 'categories/new',
           name: 'category-new',
           component: () => import('@/views/CategoryFormView.vue'),
-          meta: { title: '新增案件類別', requiresAdmin: true },
+          meta: { title: '新增案件類別', requiresCategoryManager: true },
         },
         {
           path: 'categories/:id/edit',
           name: 'category-edit',
           component: () => import('@/views/CategoryFormView.vue'),
-          meta: { title: '編輯案件類別', requiresAdmin: true },
+          meta: { title: '編輯案件類別', requiresCategoryManager: true },
         },
         {
           path: 'categories/:id',
@@ -70,11 +77,18 @@ export const router = createRouter({
           redirect: (to) => ({ name: 'templates', query: to.query }),
         },
         {
-          path: 'access',
-          name: 'access',
-          component: () => import('@/views/AccessView.vue'),
-          meta: { title: '存取權限' },
+          path: 'feedback',
+          name: 'feedback',
+          component: () => import('@/views/FeedbackView.vue'),
+          meta: { title: '網頁改善建議' },
         },
+        {
+          path: 'members',
+          name: 'members',
+          component: () => import('@/views/MembersView.vue'),
+          meta: { title: '會員管理', requiresSysadmin: true },
+        },
+        { path: 'access', redirect: { name: 'members' } },
         { path: 'cases', redirect: { name: 'categories' } },
         { path: 'personnel', redirect: { name: 'categories' } },
       ],
@@ -90,7 +104,7 @@ router.beforeEach(async (to) => {
   const session = useSessionStore()
   await session.restore()
 
-  if (to.name === 'login') {
+  if (to.name === 'login' || to.name === 'register') {
     if (session.authenticated) {
       return { path: safeRedirect(to.query.redirect) }
     }
@@ -102,8 +116,8 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
 
-  const needsAdmin = to.matched.some((record) => record.meta.requiresAdmin === true)
-  if (needsAdmin && session.role !== 'admin') {
+  const needsManager = to.matched.some((record) => record.meta.requiresCategoryManager === true)
+  if (needsManager && !session.canEditCategory) {
     const raw = to.params.id
     const categoryId = Array.isArray(raw) ? raw[0] : raw
     if (to.name === 'category-edit' && categoryId) {
@@ -111,6 +125,9 @@ router.beforeEach(async (to) => {
     }
     return { name: 'categories' }
   }
+
+  const needsSysadmin = to.matched.some((record) => record.meta.requiresSysadmin === true)
+  if (needsSysadmin && !session.isSysadmin) return { name: 'home' }
 })
 
 router.afterEach((to) => {

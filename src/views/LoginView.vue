@@ -5,7 +5,7 @@ import { useSessionStore } from '@/stores/session'
 import type { AppRole } from '@/types/domain'
 import { safeRedirect } from '@/utils/redirect'
 import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const session = useSessionStore()
 const route = useRoute()
@@ -16,16 +16,16 @@ const failed = ref(false)
 const offline = ref(false)
 
 const demoAccounts: { username: string; role: AppRole }[] = [
-  { username: 'clerk', role: 'clerk' },
-  { username: 'admin', role: 'admin' },
-  { username: 'viewer', role: 'viewer' },
+  { username: 'clerk', role: 'user' },
+  { username: 'admin', role: 'sysadmin' },
+  { username: 'viewer', role: 'user' },
 ]
 
 const points = [
   {
     mark: '1',
     title: '建立案件類別',
-    detail: '由系統管理員新增，例如竊盜案、毀損案，並寫下填寫步驟。',
+    detail: '由系統管理員或被授權的使用者新增，例如竊盜案、毀損案，並寫下填寫步驟。',
   },
   {
     mark: '2',
@@ -139,6 +139,13 @@ async function submit() {
             登入
           </button>
         </form>
+
+        <p class="mt-4 text-center text-sm text-stone-600">
+          還沒有帳號？
+          <RouterLink to="/register" class="font-medium text-orange-800 hover:underline">
+            註冊帳號
+          </RouterLink>
+        </p>
 
         <details class="mt-6 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
           <summary class="cursor-pointer text-sm font-medium text-stone-800">示範帳號</summary>

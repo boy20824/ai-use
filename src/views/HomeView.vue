@@ -36,10 +36,10 @@ const stats = computed(() => [
     to: '/templates',
   },
   {
-    label: '目前角色',
-    value: session.roleLabel,
-    hint: session.displayName,
-    to: '/access',
+    label: '留言板',
+    value: '建議',
+    hint: '網頁改善建議',
+    to: '/feedback',
   },
 ])
 
@@ -121,7 +121,7 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
         >
           新增案件類別
         </RouterLink>
-        <p v-else class="text-sm text-stone-600">請由系統管理員新增。</p>
+        <p v-else class="text-sm text-stone-600">請由系統管理員或被授權的使用者新增。</p>
       </EmptyState>
       <p v-else-if="!categories.ready" class="px-5 py-8 text-sm text-stone-500">
         正在讀取案件類別。

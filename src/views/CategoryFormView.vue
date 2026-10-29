@@ -260,7 +260,7 @@ async function submit() {
   <EmptyState
     v-else-if="!session.canEditCategory"
     title="此身分不能建立或編輯類別"
-    description="只有系統管理員可以建立或編輯類別、步驟與範本連結。承辦和唯讀檢視可以在工作台產生文件。"
+    description="只有系統管理員，或被授權可維護類別的使用者，可以建立或編輯類別、步驟與範本連結。其他已登入的使用者仍可在工作台產生文件。"
   >
     <RouterLink
       to="/categories"

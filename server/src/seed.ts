@@ -2,14 +2,42 @@ import bcrypt from 'bcryptjs'
 import { readFileSync } from 'node:fs'
 import type { SeedPasswords } from './config.ts'
 import { listPlaceholders } from './docx.ts'
-import type { AppQueries } from './db.ts'
+import type { AppQueries, Role } from './db.ts'
 import { writeTemplateFile } from './files.ts'
 
-const users = [
-  { id: 'user-clerk', username: 'clerk', displayName: '示範承辦', role: 'clerk' },
-  { id: 'user-admin', username: 'admin', displayName: '示範管理員', role: 'admin' },
-  { id: 'user-viewer', username: 'viewer', displayName: '示範檢視', role: 'viewer' },
-] as const
+const users: {
+  id: string
+  username: string
+  displayName: string
+  nickname: string
+  role: Role
+  passwordKey: keyof SeedPasswords
+}[] = [
+  {
+    id: 'user-clerk',
+    username: 'clerk',
+    displayName: '示範承辦',
+    nickname: '承辦',
+    role: 'user',
+    passwordKey: 'clerk',
+  },
+  {
+    id: 'user-admin',
+    username: 'admin',
+    displayName: '示範管理員',
+    nickname: '管理員',
+    role: 'sysadmin',
+    passwordKey: 'admin',
+  },
+  {
+    id: 'user-viewer',
+    username: 'viewer',
+    displayName: '示範檢視',
+    nickname: '檢視',
+    role: 'user',
+    passwordKey: 'viewer',
+  },
+]
 
 const sampleTemplateId = 'sample-field-note'
 
@@ -25,13 +53,14 @@ export function seedReferenceData(
   if (passwords) {
     for (const user of users) {
       if (queries.findUserByUsername(user.username)) continue
-      queries.insertUser(
-        user.id,
-        user.username,
-        bcrypt.hashSync(passwords[user.role], 10),
-        user.displayName,
-        user.role,
-      )
+      queries.insertUser({
+        id: user.id,
+        username: user.username,
+        passwordHash: bcrypt.hashSync(passwords[user.passwordKey], 10),
+        displayName: user.displayName,
+        nickname: user.nickname,
+        role: user.role,
+      })
     }
   }
 

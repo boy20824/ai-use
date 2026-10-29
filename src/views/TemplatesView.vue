@@ -25,7 +25,7 @@ const feedbackTone = ref<'ok' | 'warn'>('ok')
 const pendingDelete = ref<TemplateSummary | null>(null)
 const deleting = ref(false)
 
-const disabledReason = '只有系統管理員可以上傳或刪除範本。'
+const disabledReason = '需要可維護類別的權限才能上傳範本。刪除範本只有系統管理員可以操作。'
 
 const requestedCategory = computed(() => {
   const raw = route.query.category
@@ -113,7 +113,7 @@ async function onFiles(files: File[]) {
   <PageIntro
     eyebrow="工作台"
     title="範本庫"
-    description="每一份 Word 範本只保存一次，不屬於單一案件類別。類別透過連結使用這些範本。上傳與刪除只有系統管理員可以操作。"
+    description="每一份 Word 範本只保存一次，不屬於單一案件類別。類別透過連結使用這些範本。上傳與連結需要可維護類別的權限，刪除只有系統管理員可以操作。"
   />
 
   <div class="mb-6">
@@ -167,7 +167,7 @@ async function onFiles(files: File[]) {
   <EmptyState
     v-if="templates.ready && visible.length === 0 && templates.total === 0"
     title="範本庫還沒有文件"
-    description="系統管理員上傳 .docx 後，可在案件類別的工作台按「從範本庫選取」連結過來。"
+    description="具有維護權限的使用者上傳 .docx 後，可在案件類別的工作台按「從範本庫選取」連結過來。"
   >
     <RouterLink
       to="/categories"

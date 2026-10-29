@@ -90,6 +90,9 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     loginMaxFailures: 5,
     loginLockoutMinutes: 15,
     loginRatePerMinute: 30,
+    registerIpLimit: 5,
+    registerGlobalLimit: 30,
+    registerWindowMs: 60 * 60 * 1000,
     sampleTemplatePath: samplePath,
     seedSampleData: false,
     staticDir: undefined,
@@ -162,9 +165,12 @@ describe('api', () => {
     const loggedIn = await login(app, 'clerk', passwords.clerk)
     expect(loggedIn.statusCode).toBe(200)
     expect(loggedIn.json().user).toEqual({
+      id: 'user-clerk',
       username: 'clerk',
       displayName: '示範承辦',
-      role: 'clerk',
+      nickname: '承辦',
+      role: 'user',
+      canManageCategories: false,
     })
     expect(JSON.stringify(loggedIn.json())).not.toContain('password')
     const cookie = sessionCookie(loggedIn)

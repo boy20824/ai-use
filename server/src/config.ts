@@ -55,6 +55,9 @@ export interface AppConfig {
   loginMaxFailures: number
   loginLockoutMinutes: number
   loginRatePerMinute: number
+  registerIpLimit: number
+  registerGlobalLimit: number
+  registerWindowMs: number
   sampleTemplatePath: string
   seedSampleData: boolean
   staticDir: string | undefined
@@ -238,6 +241,9 @@ export function loadConfig(): AppConfig {
     loginMaxFailures: numberEnv('LOGIN_MAX_FAILURES', 5),
     loginLockoutMinutes: numberEnv('LOGIN_LOCKOUT_MINUTES', 15),
     loginRatePerMinute: numberEnv('LOGIN_RATE_PER_MINUTE', 20),
+    registerIpLimit: numberEnv('REGISTER_IP_LIMIT', 5),
+    registerGlobalLimit: numberEnv('REGISTER_GLOBAL_LIMIT', 30),
+    registerWindowMs: numberEnv('REGISTER_WINDOW_MS', 60 * 60 * 1000),
     sampleTemplatePath: sampleTemplatePathFromEnv(),
     seedSampleData: seedSampleEnabled(
       nodeEnv,

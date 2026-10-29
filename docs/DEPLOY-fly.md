@@ -32,7 +32,7 @@ fly volumes create data --region nrt --size 1
 
 `SESSION_SECRET` 至少 32 字元，而且不能是 `dev-only-change-me`、`change-me`、`secret`、`password`、`clerk-demo` 這類示範值。正式環境若沒有這個值，或仍是示範值，程序會拒絕啟動。這項與是否建立示範帳號無關。
 
-`fly.toml` 把 `SEED_DEMO_USERS` 設成 `false`。未設定時，正式環境（`NODE_ENV=production`）也視為關閉。關閉時開機不會建立 `clerk`、`admin`、`viewer`，也不需要 `SEED_USER_CLERK_PASSWORD`、`SEED_USER_ADMIN_PASSWORD`、`SEED_USER_VIEWER_PASSWORD`。程序不會刪除或改寫資料庫裡已經存在的使用者。
+`fly.toml` 把 `SEED_DEMO_USERS` 設成 `false`。未設定時，正式環境（`NODE_ENV=production`）也視為關閉。關閉時開機不會建立 `clerk`、`admin`、`viewer`，也不需要 `SEED_USER_CLERK_PASSWORD`、`SEED_USER_ADMIN_PASSWORD`、`SEED_USER_VIEWER_PASSWORD`。程序不會刪除已經存在的使用者。開機遷移會把舊角色 `admin` 改成 `sysadmin`、`clerk` 與 `viewer` 改成 `user`，並讓既有帳號 `boy20824` 成為系統管理員。這段遷移可重複執行，不會改掉已存在帳號的密碼。
 
 開發用的 `.env.example` 是 `SEED_DEMO_USERS=true`。只有設成 `true` 時，才會為尚不存在的那三個帳號寫入密碼，而且正式環境不能使用 `.env.example` 的 `clerk-demo`、`admin-demo`、`viewer-demo`。已存在的帳號維持原密碼。
 
@@ -64,7 +64,7 @@ fly secrets set \
 fly deploy
 ```
 
-機器開機時會冪等執行資料庫 migration，並補上缺少的案件類別與示範範本。示範使用者只在 `SEED_DEMO_USERS=true` 且該帳號尚不存在時建立，不會刪除已存在的使用者。`GET /healthz` 會對 SQLite 做 `SELECT 1`，回 `{"ok":true}`。Fly 的健康檢查打的是這個路徑。
+機器開機時會冪等執行資料庫 migration（含角色與會員欄位，交易內完成，可重複執行）。不會補建案件類別，也不會刪除已存在的使用者。示範使用者只在 `SEED_DEMO_USERS=true` 且該帳號尚不存在時建立。`GET /healthz` 會對 SQLite 做 `SELECT 1`，回 `{"ok":true}`。Fly 的健康檢查打的是這個路徑。
 
 部署完成後：
 
