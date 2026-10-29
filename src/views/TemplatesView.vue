@@ -3,7 +3,6 @@ import EmptyState from '@/components/EmptyState.vue'
 import FileDropzone from '@/components/FileDropzone.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import PlaceholderGuide from '@/components/PlaceholderGuide.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
@@ -11,7 +10,6 @@ import type { TemplateSummary } from '@/storage'
 import { formatBytes } from '@/utils/format'
 import { displayFileName } from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
-import { templateOriginLabel, templateTone } from '@/utils/status'
 import { computed, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
@@ -226,10 +224,6 @@ async function onFiles(files: File[]) {
           </p>
         </div>
         <div class="flex items-center gap-3">
-          <StatusBadge
-            :label="templateOriginLabel(item.origin)"
-            :tone="templateTone(item.origin)"
-          />
           <button
             v-if="session.canDelete"
             type="button"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import PageIntro from '@/components/PageIntro.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { roleLabels } from '@/data/mock'
+import { roleLabels } from '@/data/roles'
 import { apiErrorMessage, apiRequest } from '@/services/api'
 import { useSessionStore } from '@/stores/session'
 import type { MemberAccount } from '@/types/domain'

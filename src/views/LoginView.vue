@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { appName, appTagline } from '@/config/app'
-import { roleLabels } from '@/data/mock'
 import { useSessionStore } from '@/stores/session'
-import type { AppRole } from '@/types/domain'
 import { safeRedirect } from '@/utils/redirect'
 import { ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -14,12 +12,6 @@ const username = ref('')
 const password = ref('')
 const failed = ref(false)
 const offline = ref(false)
-
-const demoAccounts: { username: string; role: AppRole }[] = [
-  { username: 'clerk', role: 'user' },
-  { username: 'admin', role: 'sysadmin' },
-  { username: 'viewer', role: 'user' },
-]
 
 const points = [
   {
@@ -58,9 +50,7 @@ async function submit() {
 
 <template>
   <div class="grid min-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(22rem,34rem)]">
-    <section
-      class="hidden bg-stone-950 px-10 py-12 text-stone-100 lg:flex lg:flex-col lg:justify-between"
-    >
+    <section class="hidden bg-stone-950 px-10 py-12 text-stone-100 lg:flex lg:flex-col lg:gap-16">
       <div class="flex items-center gap-3">
         <span
           class="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-700 text-sm font-semibold"
@@ -88,9 +78,6 @@ async function submit() {
           </li>
         </ol>
       </div>
-      <p class="text-xs leading-5 text-stone-500">
-        登入由本機服務核對。重新整理後會恢復這個階段的身分。
-      </p>
     </section>
 
     <section class="flex items-center justify-center bg-[#f6f4f1] px-4 py-10">
@@ -146,24 +133,6 @@ async function submit() {
             註冊帳號
           </RouterLink>
         </p>
-
-        <details class="mt-6 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3">
-          <summary class="cursor-pointer text-sm font-medium text-stone-800">示範帳號</summary>
-          <ul class="mt-3 space-y-2">
-            <li
-              v-for="account in demoAccounts"
-              :key="account.username"
-              class="text-sm leading-6 text-stone-600"
-            >
-              <span class="font-medium text-stone-900">{{ account.username }}</span>
-              <span class="text-stone-500">（{{ roleLabels[account.role] }}）</span>
-            </li>
-          </ul>
-          <p class="mt-3 text-xs leading-5 text-stone-500">
-            密碼只放在伺服器環境變數，請看
-            .env.example。前端不會保存密碼，重新整理後會用登入階段恢復身分。
-          </p>
-        </details>
       </div>
     </section>
   </div>

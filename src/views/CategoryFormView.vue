@@ -299,7 +299,7 @@ async function submit() {
         required
         maxlength="80"
         autocomplete="off"
-        placeholder="例如：竊盜案"
+        placeholder="請輸入類別名稱"
         class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
       />
     </div>
@@ -314,7 +314,7 @@ async function submit() {
         name="code"
         maxlength="32"
         autocomplete="off"
-        placeholder="例如：A-01"
+        placeholder="請輸入代號"
         class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
       />
     </div>
@@ -328,7 +328,7 @@ async function submit() {
         name="summary"
         rows="3"
         maxlength="400"
-        placeholder="這個類別要協助準備什麼文件"
+        placeholder="請輸入簡述"
         class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
       ></textarea>
     </div>
@@ -430,7 +430,7 @@ async function submit() {
               :id="`picker-${step.key}`"
               :value="step.query"
               type="search"
-              placeholder="檔名"
+              placeholder="請輸入檔名"
               class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
               @input="setQuery(index, $event)"
             />

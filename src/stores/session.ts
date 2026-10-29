@@ -1,4 +1,4 @@
-import { roleLabels } from '@/data/mock'
+import { roleLabels } from '@/data/roles'
 import { apiErrorMessage, apiRequest } from '@/services/api'
 import type { AppRole } from '@/types/domain'
 import { defineStore } from 'pinia'

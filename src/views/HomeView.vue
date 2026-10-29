@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import EmptyState from '@/components/EmptyState.vue'
 import PageIntro from '@/components/PageIntro.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { formatBytes } from '@/utils/format'
 import { displayFileName } from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
-import { templateOriginLabel, templateTone } from '@/utils/status'
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -167,13 +165,7 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
           <p class="mt-1 text-xs text-stone-500">
             {{ usageLabel(item.usages) }} · {{ formatBytes(item.sizeBytes) }}
           </p>
-          <div class="mt-2 flex items-center justify-between gap-3">
-            <StatusBadge
-              :label="templateOriginLabel(item.origin)"
-              :tone="templateTone(item.origin)"
-            />
-            <time class="text-xs text-stone-500">{{ formatStoredDate(item.addedAt) }}</time>
-          </div>
+          <p class="mt-2 text-xs text-stone-500">{{ formatStoredDate(item.addedAt) }}</p>
         </li>
       </ul>
       <p v-else class="px-5 py-8 text-sm text-stone-500">範本庫還沒有文件。</p>

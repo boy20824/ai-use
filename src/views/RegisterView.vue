@@ -42,9 +42,7 @@ async function submit() {
 
 <template>
   <div class="grid min-h-dvh lg:grid-cols-[minmax(0,1fr)_minmax(22rem,34rem)]">
-    <section
-      class="hidden bg-stone-950 px-10 py-12 text-stone-100 lg:flex lg:flex-col lg:justify-between"
-    >
+    <section class="hidden bg-stone-950 px-10 py-12 text-stone-100 lg:flex lg:flex-col lg:gap-16">
       <div class="flex items-center gap-3">
         <span
           class="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-700 text-sm font-semibold"
@@ -62,7 +60,6 @@ async function submit() {
           新帳號是一般使用者，可以登入並在工作台產生文件。維護案件類別與會員管理要由系統管理員另外授權。
         </p>
       </div>
-      <p class="text-xs leading-5 text-stone-500">密碼會在服務上雜湊保存，不會寫進瀏覽器。</p>
     </section>
 
     <section class="flex items-center justify-center bg-[#f6f4f1] px-4 py-10">

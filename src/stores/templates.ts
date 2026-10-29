@@ -1,4 +1,3 @@
-import { sampleTemplateFileName, sampleTemplateId } from '@/data/sampleTemplate'
 import {
   hasZipHeader,
   listPlaceholders,
@@ -10,7 +9,6 @@ import {
   createTemplateRepository,
   templateStorageMode,
   type StoredTemplate,
-  type TemplateRepository,
   type TemplateSummary,
 } from '@/storage'
 import { formatStamp } from '@/utils/format'
@@ -18,21 +16,12 @@ import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 
 const templateLimit = 30
-const sampleSeedKey = 'sample-field-note-seeded'
 
 export interface AddTemplatesResult {
   added: number
   skipped: number
   rejected: string[]
   ids: string[]
-}
-
-function sampleSeedEnabled() {
-  if (!import.meta.env.DEV) return false
-  return (
-    import.meta.env.VITE_SEED_SAMPLE_DATA === 'true' ||
-    import.meta.env.VITE_SEED_DEMO_USERS === 'true'
-  )
 }
 
 function toSummary(record: StoredTemplate): TemplateSummary {
@@ -52,26 +41,6 @@ function sortNewest(records: StoredTemplate[]) {
   return [...records].sort(
     (left, right) => right.addedAt.localeCompare(left.addedAt) || right.id.localeCompare(left.id),
   )
-}
-
-async function ensureSample(repository: TemplateRepository) {
-  if (!sampleSeedEnabled()) return
-  if ((await repository.getMeta(sampleSeedKey)) === '1') return
-  const response = await fetch(`${import.meta.env.BASE_URL}samples/field-note.docx`)
-  if (!response.ok) return
-  const data = await response.arrayBuffer()
-  await repository.put({
-    id: sampleTemplateId,
-    fileName: sampleTemplateFileName,
-    mimeType: templateMimeType,
-    sizeBytes: data.byteLength,
-    addedAt: '2026-10-29 09:00',
-    placeholders: listPlaceholders(data),
-    origin: 'sample',
-    usages: [],
-    data,
-  })
-  await repository.setMeta(sampleSeedKey, '1')
 }
 
 export const useTemplateStore = defineStore('templates', () => {
@@ -100,7 +69,10 @@ export const useTemplateStore = defineStore('templates', () => {
   function load() {
     pending ??= (async () => {
       try {
-        if (templateStorageMode() === 'indexeddb') await ensureSample(repository)
+        if (import.meta.env.DEV && templateStorageMode() === 'indexeddb') {
+          const { ensureSampleTemplates } = await import('@/dev/sampleSeed')
+          await ensureSampleTemplates(repository)
+        }
         await reload()
         error.value = ''
       } catch {
