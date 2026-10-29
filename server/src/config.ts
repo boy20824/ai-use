@@ -56,6 +56,7 @@ export interface AppConfig {
   loginLockoutMinutes: number
   loginRatePerMinute: number
   sampleTemplatePath: string
+  seedSampleData: boolean
   staticDir: string | undefined
   trustProxy: boolean
   seedDemoUsers: boolean
@@ -67,6 +68,19 @@ export function cookieSecureFromEnv(
   flag: string | undefined,
 ): boolean {
   return nodeEnv === 'production' || flag === 'true'
+}
+
+function envFlag(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === 'true'
+}
+
+export function seedSampleEnabled(
+  nodeEnv: string | undefined,
+  sampleFlag: string | undefined,
+  demoUsersFlag: string | undefined,
+): boolean {
+  if (nodeEnv === 'production') return false
+  return envFlag(sampleFlag) || envFlag(demoUsersFlag)
 }
 
 export function resolveServerPath(value: string): string {
@@ -225,6 +239,11 @@ export function loadConfig(): AppConfig {
     loginLockoutMinutes: numberEnv('LOGIN_LOCKOUT_MINUTES', 15),
     loginRatePerMinute: numberEnv('LOGIN_RATE_PER_MINUTE', 20),
     sampleTemplatePath: sampleTemplatePathFromEnv(),
+    seedSampleData: seedSampleEnabled(
+      nodeEnv,
+      process.env.SEED_SAMPLE_DATA,
+      process.env.SEED_DEMO_USERS,
+    ),
     staticDir: staticDirFromEnv(nodeEnv),
     trustProxy: trustProxyFromEnv(nodeEnv),
     seedDemoUsers,

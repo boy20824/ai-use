@@ -4,7 +4,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import { buildApp } from './app.ts'
-import { categories } from './categories.ts'
 import { loadConfig, resolveServerPath, type AppConfig, type SeedPasswords } from './config.ts'
 import { createQueries, migrate, openDatabase } from './db.ts'
 import { templateFilePath } from './files.ts'
@@ -57,6 +56,7 @@ function appConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     loginLockoutMinutes: 15,
     loginRatePerMinute: 20,
     sampleTemplatePath: samplePath,
+    seedSampleData: false,
     staticDir: undefined,
     trustProxy: false,
     seedDemoUsers: true,
@@ -267,10 +267,16 @@ describe('deployment config', () => {
     migrate(db)
     const uploadDir = mkdtempSync(path.join(scratch, 'seed-'))
     const queries = createQueries(db)
-    seedReferenceData(queries, passwords, samplePath, uploadDir)
+    seedReferenceData(queries, passwords, samplePath, uploadDir, true)
     const adminHash = queries.findUserByUsername('admin')?.passwordHash
     db.prepare('DELETE FROM users WHERE username = ?').run('clerk')
-    seedReferenceData(queries, { ...passwords, clerk: 'replacement-pass' }, samplePath, uploadDir)
+    seedReferenceData(
+      queries,
+      { ...passwords, clerk: 'replacement-pass' },
+      samplePath,
+      uploadDir,
+      true,
+    )
     expect(queries.countUsers()).toBe(3)
     expect(queries.findUserByUsername('admin')?.passwordHash).toBe(adminHash)
     expect(queries.findUserByUsername('clerk')?.passwordHash).not.toBe(adminHash)
@@ -290,26 +296,27 @@ describe('deployment config', () => {
     const queries = createQueries(db)
     const uploadDir = mkdtempSync(path.join(scratch, 'noseed-'))
     queries.insertUser('user-kept', 'kept', 'hash-kept', '既有使用者', 'admin')
-    seedReferenceData(queries, undefined, samplePath, uploadDir)
+    seedReferenceData(queries, undefined, samplePath, uploadDir, true)
     expect(queries.countUsers()).toBe(1)
     expect(queries.findUserByUsername('kept')?.passwordHash).toBe('hash-kept')
     expect(queries.findUserByUsername('clerk')).toBeNull()
     expect(queries.findUserByUsername('admin')).toBeNull()
     expect(queries.findUserByUsername('viewer')).toBeNull()
-    expect(queries.listCategories()).toHaveLength(categories.length)
+    expect(queries.listCategories()).toEqual([])
     expect(queries.hasTemplate('sample-field-note')).toBe(true)
 
-    seedReferenceData(queries, passwords, samplePath, uploadDir)
+    seedReferenceData(queries, passwords, samplePath, uploadDir, true)
     expect(queries.countUsers()).toBe(4)
     const keptHash = queries.findUserByUsername('kept')?.passwordHash
     const adminHash = queries.findUserByUsername('admin')?.passwordHash
     const clerkHash = queries.findUserByUsername('clerk')?.passwordHash
-    seedReferenceData(queries, undefined, samplePath, uploadDir)
+    seedReferenceData(queries, undefined, samplePath, uploadDir, true)
     seedReferenceData(
       queries,
       { ...passwords, admin: 'other-admin-pass', clerk: 'other-clerk-pass' },
       samplePath,
       uploadDir,
+      true,
     )
     expect(queries.countUsers()).toBe(4)
     expect(queries.findUserByUsername('kept')?.passwordHash).toBe(keptHash)
@@ -326,7 +333,7 @@ describe('deployment config', () => {
     writeFileSync(path.join(staticDir, 'assets', 'app.js'), 'console.log("app")')
     const db = openDatabase(':memory:')
     migrate(db)
-    seedReferenceData(createQueries(db), passwords, samplePath, uploadDir)
+    seedReferenceData(createQueries(db), passwords, samplePath, uploadDir, true)
     const app = await buildApp(
       db,
       appConfig({

@@ -1,6 +1,5 @@
 import bcrypt from 'bcryptjs'
 import { readFileSync } from 'node:fs'
-import { categories } from './categories.ts'
 import type { SeedPasswords } from './config.ts'
 import { listPlaceholders } from './docx.ts'
 import type { AppQueries } from './db.ts'
@@ -12,11 +11,14 @@ const users = [
   { id: 'user-viewer', username: 'viewer', displayName: '示範檢視', role: 'viewer' },
 ] as const
 
+const sampleTemplateId = 'sample-field-note'
+
 export function seedReferenceData(
   queries: AppQueries,
   passwords: SeedPasswords | undefined,
   samplePath: string,
   uploadDir: string,
+  seedSample = false,
 ) {
   // Insert missing demo users only when SEED_DEMO_USERS loaded passwords.
   // Existing accounts are left as they are; nothing here deletes users.
@@ -33,30 +35,18 @@ export function seedReferenceData(
     }
   }
 
-  for (const category of categories) {
-    queries.insertCategory(
-      category.id,
-      category.code,
-      category.name,
-      category.summary,
-      category.audience,
-      category.updatedAt,
-    )
-  }
-
-  if (!queries.hasTemplate('sample-field-note')) {
-    const data = readFileSync(samplePath)
-    writeTemplateFile(uploadDir, 'sample-field-note', data)
-    queries.insertTemplate({
-      id: 'sample-field-note',
-      categoryId: 'general-assist',
-      fileName: '欄位示範範本.docx',
-      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      sizeBytes: data.byteLength,
-      addedAt: '2026-10-29 09:00',
-      placeholders: listPlaceholders(data),
-      origin: 'sample',
-      data,
-    })
-  }
+  if (!seedSample || queries.hasTemplate(sampleTemplateId)) return
+  const data = readFileSync(samplePath)
+  writeTemplateFile(uploadDir, sampleTemplateId, data)
+  queries.insertTemplate({
+    id: sampleTemplateId,
+    fileName: '欄位示範範本.docx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    sizeBytes: data.byteLength,
+    addedAt: '2026-10-29 09:00',
+    placeholders: listPlaceholders(data),
+    origin: 'sample',
+    usages: [],
+    data,
+  })
 }

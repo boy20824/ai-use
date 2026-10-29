@@ -1,15 +1,4 @@
-import type { DocumentKind, StatusTone, TemplateOrigin } from '@/types/domain'
-
-export function documentTone(kind: DocumentKind): StatusTone {
-  switch (kind) {
-    case '說明':
-      return 'neutral'
-    case '表單':
-      return 'warn'
-    case '檢核':
-      return 'ok'
-  }
-}
+import type { StatusTone, TemplateOrigin } from '@/types/domain'
 
 export function templateTone(origin: TemplateOrigin): StatusTone {
   switch (origin) {

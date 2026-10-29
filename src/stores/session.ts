@@ -21,6 +21,12 @@ export const useSessionStore = defineStore('session', () => {
   const roleLabel = computed(() => (role.value ? roleLabels[role.value] : '未登入'))
   const canUpload = computed(() => (role.value ? roleAllows(role.value, 'upload') : false))
   const canDelete = computed(() => (role.value ? roleAllows(role.value, 'remove') : false))
+  const canEditCategory = computed(() =>
+    role.value ? roleAllows(role.value, 'editCategory') : false,
+  )
+  const canDeleteCategory = computed(() =>
+    role.value ? roleAllows(role.value, 'deleteCategory') : false,
+  )
 
   function applyUser(next: SessionUser | null) {
     user.value = next
@@ -80,6 +86,8 @@ export const useSessionStore = defineStore('session', () => {
     roleLabel,
     canUpload,
     canDelete,
+    canEditCategory,
+    canDeleteCategory,
     restore,
     login,
     logout,

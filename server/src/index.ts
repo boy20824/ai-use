@@ -18,6 +18,7 @@ async function main() {
       config.passwords,
       config.sampleTemplatePath,
       config.uploadDir,
+      config.seedSampleData,
     )
     const app = await buildApp(db, config)
     const shutdown = createShutdown(app, db)

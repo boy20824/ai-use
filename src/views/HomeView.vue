@@ -1,7 +1,7 @@
 <script setup lang="ts">
+import EmptyState from '@/components/EmptyState.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { apiConfigured } from '@/config/env'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
@@ -19,20 +19,20 @@ const session = useSessionStore()
 const stats = computed(() => [
   {
     label: '案件類別',
-    value: String(categories.total),
-    hint: '可進入的工作台',
+    value: categories.ready ? String(categories.total) : '…',
+    hint: categories.ready && categories.total === 0 ? '尚未建立' : '可進入的工作台',
     to: '/categories',
   },
   {
-    label: '相關文件',
-    value: String(categories.documentCount),
-    hint: '說明、表單與檢核',
+    label: '填寫步驟',
+    value: categories.ready ? String(categories.stepCount) : '…',
+    hint: categories.ready && categories.stepCount === 0 ? '類別建立後可新增' : '各類別的準備順序',
     to: '/categories',
   },
   {
-    label: '範本文件',
+    label: '範本庫',
     value: templates.ready ? String(templates.total) : '…',
-    hint: '存在這個瀏覽器',
+    hint: '全站共用，不屬於單一類別',
     to: '/templates',
   },
   {
@@ -44,15 +44,35 @@ const stats = computed(() => [
 ])
 
 const latestTemplates = computed(() => templates.items.slice(0, 4))
+
+function usageLabel(usages: { categoryId: string; categoryName: string; stepBody: string }[]) {
+  const labels = usages
+    .map((usage) => {
+      const categoryName = categories.byId(usage.categoryId)?.name ?? usage.categoryName
+      const step = usage.stepBody.replace(/\s+/g, ' ').trim()
+      if (!categoryName) return step
+      return step ? `${categoryName} → ${step}` : categoryName
+    })
+    .filter((label) => label.length > 0)
+  return labels.length > 0 ? labels.join('、') : '尚未連結步驟'
+}
 </script>
 
 <template>
   <PageIntro
     eyebrow="工作台"
     title="總覽"
-    description="先選擇案件類別，閱讀相關文件與步驟，再上傳範本、填入欄位並下載文件。登入比對的是前端示範帳號，正式驗證會在 Phase C/D 接上。"
+    description="先建立案件類別，寫下填寫步驟，再從範本庫選取或上傳 Word 範本。產生文件時填入的欄位只留在這個畫面，不會寫進服務。"
   >
     <RouterLink
+      v-if="session.canEditCategory && categories.ready && categories.total === 0"
+      to="/categories/new"
+      class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
+    >
+      新增案件類別
+    </RouterLink>
+    <RouterLink
+      v-else
       to="/categories"
       class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
     >
@@ -75,8 +95,8 @@ const latestTemplates = computed(() => templates.items.slice(0, 4))
     </RouterLink>
   </section>
 
-  <p v-if="templates.error" class="mt-4 text-sm text-rose-800" role="alert">
-    {{ templates.error }}
+  <p v-if="categories.error || templates.error" class="mt-4 text-sm text-rose-800" role="alert">
+    {{ categories.error || templates.error }}
   </p>
 
   <div class="mt-8 grid gap-6 lg:grid-cols-5">
@@ -89,7 +109,24 @@ const latestTemplates = computed(() => templates.items.slice(0, 4))
           >查看全部</RouterLink
         >
       </div>
-      <ul v-if="categories.recent.length > 0" class="divide-y divide-stone-200">
+      <EmptyState
+        v-if="categories.ready && categories.total === 0"
+        title="還沒有案件類別"
+        description="新增一個類別後，總覽會列出工作台。範本庫的文件可以稍後再連結過來。"
+      >
+        <RouterLink
+          v-if="session.canEditCategory"
+          to="/categories/new"
+          class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
+        >
+          新增案件類別
+        </RouterLink>
+        <p v-else class="text-sm text-stone-600">請由類別承辦或系統管理員新增。</p>
+      </EmptyState>
+      <p v-else-if="!categories.ready" class="px-5 py-8 text-sm text-stone-500">
+        正在讀取案件類別。
+      </p>
+      <ul v-else class="divide-y divide-stone-200">
         <li v-for="item in categories.recent" :key="item.id">
           <RouterLink
             :to="`/categories/${item.id}`"
@@ -98,7 +135,8 @@ const latestTemplates = computed(() => templates.items.slice(0, 4))
             <span class="min-w-0">
               <span class="block text-sm font-medium text-stone-900">{{ item.name }}</span>
               <span class="mt-1 block text-xs text-stone-500">
-                {{ item.code }} · {{ item.audience }}
+                {{ item.code || '未設代號' }} · {{ item.steps.length }} 個步驟 ·
+                {{ item.templateCount }} 份範本
               </span>
             </span>
             <time class="shrink-0 text-xs text-stone-500" :datetime="item.updatedAt">{{
@@ -107,7 +145,6 @@ const latestTemplates = computed(() => templates.items.slice(0, 4))
           </RouterLink>
         </li>
       </ul>
-      <p v-else class="px-5 py-8 text-sm text-stone-500">尚無類別示範資料。</p>
     </section>
 
     <section
@@ -122,13 +159,13 @@ const latestTemplates = computed(() => templates.items.slice(0, 4))
       <ul v-if="latestTemplates.length > 0" class="divide-y divide-stone-200">
         <li v-for="item in latestTemplates" :key="item.id" class="px-5 py-4">
           <RouterLink
-            :to="`/categories/${item.categoryId}`"
+            to="/templates"
             class="break-all text-sm font-medium text-stone-900 hover:underline"
           >
             {{ displayFileName(item.fileName) }}
           </RouterLink>
           <p class="mt-1 text-xs text-stone-500">
-            {{ categories.nameOf(item.categoryId) }} · {{ formatBytes(item.sizeBytes) }}
+            {{ usageLabel(item.usages) }} · {{ formatBytes(item.sizeBytes) }}
           </p>
           <div class="mt-2 flex items-center justify-between gap-3">
             <StatusBadge
@@ -139,15 +176,11 @@ const latestTemplates = computed(() => templates.items.slice(0, 4))
           </div>
         </li>
       </ul>
-      <p v-else class="px-5 py-8 text-sm text-stone-500">還沒有範本文件。</p>
+      <p v-else class="px-5 py-8 text-sm text-stone-500">範本庫還沒有文件。</p>
     </section>
   </div>
 
   <p class="mt-8 text-xs leading-5 text-stone-500">
-    {{
-      apiConfigured
-        ? '已讀取 API 位址。畫面仍使用內建示範資料，不會送出請求。'
-        : '未設定 API 位址。畫面使用內建示範資料。'
-    }}
+    產生文件時填入的姓名、日期與其他欄位只留在該畫面，不會寫進服務。
   </p>
 </template>

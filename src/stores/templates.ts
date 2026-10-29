@@ -1,8 +1,4 @@
-import {
-  sampleTemplateCategoryId,
-  sampleTemplateFileName,
-  sampleTemplateId,
-} from '@/data/sampleTemplate'
+import { sampleTemplateFileName, sampleTemplateId } from '@/data/sampleTemplate'
 import {
   hasZipHeader,
   listPlaceholders,
@@ -28,18 +24,27 @@ export interface AddTemplatesResult {
   added: number
   skipped: number
   rejected: string[]
+  ids: string[]
+}
+
+function sampleSeedEnabled() {
+  if (!import.meta.env.DEV) return false
+  return (
+    import.meta.env.VITE_SEED_SAMPLE_DATA === 'true' ||
+    import.meta.env.VITE_SEED_DEMO_USERS === 'true'
+  )
 }
 
 function toSummary(record: StoredTemplate): TemplateSummary {
   return {
     id: record.id,
-    categoryId: record.categoryId,
     fileName: record.fileName,
     mimeType: record.mimeType,
     sizeBytes: record.sizeBytes,
     addedAt: record.addedAt,
     placeholders: [...record.placeholders],
     origin: record.origin,
+    usages: record.usages.map((usage) => ({ ...usage })),
   }
 }
 
@@ -50,19 +55,20 @@ function sortNewest(records: StoredTemplate[]) {
 }
 
 async function ensureSample(repository: TemplateRepository) {
+  if (!sampleSeedEnabled()) return
   if ((await repository.getMeta(sampleSeedKey)) === '1') return
   const response = await fetch(`${import.meta.env.BASE_URL}samples/field-note.docx`)
   if (!response.ok) return
   const data = await response.arrayBuffer()
   await repository.put({
     id: sampleTemplateId,
-    categoryId: sampleTemplateCategoryId,
     fileName: sampleTemplateFileName,
     mimeType: templateMimeType,
     sizeBytes: data.byteLength,
     addedAt: '2026-10-29 09:00',
     placeholders: listPlaceholders(data),
     origin: 'sample',
+    usages: [],
     data,
   })
   await repository.setMeta(sampleSeedKey, '1')
@@ -106,12 +112,17 @@ export const useTemplateStore = defineStore('templates', () => {
     return pending
   }
 
-  async function addFiles(categoryId: string, files: File[]): Promise<AddTemplatesResult> {
+  function byId(id: string) {
+    return items.value.find((item) => item.id === id)
+  }
+
+  async function addFiles(files: File[], stepId?: string): Promise<AddTemplatesResult> {
     await load()
     const rejected: string[] = []
+    const ids: string[] = []
     const room = templateLimit - items.value.length
     if (room <= 0) {
-      return { added: 0, skipped: files.length, rejected }
+      return { added: 0, skipped: files.length, rejected, ids }
     }
 
     const accepted = files.slice(0, room)
@@ -141,25 +152,29 @@ export const useTemplateStore = defineStore('templates', () => {
         continue
       }
       try {
-        await repository.put({
-          id: crypto.randomUUID(),
-          categoryId,
-          fileName,
-          mimeType: templateMimeType,
-          sizeBytes: data.byteLength,
-          addedAt: formatStamp(new Date()),
-          placeholders,
-          origin: 'upload',
-          data,
-        })
+        const createdId = await repository.put(
+          {
+            id: crypto.randomUUID(),
+            fileName,
+            mimeType: templateMimeType,
+            sizeBytes: data.byteLength,
+            addedAt: formatStamp(new Date()),
+            placeholders,
+            origin: 'upload',
+            usages: [],
+            data,
+          },
+          stepId,
+        )
+        ids.push(createdId)
         added += 1
-      } catch (error) {
-        rejected.push(error instanceof Error ? error.message : `${fileName} 無法上傳`)
+      } catch (cause) {
+        rejected.push(cause instanceof Error ? cause.message : `${fileName} 無法上傳`)
       }
     }
 
     if (added > 0) await reload()
-    return { added, skipped, rejected }
+    return { added, skipped, rejected, ids }
   }
 
   async function remove(id: string) {
@@ -181,5 +196,17 @@ export const useTemplateStore = defineStore('templates', () => {
 
   void load()
 
-  return { items, total, ready, error, limit: templateLimit, load, addFiles, remove, bytesFor }
+  return {
+    items,
+    total,
+    ready,
+    error,
+    limit: templateLimit,
+    load,
+    reload,
+    byId,
+    addFiles,
+    remove,
+    bytesFor,
+  }
 })

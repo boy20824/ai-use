@@ -6,6 +6,7 @@ export type {
   StoredTemplate,
   TemplateRepository,
   TemplateSummary,
+  TemplateUsage,
 } from '@/storage/templateRepository'
 
 export function templateStorageMode(): 'api' | 'indexeddb' {

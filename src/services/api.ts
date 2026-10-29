@@ -10,6 +10,16 @@ function csrfToken(): string | undefined {
   return match?.[1] ? decodeURIComponent(match[1]) : undefined
 }
 
+export async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { message?: string }
+    if (body.message) return body.message
+  } catch {
+    // The response had no JSON body.
+  }
+  return fallback
+}
+
 export async function apiRequest(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers)
   const method = (init.method ?? 'GET').toUpperCase()

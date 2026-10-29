@@ -80,20 +80,66 @@ async function write(storeName: 'templates' | 'meta', run: (store: IDBObjectStor
   }
 }
 
+function normalize(
+  row: StoredTemplate & {
+    categoryId?: string
+    categories?: { id: string; name: string; sortOrder: number }[]
+  },
+  stepId?: string,
+): StoredTemplate {
+  const legacyId = row.categoryId
+  const fromCategories = Array.isArray(row.categories)
+    ? row.categories.map((link) => ({
+        categoryId: link.id,
+        categoryName: link.name,
+        stepId: '',
+        stepBody: '',
+        sortOrder: link.sortOrder,
+      }))
+    : legacyId
+      ? [{ categoryId: legacyId, categoryName: '', stepId: '', stepBody: '', sortOrder: 0 }]
+      : []
+  const usages = Array.isArray(row.usages) ? row.usages : fromCategories
+  const next = stepId
+    ? [
+        ...usages.filter((usage) => usage.stepId !== stepId),
+        {
+          categoryId: '',
+          categoryName: '',
+          stepId,
+          stepBody: '',
+          sortOrder: usages.length,
+        },
+      ]
+    : usages
+  return {
+    id: row.id,
+    fileName: row.fileName,
+    mimeType: row.mimeType,
+    sizeBytes: row.sizeBytes,
+    addedAt: row.addedAt,
+    placeholders: Array.isArray(row.placeholders) ? row.placeholders : [],
+    origin: row.origin,
+    usages: next,
+    data: row.data,
+  }
+}
+
 export function createIndexedDbTemplateRepository(): TemplateRepository {
   return {
     async list() {
       const rows = await read('templates', (store) => store.getAll())
-      return rows as StoredTemplate[]
+      return (rows as StoredTemplate[]).map((row) => normalize(row))
     },
     async get(id) {
       const row = await read('templates', (store) => store.get(id))
-      return (row as StoredTemplate | undefined) ?? null
+      return row ? normalize(row as StoredTemplate) : null
     },
-    async put(record) {
+    async put(record, stepId) {
       await write('templates', (store) => {
-        store.put(record)
+        store.put(normalize(record, stepId))
       })
+      return record.id
     },
     async delete(id) {
       await write('templates', (store) => {

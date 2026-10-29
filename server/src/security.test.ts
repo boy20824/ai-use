@@ -40,6 +40,7 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     loginLockoutMinutes: 15,
     loginRatePerMinute: 20,
     sampleTemplatePath: samplePath,
+    seedSampleData: false,
     staticDir: undefined,
     trustProxy: false,
     seedDemoUsers: true,
@@ -62,18 +63,23 @@ function docx(text: string, extraFiles = 0) {
   return zip.generate({ type: 'nodebuffer' }) as Uint8Array
 }
 
-function multipart(name: string, type: string, data: Uint8Array, categoryId = 'general-assist') {
+function multipart(name: string, type: string, data: Uint8Array, categoryId?: string) {
   const boundary = '----security'
-  const chunks: Uint8Array[] = [
-    Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="categoryId"\r\n\r\n${categoryId}\r\n`,
-    ),
+  const chunks: Uint8Array[] = []
+  if (categoryId) {
+    chunks.push(
+      Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="categoryId"\r\n\r\n${categoryId}\r\n`,
+      ),
+    )
+  }
+  chunks.push(
     Buffer.from(
       `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: ${type}\r\n\r\n`,
     ),
     data,
     Buffer.from(`\r\n--${boundary}--\r\n`),
-  ]
+  )
   return {
     payload: Buffer.concat(chunks),
     headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },
@@ -84,7 +90,7 @@ async function boot(overrides: Partial<AppConfig> = {}) {
   const appConfig = config(overrides)
   const db = openDatabase(':memory:')
   migrate(db)
-  seedReferenceData(createQueries(db), passwords, samplePath, appConfig.uploadDir)
+  seedReferenceData(createQueries(db), passwords, samplePath, appConfig.uploadDir, false)
   const app = await buildApp(db, appConfig)
   return { app, db }
 }
