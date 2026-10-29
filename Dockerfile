@@ -28,7 +28,8 @@ ENV NODE_ENV=production \
     UPLOAD_DIR=/data/uploads \
     STATIC_DIR=/app/dist \
     SAMPLE_TEMPLATE_PATH=/app/public/samples/field-note.docx \
-    TRUST_PROXY=true
+    TRUST_PROXY=true \
+    SEED_DEMO_USERS=false
 WORKDIR /app
 RUN groupadd --system --gid 1001 app \
     && useradd --system --uid 1001 --gid 1001 --home-dir /app --shell /usr/sbin/nologin app \

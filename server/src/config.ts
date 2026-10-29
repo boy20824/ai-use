@@ -58,7 +58,8 @@ export interface AppConfig {
   sampleTemplatePath: string
   staticDir: string | undefined
   trustProxy: boolean
-  passwords: SeedPasswords
+  seedDemoUsers: boolean
+  passwords: SeedPasswords | undefined
 }
 
 export function cookieSecureFromEnv(
@@ -121,23 +122,43 @@ function seedPassword(nodeEnv: string | undefined, name: string): string {
   return value
 }
 
+export function seedDemoUsersFromEnv(
+  nodeEnv: string | undefined,
+  raw: string | undefined,
+): boolean {
+  const value = raw?.trim() ?? ''
+  if (value === '') return nodeEnv !== 'production'
+  if (value === 'true') return true
+  if (value === 'false') return false
+  throw new Error('環境變數 SEED_DEMO_USERS 必須是 true 或 false。')
+}
+
+function loadSeedPasswords(nodeEnv: string | undefined): SeedPasswords {
+  return {
+    clerk: seedPassword(nodeEnv, 'SEED_USER_CLERK_PASSWORD'),
+    admin: seedPassword(nodeEnv, 'SEED_USER_ADMIN_PASSWORD'),
+    viewer: seedPassword(nodeEnv, 'SEED_USER_VIEWER_PASSWORD'),
+  }
+}
+
 export function sessionSecretFromEnv(
   nodeEnv: string | undefined,
   raw: string | undefined,
-  passwords: SeedPasswords,
+  passwords: SeedPasswords | undefined,
 ): string {
   const value = raw?.trim() ?? ''
   if (nodeEnv !== 'production') return value
   const normalized = value.toLowerCase()
+  const matchesSeedPassword =
+    passwords !== undefined &&
+    (value === passwords.clerk || value === passwords.admin || value === passwords.viewer)
   const rejected =
     value.length < 32 ||
     demoSessionSecrets.has(normalized) ||
     normalized.startsWith('dev-only') ||
     normalized.startsWith('change-me') ||
     normalized.startsWith('changeme') ||
-    value === passwords.clerk ||
-    value === passwords.admin ||
-    value === passwords.viewer
+    matchesSeedPassword
   if (rejected) {
     throw new Error(
       '正式環境的 SESSION_SECRET 必須至少 32 字元，且不能是示範或預設值。請用 fly secrets set 設定。',
@@ -186,11 +207,8 @@ function sampleTemplatePathFromEnv(): string {
 export function loadConfig(): AppConfig {
   loadEnvFiles()
   const nodeEnv = process.env.NODE_ENV
-  const passwords = {
-    clerk: seedPassword(nodeEnv, 'SEED_USER_CLERK_PASSWORD'),
-    admin: seedPassword(nodeEnv, 'SEED_USER_ADMIN_PASSWORD'),
-    viewer: seedPassword(nodeEnv, 'SEED_USER_VIEWER_PASSWORD'),
-  }
+  const seedDemoUsers = seedDemoUsersFromEnv(nodeEnv, process.env.SEED_DEMO_USERS)
+  const passwords = seedDemoUsers ? loadSeedPasswords(nodeEnv) : undefined
   return {
     host: hostFromEnv(nodeEnv),
     port: numberEnv('PORT', 3000),
@@ -209,6 +227,7 @@ export function loadConfig(): AppConfig {
     sampleTemplatePath: sampleTemplatePathFromEnv(),
     staticDir: staticDirFromEnv(nodeEnv),
     trustProxy: trustProxyFromEnv(nodeEnv),
+    seedDemoUsers,
     passwords,
   }
 }

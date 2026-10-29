@@ -14,6 +14,8 @@ primary_region = "nrt"
   STATIC_DIR = "/app/dist"
   SAMPLE_TEMPLATE_PATH = "/app/public/samples/field-note.docx"
   TRUST_PROXY = "true"
+  # Create missing demo users only when true. Leave this false so SEED_USER_* is not required.
+  SEED_DEMO_USERS = "false"
 
 [http_service]
   internal_port = 3000

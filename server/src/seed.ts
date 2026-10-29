@@ -14,19 +14,23 @@ const users = [
 
 export function seedReferenceData(
   queries: AppQueries,
-  passwords: SeedPasswords,
+  passwords: SeedPasswords | undefined,
   samplePath: string,
   uploadDir: string,
 ) {
-  for (const user of users) {
-    if (queries.findUserByUsername(user.username)) continue
-    queries.insertUser(
-      user.id,
-      user.username,
-      bcrypt.hashSync(passwords[user.role], 10),
-      user.displayName,
-      user.role,
-    )
+  // Insert missing demo users only when SEED_DEMO_USERS loaded passwords.
+  // Existing accounts are left as they are; nothing here deletes users.
+  if (passwords) {
+    for (const user of users) {
+      if (queries.findUserByUsername(user.username)) continue
+      queries.insertUser(
+        user.id,
+        user.username,
+        bcrypt.hashSync(passwords[user.role], 10),
+        user.displayName,
+        user.role,
+      )
+    }
   }
 
   for (const category of categories) {

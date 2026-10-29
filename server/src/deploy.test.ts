@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it } from 'vitest'
 import { buildApp } from './app.ts'
+import { categories } from './categories.ts'
 import { loadConfig, resolveServerPath, type AppConfig, type SeedPasswords } from './config.ts'
 import { createQueries, migrate, openDatabase } from './db.ts'
 import { templateFilePath } from './files.ts'
@@ -58,6 +59,7 @@ function appConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     sampleTemplatePath: samplePath,
     staticDir: undefined,
     trustProxy: false,
+    seedDemoUsers: true,
     passwords,
     ...overrides,
   }
@@ -66,9 +68,10 @@ function appConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 const baseProductionEnv = {
   NODE_ENV: 'production',
   SESSION_SECRET: longSecret,
-  SEED_USER_CLERK_PASSWORD: 'clerk-pass-prod',
-  SEED_USER_ADMIN_PASSWORD: 'admin-pass-prod',
-  SEED_USER_VIEWER_PASSWORD: 'viewer-pass-prod',
+  SEED_DEMO_USERS: undefined,
+  SEED_USER_CLERK_PASSWORD: undefined,
+  SEED_USER_ADMIN_PASSWORD: undefined,
+  SEED_USER_VIEWER_PASSWORD: undefined,
   HOST: undefined,
   PORT: undefined,
   DATABASE_PATH: '/data/app.sqlite',
@@ -112,6 +115,12 @@ describe('deployment config', () => {
           config.uploadDir.endsWith(`${path.sep}server${path.sep}data${path.sep}uploads`),
         ).toBe(true)
         expect(config.sessionSecret).toBe('dev-only-change-me')
+        expect(config.seedDemoUsers).toBe(true)
+        expect(config.passwords).toEqual({
+          clerk: 'clerk-demo',
+          admin: 'admin-demo',
+          viewer: 'viewer-demo',
+        })
         expect(config.staticDir).toBeUndefined()
         expect(config.trustProxy).toBe(false)
         expect(config.corsOrigins).toEqual(['http://localhost:5173', 'http://127.0.0.1:5173'])
@@ -119,7 +128,7 @@ describe('deployment config', () => {
     )
   })
 
-  it('refuses a missing, short, or demo session secret and demo seed passwords in production', () => {
+  it('refuses a missing, short, or demo session secret in production', () => {
     const staticDir = path.join(scratch, 'static-ok')
     mkdirSync(staticDir, { recursive: true })
     writeFileSync(path.join(staticDir, 'index.html'), '<!doctype html><title>ok</title>')
@@ -129,7 +138,6 @@ describe('deployment config', () => {
       { SESSION_SECRET: 'dev-only-change-me' },
       { SESSION_SECRET: 'dev-only-change-me-dev-only-change-me' },
       { SESSION_SECRET: 'clerk-demo' },
-      { SEED_USER_ADMIN_PASSWORD: 'admin-demo' },
     ]
     for (const overrides of cases) {
       withEnv({ ...baseProductionEnv, STATIC_DIR: staticDir, ...overrides }, () => {
@@ -139,6 +147,8 @@ describe('deployment config', () => {
     withEnv({ ...baseProductionEnv, STATIC_DIR: staticDir }, () => {
       const config = loadConfig()
       expect(config.sessionSecret).toBe(longSecret)
+      expect(config.seedDemoUsers).toBe(false)
+      expect(config.passwords).toBeUndefined()
       expect(config.host).toBe('0.0.0.0')
       expect(config.databasePath).toBe('/data/app.sqlite')
       expect(config.uploadDir).toBe('/data/uploads')
@@ -150,6 +160,103 @@ describe('deployment config', () => {
     withEnv({ ...baseProductionEnv, STATIC_DIR: path.join(scratch, 'missing-static') }, () => {
       expect(() => loadConfig()).toThrow(/index\.html/)
     })
+  })
+
+  it('requires seed passwords only when SEED_DEMO_USERS=true', () => {
+    const staticDir = path.join(scratch, 'static-seed')
+    mkdirSync(staticDir, { recursive: true })
+    writeFileSync(path.join(staticDir, 'index.html'), '<!doctype html><title>ok</title>')
+    const prodPasswords = {
+      SEED_USER_CLERK_PASSWORD: 'clerk-pass-prod',
+      SEED_USER_ADMIN_PASSWORD: 'admin-pass-prod',
+      SEED_USER_VIEWER_PASSWORD: 'viewer-pass-prod',
+    }
+
+    for (const flag of [undefined, 'false'] as const) {
+      withEnv({ ...baseProductionEnv, STATIC_DIR: staticDir, SEED_DEMO_USERS: flag }, () => {
+        const config = loadConfig()
+        expect(config.seedDemoUsers).toBe(false)
+        expect(config.passwords).toBeUndefined()
+        expect(config.sessionSecret).toBe(longSecret)
+      })
+    }
+
+    withEnv(
+      {
+        ...baseProductionEnv,
+        STATIC_DIR: staticDir,
+        SEED_DEMO_USERS: 'false',
+        SEED_USER_CLERK_PASSWORD: 'clerk-demo',
+        SEED_USER_ADMIN_PASSWORD: 'admin-demo',
+        SEED_USER_VIEWER_PASSWORD: 'viewer-demo',
+      },
+      () => {
+        const config = loadConfig()
+        expect(config.seedDemoUsers).toBe(false)
+        expect(config.passwords).toBeUndefined()
+      },
+    )
+
+    withEnv({ ...baseProductionEnv, STATIC_DIR: staticDir, SEED_DEMO_USERS: 'true' }, () => {
+      expect(() => loadConfig()).toThrow(/SEED_USER_CLERK_PASSWORD/)
+    })
+    withEnv(
+      {
+        ...baseProductionEnv,
+        STATIC_DIR: staticDir,
+        SEED_DEMO_USERS: 'true',
+        ...prodPasswords,
+        SEED_USER_ADMIN_PASSWORD: 'admin-demo',
+      },
+      () => {
+        expect(() => loadConfig()).toThrow(/fly secrets set/)
+      },
+    )
+    withEnv({ ...baseProductionEnv, STATIC_DIR: staticDir, SEED_DEMO_USERS: 'yes' }, () => {
+      expect(() => loadConfig()).toThrow(/SEED_DEMO_USERS/)
+    })
+    withEnv(
+      {
+        ...baseProductionEnv,
+        STATIC_DIR: staticDir,
+        SEED_DEMO_USERS: 'true',
+        ...prodPasswords,
+        SEED_USER_CLERK_PASSWORD: longSecret,
+        SESSION_SECRET: longSecret,
+      },
+      () => {
+        expect(() => loadConfig()).toThrow(/fly secrets set/)
+      },
+    )
+    withEnv(
+      { ...baseProductionEnv, STATIC_DIR: staticDir, SEED_DEMO_USERS: 'true', ...prodPasswords },
+      () => {
+        const config = loadConfig()
+        expect(config.seedDemoUsers).toBe(true)
+        expect(config.passwords).toEqual({
+          clerk: 'clerk-pass-prod',
+          admin: 'admin-pass-prod',
+          viewer: 'viewer-pass-prod',
+        })
+      },
+    )
+
+    withEnv(
+      {
+        ...baseProductionEnv,
+        NODE_ENV: 'development',
+        STATIC_DIR: undefined,
+        SESSION_SECRET: 'dev-only-change-me',
+        SEED_DEMO_USERS: 'false',
+        DATABASE_PATH: 'data/app.sqlite',
+        UPLOAD_DIR: 'data/uploads',
+      },
+      () => {
+        const config = loadConfig()
+        expect(config.seedDemoUsers).toBe(false)
+        expect(config.passwords).toBeUndefined()
+      },
+    )
   })
 
   it('uses WAL on a file database and closes it on shutdown', async () => {
@@ -175,6 +282,40 @@ describe('deployment config', () => {
     await shutdown()
     await shutdown()
     expect(() => db.prepare('SELECT 1').get()).toThrow()
+  })
+
+  it('leaves existing users in place when demo seeding is off', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const queries = createQueries(db)
+    const uploadDir = mkdtempSync(path.join(scratch, 'noseed-'))
+    queries.insertUser('user-kept', 'kept', 'hash-kept', '既有使用者', 'admin')
+    seedReferenceData(queries, undefined, samplePath, uploadDir)
+    expect(queries.countUsers()).toBe(1)
+    expect(queries.findUserByUsername('kept')?.passwordHash).toBe('hash-kept')
+    expect(queries.findUserByUsername('clerk')).toBeNull()
+    expect(queries.findUserByUsername('admin')).toBeNull()
+    expect(queries.findUserByUsername('viewer')).toBeNull()
+    expect(queries.listCategories()).toHaveLength(categories.length)
+    expect(queries.hasTemplate('sample-field-note')).toBe(true)
+
+    seedReferenceData(queries, passwords, samplePath, uploadDir)
+    expect(queries.countUsers()).toBe(4)
+    const keptHash = queries.findUserByUsername('kept')?.passwordHash
+    const adminHash = queries.findUserByUsername('admin')?.passwordHash
+    const clerkHash = queries.findUserByUsername('clerk')?.passwordHash
+    seedReferenceData(queries, undefined, samplePath, uploadDir)
+    seedReferenceData(
+      queries,
+      { ...passwords, admin: 'other-admin-pass', clerk: 'other-clerk-pass' },
+      samplePath,
+      uploadDir,
+    )
+    expect(queries.countUsers()).toBe(4)
+    expect(queries.findUserByUsername('kept')?.passwordHash).toBe(keptHash)
+    expect(queries.findUserByUsername('admin')?.passwordHash).toBe(adminHash)
+    expect(queries.findUserByUsername('clerk')?.passwordHash).toBe(clerkHash)
+    db.close()
   })
 
   it('serves health, same-origin API, and the built frontend', async () => {

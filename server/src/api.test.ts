@@ -93,6 +93,7 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     sampleTemplatePath: samplePath,
     staticDir: undefined,
     trustProxy: false,
+    seedDemoUsers: true,
     passwords,
     ...overrides,
   }
