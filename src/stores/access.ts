@@ -1,11 +1,10 @@
-import { accessRoles } from '@/data/mock'
-import type { AccessRole } from '@/types/records'
+import { accessRoles, permissionRows, roleLabels, roleOrder } from '@/data/mock'
 import { defineStore } from 'pinia'
-import { computed, shallowRef } from 'vue'
+import { shallowRef } from 'vue'
 
 export const useAccessStore = defineStore('access', () => {
-  const roles = shallowRef<AccessRole[]>(accessRoles)
-  const total = computed(() => roles.value.length)
+  const roles = shallowRef(accessRoles)
+  const rows = shallowRef(permissionRows)
 
-  return { roles, total }
+  return { roles, rows, roleLabels, roleOrder }
 })

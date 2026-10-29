@@ -1,20 +1,38 @@
+import { demoAccounts, roleAllows, roleLabels } from '@/data/mock'
+import type { AppRole } from '@/types/domain'
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 
 export const useSessionStore = defineStore('session', () => {
-  const displayName = ref('訪客')
-  const entered = ref(false)
+  const accountId = ref<string | null>(null)
 
-  function enter(name: string) {
-    const trimmed = name.trim().slice(0, 40)
-    displayName.value = trimmed.length > 0 ? trimmed : '示範使用者'
-    entered.value = true
+  const account = computed(() => demoAccounts.find((item) => item.id === accountId.value) ?? null)
+  const authenticated = computed(() => account.value !== null)
+  const displayName = computed(() => account.value?.displayName ?? '訪客')
+  const role = computed<AppRole | null>(() => account.value?.role ?? null)
+  const roleLabel = computed(() => (role.value ? roleLabels[role.value] : '未登入'))
+  const canUpload = computed(() => (role.value ? roleAllows(role.value, 'upload') : false))
+
+  function login(id: string) {
+    const next = demoAccounts.find((item) => item.id === id)
+    if (!next) return false
+    accountId.value = next.id
+    return true
   }
 
-  function leave() {
-    displayName.value = '訪客'
-    entered.value = false
+  function logout() {
+    accountId.value = null
   }
 
-  return { displayName, entered, enter, leave }
+  return {
+    accountId,
+    account,
+    authenticated,
+    displayName,
+    role,
+    roleLabel,
+    canUpload,
+    login,
+    logout,
+  }
 })

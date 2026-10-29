@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { StatusTone } from '@/types/records'
+import type { StatusTone } from '@/types/domain'
 import { computed } from 'vue'
 
 const props = defineProps<{

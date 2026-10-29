@@ -2,75 +2,143 @@
 import PageIntro from '@/components/PageIntro.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import { apiConfigured } from '@/config/env'
-import { useAccessStore } from '@/stores/access'
-import { useCaseStore } from '@/stores/cases'
-import { usePersonnelStore } from '@/stores/personnel'
-import { caseTone } from '@/utils/status'
+import { useCategoryStore } from '@/stores/categories'
+import { useDraftStore } from '@/stores/drafts'
+import { useSessionStore } from '@/stores/session'
+import { formatBytes } from '@/utils/format'
+import { draftTone } from '@/utils/status'
+import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
-const cases = useCaseStore()
-const personnel = usePersonnelStore()
-const access = useAccessStore()
+const categories = useCategoryStore()
+const drafts = useDraftStore()
+const session = useSessionStore()
 
-const stats = [
-  { label: '案件', value: () => cases.total, hint: '示範清單' },
-  { label: '審核中', value: () => cases.pendingCount, hint: '尚未結案' },
-  { label: '在職人員', value: () => personnel.activeCount, hint: `名冊 ${personnel.total} 人` },
-  { label: '權限角色', value: () => access.total, hint: '存取分類' },
-]
+const stats = computed(() => [
+  {
+    label: '案件類別',
+    value: String(categories.total),
+    hint: '可進入的工作台',
+    to: '/categories',
+  },
+  {
+    label: '相關文件',
+    value: String(categories.documentCount),
+    hint: '說明、表單與檢核',
+    to: '/categories',
+  },
+  {
+    label: '我的草稿',
+    value: String(drafts.total),
+    hint: '含示範與本機紀錄',
+    to: '/drafts',
+  },
+  {
+    label: '目前角色',
+    value: session.roleLabel,
+    hint: session.displayName,
+    to: '/access',
+  },
+])
+
+const latestDrafts = computed(() => drafts.items.slice(0, 4))
 </script>
 
 <template>
   <PageIntro
+    eyebrow="工作台"
     title="總覽"
-    description="這裡彙整案件、人員與存取權限的示範數字。資料寫在前端，重新整理頁面後不會保留登入顯示名稱。"
-  />
-
-  <p class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-    {{
-      apiConfigured
-        ? '已讀取 API 位址，但 Phase A 不會送出請求，畫面仍使用內建示範資料。'
-        : '尚未設定 API 位址。畫面使用內建示範資料。'
-    }}
-  </p>
+    description="先選擇案件類別，閱讀相關文件與填寫步驟，再把草稿檔留在這個分頁。登入的是示範身分，案件送審會在之後才接上。"
+  >
+    <RouterLink
+      to="/categories"
+      class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
+    >
+      瀏覽案件類別
+    </RouterLink>
+  </PageIntro>
 
   <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="摘要">
-    <article
+    <RouterLink
       v-for="stat in stats"
       :key="stat.label"
-      class="rounded-2xl border border-stone-200 bg-white px-4 py-4 shadow-sm"
+      :to="stat.to"
+      class="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm transition hover:border-stone-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700"
     >
       <p class="text-sm text-stone-500">{{ stat.label }}</p>
-      <p class="mt-2 text-3xl font-semibold tracking-tight">{{ stat.value() }}</p>
-      <p class="mt-1 text-xs text-stone-500">{{ stat.hint }}</p>
-    </article>
+      <p class="mt-3 text-3xl font-semibold tracking-tight text-stone-950 tabular-nums">
+        {{ stat.value }}
+      </p>
+      <p class="mt-2 text-xs text-stone-500">{{ stat.hint }}</p>
+    </RouterLink>
   </section>
 
-  <section class="mt-8 rounded-2xl border border-stone-200 bg-white shadow-sm">
-    <div class="flex items-center justify-between gap-3 border-b border-stone-200 px-4 py-4">
-      <h2 class="text-base font-semibold">最近更新的案件</h2>
-      <RouterLink to="/cases" class="text-sm text-orange-800 hover:underline">查看全部</RouterLink>
-    </div>
-    <ul v-if="cases.recent.length > 0" class="divide-y divide-stone-200">
-      <li
-        v-for="item in cases.recent"
-        :key="item.id"
-        class="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between"
-      >
-        <div>
-          <p class="text-sm font-medium">{{ item.title }}</p>
+  <div class="mt-8 grid gap-6 lg:grid-cols-5">
+    <section
+      class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm lg:col-span-3"
+    >
+      <div class="flex items-center justify-between gap-3 border-b border-stone-200 px-5 py-4">
+        <h2 class="text-base font-semibold">案件類別</h2>
+        <RouterLink to="/categories" class="text-sm text-orange-800 hover:underline"
+          >查看全部</RouterLink
+        >
+      </div>
+      <ul v-if="categories.recent.length > 0" class="divide-y divide-stone-200">
+        <li v-for="item in categories.recent" :key="item.id">
+          <RouterLink
+            :to="`/categories/${item.id}`"
+            class="flex items-center justify-between gap-4 px-5 py-4 hover:bg-stone-50"
+          >
+            <span class="min-w-0">
+              <span class="block text-sm font-medium text-stone-900">{{ item.name }}</span>
+              <span class="mt-1 block text-xs text-stone-500">
+                {{ item.code }} · {{ item.audience }}
+              </span>
+            </span>
+            <time class="shrink-0 text-xs text-stone-500" :datetime="item.updatedAt">{{
+              item.updatedAt
+            }}</time>
+          </RouterLink>
+        </li>
+      </ul>
+      <p v-else class="px-5 py-8 text-sm text-stone-500">尚無類別示範資料。</p>
+    </section>
+
+    <section
+      class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm lg:col-span-2"
+    >
+      <div class="flex items-center justify-between gap-3 border-b border-stone-200 px-5 py-4">
+        <h2 class="text-base font-semibold">最近草稿</h2>
+        <RouterLink to="/drafts" class="text-sm text-orange-800 hover:underline"
+          >查看全部</RouterLink
+        >
+      </div>
+      <ul v-if="latestDrafts.length > 0" class="divide-y divide-stone-200">
+        <li v-for="item in latestDrafts" :key="item.id" class="px-5 py-4">
+          <RouterLink
+            :to="`/categories/${item.categoryId}`"
+            class="break-all text-sm font-medium text-stone-900 hover:underline"
+          >
+            {{ item.fileName }}
+          </RouterLink>
           <p class="mt-1 text-xs text-stone-500">
-            {{ item.id }} · {{ item.applicant }} · {{ item.department }}
+            {{ categories.nameOf(item.categoryId) }} · {{ formatBytes(item.sizeBytes) }}
           </p>
-        </div>
-        <div class="flex items-center gap-3">
-          <StatusBadge :label="item.status" :tone="caseTone(item.status)" />
-          <time class="text-xs text-stone-500" :datetime="item.updatedAt">{{
-            item.updatedAt
-          }}</time>
-        </div>
-      </li>
-    </ul>
-    <p v-else class="px-4 py-8 text-sm text-stone-500">尚無案件示範資料。</p>
-  </section>
+          <div class="mt-2 flex items-center justify-between gap-3">
+            <StatusBadge :label="item.source" :tone="draftTone(item.source)" />
+            <time class="text-xs text-stone-500">{{ item.addedAt }}</time>
+          </div>
+        </li>
+      </ul>
+      <p v-else class="px-5 py-8 text-sm text-stone-500">還沒有草稿紀錄。</p>
+    </section>
+  </div>
+
+  <p class="mt-8 text-xs leading-5 text-stone-500">
+    {{
+      apiConfigured
+        ? '已讀取 API 位址。畫面仍使用內建示範資料，不會送出請求。'
+        : '未設定 API 位址。畫面使用內建示範資料。'
+    }}
+  </p>
 </template>
