@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "concurrently -k -n web,api \"vite\" \"pnpm --filter @ai-use/server dev\"",
-    "build": "vue-tsc --noEmit && vite build && pnpm --filter @ai-use/server typecheck",
+    "build": "vue-tsc --noEmit && vite build && rm -rf dist/samples && pnpm --filter @ai-use/server typecheck",
     "preview": "vite preview",
     "start": "node server/src/index.ts",
     "typecheck": "vue-tsc --noEmit && pnpm --filter @ai-use/server typecheck",
@@ -37,6 +37,7 @@
     "concurrently": "^10.0.6",
     "eslint": "^10.13.0",
     "eslint-plugin-vue": "^10.12.0",
+    "happy-dom": "^21.0.4",
     "prettier": "^3.9.10",
     "tailwindcss": "^4.3.3",
     "typescript": "~5.9.3",

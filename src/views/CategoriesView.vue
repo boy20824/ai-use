@@ -27,7 +27,7 @@ const visible = computed(() => {
   <PageIntro
     eyebrow="工作台"
     title="案件類別"
-    description="類別由系統管理員建立，例如竊盜案、毀損案。進入工作台後可依步驟產生文件，或在全部文件總覽一次勾選。"
+    description="類別由系統管理員或被授權可維護類別的使用者建立，例如竊盜案、毀損案。進入工作台後可依步驟產生文件，或在全部文件總覽一次勾選。"
   >
     <RouterLink
       v-if="session.canEditCategory && categories.total > 0"
@@ -55,7 +55,7 @@ const visible = computed(() => {
     >
       新增案件類別
     </RouterLink>
-    <p v-else class="text-sm text-stone-600">請由系統管理員新增。</p>
+    <p v-else class="text-sm text-stone-600">請由系統管理員或被授權的使用者新增。</p>
   </EmptyState>
 
   <template v-else>

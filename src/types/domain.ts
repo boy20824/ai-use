@@ -1,14 +1,7 @@
-export type AppRole = 'admin' | 'clerk' | 'viewer'
-export type PermissionKey =
-  'browse' | 'editCategory' | 'deleteCategory' | 'upload' | 'remove' | 'access'
+export type AppRole = 'sysadmin' | 'user'
 export type TemplateOrigin = 'sample' | 'upload'
 export type StatusTone = 'neutral' | 'warn' | 'ok' | 'danger'
-
-export interface PermissionRow {
-  key: PermissionKey
-  label: string
-  roles: AppRole[]
-}
+export type FeedbackStatus = 'pending' | 'in_progress' | 'done'
 
 export interface CategoryStep {
   id: string
@@ -39,10 +32,25 @@ export interface CategoryInput {
   steps: CategoryStepInput[]
 }
 
-export interface AccessRole {
-  id: AppRole
-  name: string
-  summary: string
-  members: number
-  permissions: string[]
+export interface FeedbackPost {
+  id: string
+  authorId: string
+  authorNickname: string
+  title: string
+  content: string
+  status: FeedbackStatus
+  adminReply: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface MemberAccount {
+  id: string
+  username: string
+  displayName: string
+  nickname: string
+  role: AppRole
+  active: boolean
+  canManageCategories: boolean
+  createdAt: string
 }

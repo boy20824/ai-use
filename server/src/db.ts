@@ -5,10 +5,24 @@ import path from 'node:path'
 
 export type AppDatabase = Database.Database
 
-export type Role = 'admin' | 'clerk' | 'viewer'
+export type Role = 'sysadmin' | 'user'
 
 export type AuditAction =
-  'upload' | 'delete' | 'category_create' | 'category_update' | 'category_delete'
+  | 'upload'
+  | 'delete'
+  | 'category_create'
+  | 'category_update'
+  | 'category_delete'
+  | 'member_list'
+  | 'member_create'
+  | 'member_update'
+  | 'feedback_update'
+  | 'feedback_delete'
+  | 'feedback_moderate'
+
+export type FeedbackStatus = 'pending' | 'in_progress' | 'done'
+
+const auditActionsSql = `'upload', 'delete', 'category_create', 'category_update', 'category_delete', 'member_list', 'member_create', 'member_update', 'feedback_update', 'feedback_delete', 'feedback_moderate'`
 
 export type AuditResult = 'allowed' | 'denied'
 
@@ -29,7 +43,53 @@ export interface UserRecord {
   username: string
   passwordHash: string
   displayName: string
+  nickname: string
   role: Role
+  canManageCategories: boolean
+  active: boolean
+  createdAt: string
+}
+
+export interface NewUserInput {
+  id: string
+  username: string
+  passwordHash: string
+  displayName: string
+  nickname: string
+  role: Role
+  canManageCategories?: boolean
+  active?: boolean
+  createdAt?: string
+}
+
+export interface MemberPatch {
+  active?: boolean
+  canManageCategories?: boolean
+  role?: Role
+}
+
+export type MemberUpdateError = 'not-found' | 'self-disable' | 'self-demote' | 'last-sysadmin'
+
+export type MemberUpdateResult =
+  { ok: true; user: UserRecord } | { ok: false; error: MemberUpdateError }
+
+export interface FeedbackRecord {
+  id: string
+  authorId: string
+  authorNickname: string
+  title: string
+  content: string
+  status: FeedbackStatus
+  adminReply: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface FeedbackPatch {
+  title?: string
+  content?: string
+  status?: FeedbackStatus
+  adminReply?: string
 }
 
 export interface CategoryStepRecord {
@@ -88,7 +148,23 @@ interface UserRow {
   username: string
   password_hash: string
   display_name: string
+  nickname: string
   role: Role
+  can_manage_categories: number
+  active: number
+  created_at: string
+}
+
+interface FeedbackRow {
+  id: string
+  author_id: string
+  author_nickname: string
+  title: string
+  content: string
+  status: FeedbackStatus
+  admin_reply: string
+  created_at: string
+  updated_at: string
 }
 
 interface CategoryRow {
@@ -143,9 +219,33 @@ function mapUser(row: UserRow): UserRecord {
     username: row.username,
     passwordHash: row.password_hash,
     displayName: row.display_name,
+    nickname: row.nickname,
     role: row.role,
+    canManageCategories: row.can_manage_categories === 1,
+    active: row.active === 1,
+    createdAt: row.created_at,
   }
 }
+
+function mapFeedback(row: FeedbackRow): FeedbackRecord {
+  return {
+    id: row.id,
+    authorId: row.author_id,
+    authorNickname: row.author_nickname,
+    title: row.title,
+    content: row.content,
+    status: row.status,
+    adminReply: row.admin_reply,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function roleLabel(role: Role): string {
+  return role === 'sysadmin' ? '系統管理員' : '一般使用者'
+}
+
+const userSelect = `id, username, password_hash, display_name, nickname, role, can_manage_categories, active, created_at`
 
 function mapCategory(row: CategoryRow, steps: CategoryStepRecord[]): CategoryRecord {
   return {
@@ -199,10 +299,7 @@ function tableExists(db: AppDatabase, table: string): boolean {
   return Boolean(row)
 }
 
-function columnNames(
-  db: AppDatabase,
-  table: 'templates' | 'categories' | 'audit_log' | 'category_steps',
-): string[] {
+function columnNames(db: AppDatabase, table: string): string[] {
   if (!tableExists(db, table)) return []
   const rows = db.prepare(`SELECT name FROM pragma_table_info('${table}')`).all() as {
     name: string
@@ -220,10 +317,14 @@ function isLegacySchema(db: AppDatabase): boolean {
 const accountTables = `
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL COLLATE NOCASE UNIQUE,
     password_hash TEXT NOT NULL,
     display_name TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('admin', 'clerk', 'viewer'))
+    nickname TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('sysadmin', 'user')),
+    can_manage_categories INTEGER NOT NULL DEFAULT 0 CHECK (can_manage_categories IN (0, 1)),
+    active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at TEXT NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS sessions (
@@ -289,15 +390,38 @@ const auditTable = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TEXT NOT NULL,
     actor_username TEXT NOT NULL,
-    action TEXT NOT NULL CHECK (action IN (
-      'upload', 'delete', 'category_create', 'category_update', 'category_delete'
-    )),
+    action TEXT NOT NULL CHECK (action IN (${auditActionsSql})),
     template_id TEXT NOT NULL DEFAULT '',
     file_name TEXT NOT NULL DEFAULT '',
     category_id TEXT NOT NULL DEFAULT '',
     detail TEXT NOT NULL DEFAULT '',
-    result TEXT NOT NULL DEFAULT 'allowed'
+    result TEXT NOT NULL DEFAULT 'allowed',
+    target_username TEXT NOT NULL DEFAULT ''
   );
+`
+
+const feedbackTable = `
+  CREATE TABLE IF NOT EXISTS feedback_posts (
+    id TEXT PRIMARY KEY,
+    author_id TEXT NOT NULL REFERENCES users(id),
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'done')),
+    admin_reply TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS feedback_posts_by_status ON feedback_posts(status, created_at);
+  CREATE INDEX IF NOT EXISTS feedback_posts_by_author ON feedback_posts(author_id);
+`
+
+const registerEventsTable = `
+  CREATE TABLE IF NOT EXISTS register_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS register_events_by_ip ON register_events(ip, created_at);
 `
 
 function createCurrentSchema(db: AppDatabase) {
@@ -527,10 +651,142 @@ function upgradeStepLinks(db: AppDatabase) {
   }
 }
 
-function ensureAuditResult(db: AppDatabase) {
-  if (!tableExists(db, 'audit_log')) return
-  if (columnNames(db, 'audit_log').includes('result')) return
-  db.exec("ALTER TABLE audit_log ADD COLUMN result TEXT NOT NULL DEFAULT 'allowed'")
+function tableSql(db: AppDatabase, table: string): string {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(table) as { sql: string } | undefined
+  return row?.sql ?? ''
+}
+
+function mappedRole(username: string, role: string): Role {
+  if (username.toLowerCase() === 'boy20824') return 'sysadmin'
+  if (role === 'admin' || role === 'sysadmin') return 'sysadmin'
+  return 'user'
+}
+
+function needsAccountUpgrade(db: AppDatabase): boolean {
+  if (!tableExists(db, 'users')) return false
+  const sql = tableSql(db, 'users')
+  if (!sql.includes("'sysadmin'")) return true
+  const names = new Set(columnNames(db, 'users'))
+  return ['nickname', 'can_manage_categories', 'active', 'created_at'].some(
+    (name) => !names.has(name),
+  )
+}
+
+function upgradeAccounts(db: AppDatabase) {
+  if (!needsAccountUpgrade(db)) return
+  const names = new Set(columnNames(db, 'users'))
+  const rows = db.prepare('SELECT * FROM users').all() as Record<string, unknown>[]
+  const createdAt = new Date().toISOString()
+  db.pragma('foreign_keys = OFF')
+  try {
+    const apply = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE users_next (
+          id TEXT PRIMARY KEY,
+          username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+          password_hash TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          nickname TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('sysadmin', 'user')),
+          can_manage_categories INTEGER NOT NULL DEFAULT 0 CHECK (can_manage_categories IN (0, 1)),
+          active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+          created_at TEXT NOT NULL
+        );
+      `)
+      const insert = db.prepare(`
+        INSERT INTO users_next (
+          id, username, password_hash, display_name, nickname, role,
+          can_manage_categories, active, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      for (const row of rows) {
+        const username = String(row.username ?? '')
+        const displayName = String(row.display_name ?? username)
+        const nicknameRaw = names.has('nickname') ? String(row.nickname ?? '').trim() : ''
+        const canManage =
+          names.has('can_manage_categories') && Number(row.can_manage_categories) === 1 ? 1 : 0
+        const active = names.has('active') && Number(row.active) === 0 ? 0 : 1
+        const created =
+          names.has('created_at') && String(row.created_at ?? '').length > 0
+            ? String(row.created_at)
+            : createdAt
+        insert.run(
+          row.id,
+          username,
+          row.password_hash,
+          displayName,
+          nicknameRaw || displayName,
+          mappedRole(username, String(row.role ?? '')),
+          canManage,
+          active,
+          created,
+        )
+      }
+      db.exec('DROP TABLE users')
+      db.exec('ALTER TABLE users_next RENAME TO users')
+    })
+    apply()
+  } finally {
+    db.pragma('foreign_keys = ON')
+  }
+}
+
+function needsAuditUpgrade(db: AppDatabase): boolean {
+  if (!tableExists(db, 'audit_log')) return false
+  const names = new Set(columnNames(db, 'audit_log'))
+  if (!names.has('result') || !names.has('detail') || !names.has('target_username')) return true
+  return !tableSql(db, 'audit_log').includes("'member_update'")
+}
+
+function ensureAuditSchema(db: AppDatabase) {
+  if (!tableExists(db, 'audit_log')) {
+    db.exec(auditTable)
+    return
+  }
+  if (!needsAuditUpgrade(db)) return
+  const names = new Set(columnNames(db, 'audit_log'))
+  const rows = db.prepare('SELECT * FROM audit_log').all() as Record<string, unknown>[]
+  const apply = db.transaction(() => {
+    db.exec(`
+      CREATE TABLE audit_log_next (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        actor_username TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN (${auditActionsSql})),
+        template_id TEXT NOT NULL DEFAULT '',
+        file_name TEXT NOT NULL DEFAULT '',
+        category_id TEXT NOT NULL DEFAULT '',
+        detail TEXT NOT NULL DEFAULT '',
+        result TEXT NOT NULL DEFAULT 'allowed',
+        target_username TEXT NOT NULL DEFAULT ''
+      );
+    `)
+    const insert = db.prepare(`
+      INSERT INTO audit_log_next (
+        id, created_at, actor_username, action, template_id, file_name, category_id, detail, result,
+        target_username
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    for (const row of rows) {
+      insert.run(
+        row.id,
+        row.created_at,
+        row.actor_username,
+        row.action,
+        row.template_id ?? '',
+        names.has('file_name') ? (row.file_name ?? '') : '',
+        row.category_id ?? '',
+        names.has('detail') ? (row.detail ?? '') : '',
+        names.has('result') && row.result ? row.result : 'allowed',
+        names.has('target_username') ? (row.target_username ?? '') : '',
+      )
+    }
+    db.exec('DROP TABLE audit_log')
+    db.exec('ALTER TABLE audit_log_next RENAME TO audit_log')
+  })
+  apply()
 }
 
 function deleteSeededCategories(db: AppDatabase) {
@@ -554,16 +810,18 @@ export function migrate(db: AppDatabase) {
   db.exec(accountTables)
   if (!tableExists(db, 'categories')) {
     createCurrentSchema(db)
-    return
+  } else {
+    if (isLegacySchema(db)) upgradeLegacySchema(db)
+    if (needsStepLinkMigration(db)) upgradeStepLinks(db)
+    db.exec(stepTable + linkTable)
+    deleteSeededCategories(db)
   }
-  if (isLegacySchema(db)) upgradeLegacySchema(db)
-  if (needsStepLinkMigration(db)) upgradeStepLinks(db)
-  db.exec(stepTable + linkTable)
-  deleteSeededCategories(db)
-  ensureAuditResult(db)
+  ensureAuditSchema(db)
+  upgradeAccounts(db)
+  db.exec(feedbackTable + registerEventsTable)
 }
 
-function isUniqueConstraint(error: unknown): boolean {
+export function isUniqueConstraint(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false
   const code = 'code' in error ? String((error as { code?: string }).code ?? '') : ''
   if (code === 'SQLITE_CONSTRAINT_UNIQUE') return true
@@ -574,16 +832,30 @@ function isUniqueConstraint(error: unknown): boolean {
 export function createQueries(db: AppDatabase) {
   const countUsers = db.prepare('SELECT COUNT(*) AS count FROM users')
   const insertUser = db.prepare(
-    'INSERT INTO users (id, username, password_hash, display_name, role) VALUES (?, ?, ?, ?, ?)',
+    `INSERT INTO users (
+      id, username, password_hash, display_name, nickname, role, can_manage_categories, active, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
   const findUserByUsername = db.prepare(
-    'SELECT id, username, password_hash, display_name, role FROM users WHERE username = ?',
+    `SELECT ${userSelect} FROM users WHERE username = ? COLLATE NOCASE`,
+  )
+  const findUserById = db.prepare(`SELECT ${userSelect} FROM users WHERE id = ?`)
+  const listUsers = db.prepare(
+    `SELECT ${userSelect} FROM users ORDER BY created_at ASC, username COLLATE NOCASE ASC`,
+  )
+  const countOtherActiveSysadmins = db.prepare(
+    `SELECT COUNT(*) AS count FROM users WHERE role = 'sysadmin' AND active = 1 AND id <> ?`,
+  )
+  const updateUserRow = db.prepare(
+    'UPDATE users SET role = ?, can_manage_categories = ?, active = ? WHERE id = ?',
   )
   const insertSession = db.prepare(
     'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)',
   )
   const findSession = db.prepare(`
-    SELECT u.id, u.username, u.display_name, u.role, s.expires_at
+    SELECT
+      u.id, u.username, u.display_name, u.nickname, u.role, u.can_manage_categories, u.active,
+      s.expires_at
     FROM sessions s
     JOIN users u ON u.id = s.user_id
     WHERE s.id = ?
@@ -708,7 +980,45 @@ export function createQueries(db: AppDatabase) {
   )
 
   const insertAudit = db.prepare(
-    'INSERT INTO audit_log (created_at, actor_username, action, template_id, file_name, category_id, detail, result) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    `INSERT INTO audit_log (
+      created_at, actor_username, action, template_id, file_name, category_id, detail, result,
+      target_username
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+  const insertFeedback = db.prepare(`
+    INSERT INTO feedback_posts (
+      id, author_id, title, content, status, admin_reply, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'pending', '', ?, ?)
+  `)
+  const listFeedbackRows = db.prepare(`
+    SELECT
+      p.id, p.author_id, u.nickname AS author_nickname, p.title, p.content, p.status,
+      p.admin_reply, p.created_at, p.updated_at
+    FROM feedback_posts p
+    JOIN users u ON u.id = p.author_id
+    WHERE (? IS NULL OR p.status = ?)
+    ORDER BY p.created_at DESC, p.id DESC
+  `)
+  const getFeedbackRow = db.prepare(`
+    SELECT
+      p.id, p.author_id, u.nickname AS author_nickname, p.title, p.content, p.status,
+      p.admin_reply, p.created_at, p.updated_at
+    FROM feedback_posts p
+    JOIN users u ON u.id = p.author_id
+    WHERE p.id = ?
+  `)
+  const updateFeedbackRow = db.prepare(
+    'UPDATE feedback_posts SET title = ?, content = ?, status = ?, admin_reply = ?, updated_at = ? WHERE id = ?',
+  )
+  const deleteFeedbackRow = db.prepare('DELETE FROM feedback_posts WHERE id = ?')
+  const insertRegisterEvent = db.prepare(
+    'INSERT INTO register_events (ip, created_at) VALUES (?, ?)',
+  )
+  const countRegisterByIp = db.prepare(
+    'SELECT COUNT(*) AS count FROM register_events WHERE ip = ? AND created_at > ?',
+  )
+  const countRegisterGlobal = db.prepare(
+    'SELECT COUNT(*) AS count FROM register_events WHERE created_at > ?',
   )
   const insertLoginEvent = db.prepare(
     'INSERT INTO login_events (username, ip, success, created_at) VALUES (?, ?, ?, ?)',
@@ -793,6 +1103,7 @@ export function createQueries(db: AppDatabase) {
     categoryId: string,
     detail: string,
     result: AuditResult = 'allowed',
+    targetUsername = '',
   ) {
     const denied = result === 'denied'
     insertAudit.run(
@@ -804,6 +1115,7 @@ export function createQueries(db: AppDatabase) {
       categoryId,
       denied ? '' : detail,
       denied ? 'denied' : 'allowed',
+      targetUsername,
     )
   }
 
@@ -812,25 +1124,98 @@ export function createQueries(db: AppDatabase) {
       const row = countUsers.get() as { count: number }
       return row.count
     },
-    insertUser(
-      id: string,
-      username: string,
-      passwordHash: string,
-      displayName: string,
-      role: Role,
-    ) {
-      insertUser.run(id, username, passwordHash, displayName, role)
+    insertUser(input: NewUserInput) {
+      insertUser.run(
+        input.id,
+        input.username,
+        input.passwordHash,
+        input.displayName,
+        input.nickname,
+        input.role,
+        input.canManageCategories ? 1 : 0,
+        input.active === false ? 0 : 1,
+        input.createdAt ?? new Date().toISOString(),
+      )
     },
     findUserByUsername(username: string) {
       const row = findUserByUsername.get(username) as UserRow | undefined
       return row ? mapUser(row) : null
+    },
+    findUserById(id: string) {
+      const row = findUserById.get(id) as UserRow | undefined
+      return row ? mapUser(row) : null
+    },
+    listUsers() {
+      return (listUsers.all() as UserRow[]).map(mapUser)
+    },
+    updateMember(actorId: string, targetId: string, patch: MemberPatch): MemberUpdateResult {
+      const apply = db.transaction((): MemberUpdateResult => {
+        const current = findUserById.get(targetId) as UserRow | undefined
+        if (!current) return { ok: false, error: 'not-found' }
+        const target = mapUser(current)
+        if (patch.active === false && target.id === actorId) {
+          return { ok: false, error: 'self-disable' }
+        }
+        if (patch.role === 'user' && target.id === actorId && target.role === 'sysadmin') {
+          return { ok: false, error: 'self-demote' }
+        }
+        const nextRole = patch.role ?? target.role
+        const nextActive = patch.active ?? target.active
+        const nextFlag = patch.canManageCategories ?? target.canManageCategories
+        const remainsActiveSysadmin = nextRole === 'sysadmin' && nextActive
+        if (!remainsActiveSysadmin) {
+          const others = countOtherActiveSysadmins.get(target.id) as { count: number }
+          if (others.count < 1) return { ok: false, error: 'last-sysadmin' }
+        }
+        const changes: string[] = []
+        if (nextActive !== target.active) {
+          changes.push(`狀態：${target.active ? '啟用' : '停用'} → ${nextActive ? '啟用' : '停用'}`)
+        }
+        if (nextFlag !== target.canManageCategories) {
+          changes.push(
+            `可維護類別：${target.canManageCategories ? '是' : '否'} → ${nextFlag ? '是' : '否'}`,
+          )
+        }
+        if (nextRole !== target.role) {
+          changes.push(`角色：${roleLabel(target.role)} → ${roleLabel(nextRole)}`)
+        }
+        if (changes.length === 0) return { ok: true, user: target }
+        updateUserRow.run(nextRole, nextFlag ? 1 : 0, nextActive ? 1 : 0, target.id)
+        if (target.active && !nextActive) deleteUserSessions.run(target.id)
+        const actor = findUserById.get(actorId) as UserRow | undefined
+        for (const change of changes) {
+          writeAudit(
+            actor?.username ?? '',
+            'member_update',
+            '',
+            '',
+            '',
+            change,
+            'allowed',
+            target.username,
+          )
+        }
+        const updated = findUserById.get(target.id) as UserRow | undefined
+        if (!updated) return { ok: false, error: 'not-found' }
+        return { ok: true, user: mapUser(updated) }
+      })
+      return apply()
     },
     insertSession(id: string, userId: string, expiresAt: string) {
       insertSession.run(id, userId, expiresAt)
     },
     findSession(id: string) {
       return findSession.get(id) as
-        | { id: string; username: string; display_name: string; role: Role; expires_at: string }
+        | {
+            id: string
+            username: string
+            display_name: string
+            nickname: string
+            role: Role
+            can_manage_categories: number
+            active: number
+            expires_at: string
+          }
         | undefined
     },
     deleteSession(id: string) {
@@ -952,8 +1337,76 @@ export function createQueries(db: AppDatabase) {
       categoryId: string,
       detail = '',
       result: AuditResult = 'allowed',
+      targetUsername = '',
     ) {
-      writeAudit(actorUsername, action, templateId, fileName, categoryId, detail, result)
+      writeAudit(
+        actorUsername,
+        action,
+        templateId,
+        fileName,
+        categoryId,
+        detail,
+        result,
+        targetUsername,
+      )
+    },
+    insertFeedback(record: {
+      id: string
+      authorId: string
+      title: string
+      content: string
+      createdAt: string
+    }) {
+      insertFeedback.run(
+        record.id,
+        record.authorId,
+        record.title,
+        record.content,
+        record.createdAt,
+        record.createdAt,
+      )
+    },
+    listFeedback(status?: FeedbackStatus) {
+      const filter = status ?? null
+      return (listFeedbackRows.all(filter, filter) as FeedbackRow[]).map(mapFeedback)
+    },
+    getFeedback(id: string) {
+      const row = getFeedbackRow.get(id) as FeedbackRow | undefined
+      return row ? mapFeedback(row) : null
+    },
+    updateFeedback(id: string, patch: FeedbackPatch) {
+      const current = getFeedbackRow.get(id) as FeedbackRow | undefined
+      if (!current) return null
+      const updatedAt = new Date().toISOString()
+      updateFeedbackRow.run(
+        patch.title ?? current.title,
+        patch.content ?? current.content,
+        patch.status ?? current.status,
+        patch.adminReply ?? current.admin_reply,
+        updatedAt,
+        id,
+      )
+      const row = getFeedbackRow.get(id) as FeedbackRow | undefined
+      return row ? mapFeedback(row) : null
+    },
+    deleteFeedback(id: string) {
+      return deleteFeedbackRow.run(id).changes > 0
+    },
+    consumeRegisterAttempt(
+      ip: string,
+      now: number,
+      since: number,
+      ipLimit: number,
+      globalLimit: number,
+    ) {
+      const apply = db.transaction(() => {
+        const byIp = countRegisterByIp.get(ip, since) as { count: number }
+        const global = countRegisterGlobal.get(since) as { count: number }
+        if (byIp.count >= ipLimit || global.count >= globalLimit) return false
+        insertRegisterEvent.run(ip, now)
+        return true
+      })
+      return apply()
     },
     recordLogin(username: string, ip: string, success: boolean) {
       insertLoginEvent.run(username, ip, success ? 1 : 0, Date.now())

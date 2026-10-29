@@ -39,6 +39,9 @@ function config(): AppConfig {
     loginMaxFailures: 5,
     loginLockoutMinutes: 15,
     loginRatePerMinute: 30,
+    registerIpLimit: 5,
+    registerGlobalLimit: 30,
+    registerWindowMs: 60 * 60 * 1000,
     sampleTemplatePath: samplePath,
     seedSampleData: false,
     staticDir: undefined,
@@ -295,11 +298,11 @@ describe('admin-only mutations', () => {
       url: '/api/auth/me',
       cookies: { session: clerkAuth.cookies.session },
     })
-    expect(me.json().user.role).toBe('clerk')
+    expect(me.json().user.role).toBe('user')
     const storedRole = db.prepare('SELECT role FROM users WHERE username = ?').get('clerk') as {
       role: string
     }
-    expect(storedRole.role).toBe('clerk')
+    expect(storedRole.role).toBe('user')
 
     const readable = await app.inject({
       method: 'GET',

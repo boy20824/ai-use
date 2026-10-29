@@ -1,14 +1,12 @@
 <script setup lang="ts">
 import EmptyState from '@/components/EmptyState.vue'
 import PageIntro from '@/components/PageIntro.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { formatBytes } from '@/utils/format'
 import { displayFileName } from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
-import { templateOriginLabel, templateTone } from '@/utils/status'
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -36,10 +34,10 @@ const stats = computed(() => [
     to: '/templates',
   },
   {
-    label: '目前角色',
-    value: session.roleLabel,
-    hint: session.displayName,
-    to: '/access',
+    label: '留言板',
+    value: '建議',
+    hint: '網頁改善建議',
+    to: '/feedback',
   },
 ])
 
@@ -121,7 +119,7 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
         >
           新增案件類別
         </RouterLink>
-        <p v-else class="text-sm text-stone-600">請由系統管理員新增。</p>
+        <p v-else class="text-sm text-stone-600">請由系統管理員或被授權的使用者新增。</p>
       </EmptyState>
       <p v-else-if="!categories.ready" class="px-5 py-8 text-sm text-stone-500">
         正在讀取案件類別。
@@ -167,13 +165,7 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
           <p class="mt-1 text-xs text-stone-500">
             {{ usageLabel(item.usages) }} · {{ formatBytes(item.sizeBytes) }}
           </p>
-          <div class="mt-2 flex items-center justify-between gap-3">
-            <StatusBadge
-              :label="templateOriginLabel(item.origin)"
-              :tone="templateTone(item.origin)"
-            />
-            <time class="text-xs text-stone-500">{{ formatStoredDate(item.addedAt) }}</time>
-          </div>
+          <p class="mt-2 text-xs text-stone-500">{{ formatStoredDate(item.addedAt) }}</p>
         </li>
       </ul>
       <p v-else class="px-5 py-8 text-sm text-stone-500">範本庫還沒有文件。</p>

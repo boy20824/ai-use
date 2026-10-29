@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { appName, appTagline } from '@/config/app'
 import { mainNav } from '@/navigation'
+import { useSessionStore } from '@/stores/session'
+import { computed } from 'vue'
 import type { NavigationFailure } from 'vue-router'
 import { RouterLink, useRoute } from 'vue-router'
 
@@ -13,6 +15,10 @@ const emit = defineEmits<{
 }>()
 
 const route = useRoute()
+const session = useSessionStore()
+const items = computed(() =>
+  mainNav.filter((item) => !item.sysadminOnly || session.canManageMembers),
+)
 
 function isItemActive(to: string) {
   if (to === '/') return route.path === '/'
@@ -46,7 +52,7 @@ function onNavigate(
 
     <nav :id="id" class="flex-1 space-y-1 px-3 py-4" aria-label="主要導覽">
       <RouterLink
-        v-for="item in mainNav"
+        v-for="item in items"
         :key="item.to"
         v-slot="{ href, navigate }"
         :to="item.to"

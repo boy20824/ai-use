@@ -63,6 +63,11 @@ const linkedTemplates = computed(() => {
     .filter((item) => item !== undefined)
 })
 
+function fieldPlaceholder(name: string) {
+  if (name === '姓名') return '請輸入姓名'
+  return `請輸入${name}`
+}
+
 const fieldNames = computed(() => {
   const names = ['姓名', '日期']
   const seen = new Set(names)
@@ -520,6 +525,7 @@ onUnmounted(clearDraft)
                   :value="fieldValue(name)"
                   type="text"
                   autocomplete="off"
+                  :placeholder="fieldPlaceholder(name)"
                   class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
                   @input="onFieldInput(name, $event)"
                 />
@@ -691,7 +697,7 @@ onUnmounted(clearDraft)
               id="overview-picker"
               :value="pickerQuery"
               type="search"
-              placeholder="檔名"
+              placeholder="請輸入檔名"
               class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
               @input="onPickerQuery"
             />
@@ -743,6 +749,7 @@ onUnmounted(clearDraft)
                 :value="fieldValue(name)"
                 type="text"
                 autocomplete="off"
+                :placeholder="fieldPlaceholder(name)"
                 class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
                 @input="onFieldInput(name, $event)"
               />
