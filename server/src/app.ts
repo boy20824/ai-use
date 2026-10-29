@@ -19,6 +19,7 @@ import {
   createQueries,
   type AppDatabase,
   type AppQueries,
+  type AuditAction,
   type CategoryRecord,
   type Role,
   type StepInput,
@@ -223,8 +224,9 @@ function requireUser(request: FastifyRequest, reply: FastifyReply) {
   return request.authUser
 }
 
-function canEditCategory(role: Role) {
-  return role === 'admin' || role === 'clerk'
+function scopedId(schema: z.ZodType<string>, raw: unknown): string {
+  const parsed = schema.safeParse(raw)
+  return parsed.success ? parsed.data : ''
 }
 
 function originAllowed(request: FastifyRequest, config: AppConfig) {
@@ -317,6 +319,28 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     }
   })
 
+  function requireAdmin(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    action: AuditAction,
+    target: { templateId?: string; categoryId?: string },
+  ) {
+    const user = requireUser(request, reply)
+    if (!user) return null
+    if (user.role === 'admin') return user
+    queries.insertAudit(
+      user.username,
+      action,
+      target.templateId ?? '',
+      '',
+      target.categoryId ?? '',
+      '',
+      'denied',
+    )
+    fail(reply, 403, 'forbidden', '只有管理員可以變更範本或案件類別。')
+    return null
+  }
+
   app.setErrorHandler((error: { code?: string }, _request, reply) => {
     if (reply.sent) return
     const code = error.code ?? ''
@@ -399,11 +423,8 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   })
 
   app.post('/api/categories', async (request, reply) => {
-    const user = requireUser(request, reply)
+    const user = requireAdmin(request, reply, 'category_create', {})
     if (!user) return
-    if (!canEditCategory(user.role)) {
-      return fail(reply, 403, 'forbidden', '唯讀身分不能建立或編輯案件類別。')
-    }
     const parsed = categoryBodySchema.safeParse(request.body)
     if (!parsed.success)
       return fail(reply, 400, 'invalid-input', categoryInputMessage(parsed.error))
@@ -433,11 +454,10 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   })
 
   app.patch('/api/categories/:id', async (request, reply) => {
-    const user = requireUser(request, reply)
+    const user = requireAdmin(request, reply, 'category_update', {
+      categoryId: scopedId(categoryIdSchema, requestId(request)),
+    })
     if (!user) return
-    if (!canEditCategory(user.role)) {
-      return fail(reply, 403, 'forbidden', '唯讀身分不能建立或編輯案件類別。')
-    }
     const id = categoryIdSchema.safeParse(requestId(request))
     if (!id.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
     const parsed = categoryBodySchema.safeParse(request.body)
@@ -473,11 +493,10 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   })
 
   app.delete('/api/categories/:id', async (request, reply) => {
-    const user = requireUser(request, reply)
+    const user = requireAdmin(request, reply, 'category_delete', {
+      categoryId: scopedId(categoryIdSchema, requestId(request)),
+    })
     if (!user) return
-    if (user.role !== 'admin') {
-      return fail(reply, 403, 'forbidden', '只有管理員可以刪除案件類別。')
-    }
     const id = categoryIdSchema.safeParse(requestId(request))
     if (!id.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
     const existing = queries.getCategory(id.data)
@@ -516,11 +535,8 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   })
 
   app.post('/api/templates', async (request, reply) => {
-    const user = requireUser(request, reply)
+    const user = requireAdmin(request, reply, 'upload', {})
     if (!user) return
-    if (user.role === 'viewer') {
-      return fail(reply, 403, 'forbidden', '唯讀身分不能上傳範本。')
-    }
 
     const file = await request.file()
     if (!file) return fail(reply, 400, 'invalid-input', '請選擇 .docx 檔案。')
@@ -580,11 +596,10 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   })
 
   app.delete('/api/templates/:id', async (request, reply) => {
-    const user = requireUser(request, reply)
+    const user = requireAdmin(request, reply, 'delete', {
+      templateId: scopedId(templateIdSchema, requestId(request)),
+    })
     if (!user) return
-    if (user.role !== 'admin') {
-      return fail(reply, 403, 'forbidden', '只有管理員可以移除範本。')
-    }
     const parsed = templateIdSchema.safeParse(requestId(request))
     if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
     const existing = queries.getTemplateFile(parsed.data)

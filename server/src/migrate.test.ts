@@ -137,11 +137,12 @@ describe('category migration', () => {
     }[]
     expect(templateColumns.map((column) => column.name)).not.toContain('category_id')
 
-    const audit = db.prepare('SELECT action, template_id FROM audit_log').all() as {
+    const audit = db.prepare('SELECT action, template_id, result FROM audit_log').all() as {
       action: string
       template_id: string
+      result: string
     }[]
-    expect(audit).toEqual([{ action: 'upload', template_id: 'user-template' }])
+    expect(audit).toEqual([{ action: 'upload', template_id: 'user-template', result: 'allowed' }])
 
     const removed = queries.deleteCategory('user-keep', 'admin', '使用者自建類別')
     expect(removed).toBe(true)

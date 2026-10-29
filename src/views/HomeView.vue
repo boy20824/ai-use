@@ -121,7 +121,7 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
         >
           新增案件類別
         </RouterLink>
-        <p v-else class="text-sm text-stone-600">請由類別承辦或系統管理員新增。</p>
+        <p v-else class="text-sm text-stone-600">請由系統管理員新增。</p>
       </EmptyState>
       <p v-else-if="!categories.ready" class="px-5 py-8 text-sm text-stone-500">
         正在讀取案件類別。

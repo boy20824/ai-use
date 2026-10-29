@@ -202,6 +202,21 @@ describe('security controls', () => {
       payload: file.payload,
     })
     expect(missingToken.statusCode).toBe(403)
+    expect(missingToken.json().error).toBe('csrf')
+
+    const forged = await app.inject({
+      method: 'POST',
+      url: '/api/templates',
+      cookies: clerkAuth.cookies,
+      headers: {
+        ...file.headers,
+        origin,
+        'x-csrf-token': '0'.repeat(64),
+      },
+      payload: file.payload,
+    })
+    expect(forged.statusCode).toBe(403)
+    expect(forged.json().error).toBe('csrf')
 
     const viewerUpload = await app.inject({
       method: 'POST',
@@ -212,11 +227,22 @@ describe('security controls', () => {
     })
     expect(viewerUpload.statusCode).toBe(403)
 
-    const uploaded = await app.inject({
+    const clerkUpload = await app.inject({
       method: 'POST',
       url: '/api/templates',
       cookies: clerkAuth.cookies,
       headers: { ...file.headers, ...clerkAuth.headers },
+      payload: file.payload,
+    })
+    expect(clerkUpload.statusCode).toBe(403)
+    expect(clerkUpload.json().error).toBe('forbidden')
+
+    const adminAuth = auth(admin)
+    const uploaded = await app.inject({
+      method: 'POST',
+      url: '/api/templates',
+      cookies: adminAuth.cookies,
+      headers: { ...file.headers, ...adminAuth.headers },
       payload: file.payload,
     })
     expect(uploaded.statusCode).toBe(201)
@@ -233,13 +259,29 @@ describe('security controls', () => {
     const removed = await app.inject({
       method: 'DELETE',
       url: `/api/templates/${templateId}`,
-      ...auth(admin),
+      ...adminAuth,
     })
     expect(removed.statusCode).toBe(204)
     const audit = db
-      .prepare('SELECT actor_username, action, template_id, file_name, category_id FROM audit_log')
-      .all() as { actor_username: string; action: string; file_name: string }[]
-    expect(audit.map((row) => row.action)).toEqual(['upload', 'delete'])
+      .prepare(
+        'SELECT actor_username, action, template_id, file_name, category_id, detail, result FROM audit_log ORDER BY id',
+      )
+      .all() as {
+      actor_username: string
+      action: string
+      file_name: string
+      detail: string
+      result: string
+    }[]
+    expect(audit.filter((row) => row.result === 'allowed').map((row) => row.action)).toEqual([
+      'upload',
+      'delete',
+    ])
+    expect(audit.filter((row) => row.result === 'denied').map((row) => row.action)).toEqual([
+      'upload',
+      'upload',
+      'delete',
+    ])
     expect(JSON.stringify(audit)).not.toContain('CASE-SECRET-VALUE')
     expect(JSON.stringify(audit)).not.toContain('password')
   })
