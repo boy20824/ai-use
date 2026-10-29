@@ -40,6 +40,7 @@ pnpm dev
 | `pnpm lint`         | ESLint 與 Prettier                   |
 | `pnpm build`        | 建置畫面，並做服務型別檢查           |
 | `pnpm check:sample` | 用示範範本確認欄位可被帶入並打成 zip |
+| `pnpm smoke:docker` | 建置正式映像並確認 `/healthz` 回 ok  |
 
 ## 環境變數
 
@@ -70,6 +71,12 @@ pnpm dev
 ## 部署
 
 正式環境由 Fastify 在同一個來源提供建置後的畫面與 `/api`。Fly.io 的指令、volume、機密與費用見 [docs/DEPLOY-fly.md](docs/DEPLOY-fly.md)。
+
+推上 `main` 時，部署 workflow 會先跑 `pnpm smoke:docker`（`scripts/smoke-docker.sh`）。它建置 Docker 映像，以 `NODE_ENV=production`、至少 32 字元且不是示範值的 `SESSION_SECRET` 啟動容器，把暫存目錄掛到 `/data`，再請求 `/healthz`。回應不是 ok 就失敗，不會繼續部署。本機需要 Docker：
+
+```bash
+pnpm smoke:docker
+```
 
 ## 路由
 
@@ -121,11 +128,13 @@ pnpm dev
 ## 目錄
 
 ```text
-src/             畫面
-server/          Fastify 與 SQLite
-public/samples/  虛構的 .docx 範本
-Dockerfile       正式映像
-fly.toml         Fly.io app
+src/                  畫面
+server/               Fastify 與 SQLite
+server/src/docxXml.ts 服務與畫面共用的 docx XML 正規化（會打進執行映像）
+shared/               瀏覽器產生文件與測試用的 docx 輔助
+public/samples/       虛構的 .docx 範本
+Dockerfile            正式映像
+fly.toml              Fly.io app
 ```
 
 ## 範圍

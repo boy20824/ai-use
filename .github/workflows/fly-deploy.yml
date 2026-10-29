@@ -21,6 +21,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Smoke test the production image
+        run: bash scripts/smoke-docker.sh
+
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@1.6
 

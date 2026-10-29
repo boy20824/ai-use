@@ -18,7 +18,8 @@
     "typecheck": "vue-tsc --noEmit && pnpm --filter @ai-use/server typecheck",
     "test": "vitest run",
     "lint": "eslint . --max-warnings 0 && prettier --check .",
-    "check:sample": "node --experimental-strip-types scripts/check-sample-docx.ts"
+    "check:sample": "node --experimental-strip-types scripts/check-sample-docx.ts",
+    "smoke:docker": "bash scripts/smoke-docker.sh"
   },
   "dependencies": {
     "docxtemplater": "^3.71.1",

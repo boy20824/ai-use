@@ -1,14 +1,12 @@
-import Docxtemplater from 'docxtemplater'
-import PizZip from 'pizzip'
 import JSZip from 'jszip'
-import { docxZipLimits, normalizeDocx } from './docxXml.ts'
 
 const docxMimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
 export const templateMimeType = docxMimeType
 export const maxTemplateBytes = 8 * 1024 * 1024
 
-export { listPlaceholders, placeholdersInText } from './docxXml.ts'
+export { listPlaceholders, placeholdersInText } from '../../server/src/docxXml.ts'
+export { renderDocx } from '../../shared/docxRender.ts'
 
 export function safeFileName(name: string): string {
   const base = name.replace(/\\/g, '/').split('/').pop() ?? ''
@@ -24,24 +22,6 @@ export function hasZipHeader(data: ArrayBuffer): boolean {
   if (data.byteLength < 4) return false
   const bytes = new Uint8Array(data, 0, 4)
   return bytes[0] === 0x50 && bytes[1] === 0x4b
-}
-
-export function renderDocx(
-  data: ArrayBuffer | Uint8Array,
-  values: Record<string, string>,
-): Uint8Array {
-  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
-  const normalized = normalizeDocx(bytes, docxZipLimits)
-  const zip = new PizZip(normalized.data)
-  const doc = new Docxtemplater(zip, {
-    delimiters: { start: '{{', end: '}}' },
-    paragraphLoop: true,
-    linebreaks: true,
-    nullGetter: () => '',
-  })
-  doc.render({ ...values })
-  const output = doc.getZip().generate({ type: 'uint8array' })
-  return output instanceof Uint8Array ? output : new Uint8Array(output)
 }
 
 export async function zipGeneratedFiles(

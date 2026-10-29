@@ -127,7 +127,7 @@ fly volumes snapshots list <volume-id>
 
 ## GitHub Actions
 
-`.github/workflows/fly-deploy.yml` 在推上 `main`，或於 Actions 手動執行（`workflow_dispatch`）時部署。它讀 repository secret `FLY_API_TOKEN`。沒有這個 secret 時，部署步驟會略過並成功結束，不會因為缺 token 失敗。有 token 時執行 `flyctl deploy --remote-only --ha=false`，避免再開第二台機器。部署步驟結束後會重試 `https://ai-use.fly.dev/healthz`，回應不是 ok 就讓這個 job 失敗。
+`.github/workflows/fly-deploy.yml` 在推上 `main`，或於 Actions 手動執行（`workflow_dispatch`）時部署。部署前會先執行 `scripts/smoke-docker.sh`（本機是 `pnpm smoke:docker`）：建置 Docker 映像，用至少 32 字元且不是示範值的 `SESSION_SECRET`、`NODE_ENV=production`，把暫存目錄掛到 `/data`，再請求容器裡的 `/healthz`。沒有回 ok 就讓這個 job 失敗，不會繼續部署。接著讀 repository secret `FLY_API_TOKEN`。沒有這個 secret 時，部署步驟會略過並成功結束，不會因為缺 token 失敗。有 token 時執行 `flyctl deploy --remote-only --ha=false`，避免再開第二台機器。部署步驟結束後會重試 `https://ai-use.fly.dev/healthz`，回應不是 ok 就讓這個 job 失敗。
 
 在本機建立 deploy token（不要把 token 貼進 repo）：
 
@@ -139,4 +139,4 @@ fly tokens create deploy
 
 ## 映像檔
 
-`docker build` 是多階段的：建置階段用 corepack 安裝 pnpm 10.33.4，編譯畫面與原生模組；最後一個階段只有 Node 22 slim、正式依賴、`dist`、示範範本與伺服器原始碼。沒有 TypeScript、Vite、ESLint 或測試工具。伺服器行程在打開資料庫之前會把 `/data` 的擁有者改成 uid 1001（`app`），然後放棄 root。
+`docker build` 是多階段的：建置階段用 corepack 安裝 pnpm 10.33.4，編譯畫面與原生模組；最後一個階段只有 Node 22 slim、正式依賴、`dist`、示範範本與伺服器原始碼。docx 欄位合併在 `server/src/docxXml.ts`，映像會再複製這個檔，服務不會從畫面的 `src/` 載入模組。沒有 TypeScript、Vite、ESLint 或測試工具。伺服器行程在打開資料庫之前會把 `/data` 的擁有者改成 uid 1001（`app`），然後放棄 root。

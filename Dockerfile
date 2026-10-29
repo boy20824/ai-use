@@ -38,6 +38,9 @@ RUN groupadd --system --gid 1001 app \
 COPY --from=build /prod /app/server
 COPY --from=build /app/dist /app/dist
 COPY --from=build /app/public/samples /app/public/samples
+# docx.ts loads this file when the process starts. pnpm deploy should already
+# include it; copy it again so a pack filter cannot drop the module.
+COPY --from=build /app/server/src/docxXml.ts /app/server/src/docxXml.ts
 RUN chown -R app:app /app
 EXPOSE 3000
 CMD ["node", "/app/server/src/index.ts"]

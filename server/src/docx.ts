@@ -1,9 +1,5 @@
-export {
-  assertSafeZip,
-  listPlaceholders,
-  normalizeDocx,
-  type ZipLimits,
-} from '../../src/services/docxXml.ts'
+// Loaded at runtime from this package. The production image does not contain frontend src/.
+export { assertSafeZip, listPlaceholders, normalizeDocx, type ZipLimits } from './docxXml.ts'
 
 const allowedMimeTypes = new Set([
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

@@ -4,7 +4,7 @@ import { applyRocDateFields, defaultRocDateSlash } from '@/utils/rocDate'
 import { initialDraftValues } from '@/workbench/draft'
 import { inputFields, manualFieldsFromPlaceholders } from '@/workbench/overview'
 import { listPlaceholders, renderDocx } from './docxTemplates'
-import { docxZipLimits, normalizeDocx, splitFormatNotice } from './docxXml'
+import { docxZipLimits, normalizeDocx, splitFormatNotice } from '../../server/src/docxXml'
 import {
   buildDocx,
   differentRPr,
@@ -14,7 +14,7 @@ import {
   wordDocument,
   wordFooter,
   wordHeader,
-} from './docxFixture'
+} from '../../shared/docxFixture'
 
 const runPattern = /<w:r(?=[\s>])[^>]*>[\s\S]*?<\/w:r>/g
 

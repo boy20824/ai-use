@@ -1,4 +1,4 @@
-import { docxZipLimits, normalizeDocx, splitFormatNotice } from '@/services/docxXml'
+import { docxZipLimits, normalizeDocx, splitFormatNotice } from '../../server/src/docxXml'
 import {
   hasZipHeader,
   listPlaceholders,
