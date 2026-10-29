@@ -30,22 +30,33 @@ fly volumes create data --region nrt --size 1
 
 ## 設定機密
 
-`SESSION_SECRET` 至少 32 字元，而且不能是 `dev-only-change-me`、`change-me`、`secret`、`password`、`clerk-demo` 這類示範值。正式環境若沒有這個值，或仍是示範值，程序會拒絕啟動。
+`SESSION_SECRET` 至少 32 字元，而且不能是 `dev-only-change-me`、`change-me`、`secret`、`password`、`clerk-demo` 這類示範值。正式環境若沒有這個值，或仍是示範值，程序會拒絕啟動。這項與是否建立示範帳號無關。
 
-三個種子密碼也不能用 `.env.example` 裡的 `clerk-demo`、`admin-demo`、`viewer-demo`。帳號只在資料庫裡**還沒有這個使用者**時建立；之後再啟動不會覆寫已存在的密碼。
+`fly.toml` 把 `SEED_DEMO_USERS` 設成 `false`。未設定時，正式環境（`NODE_ENV=production`）也視為關閉。關閉時開機不會建立 `clerk`、`admin`、`viewer`，也不需要 `SEED_USER_CLERK_PASSWORD`、`SEED_USER_ADMIN_PASSWORD`、`SEED_USER_VIEWER_PASSWORD`。程序不會刪除或改寫資料庫裡已經存在的使用者。
+
+開發用的 `.env.example` 是 `SEED_DEMO_USERS=true`。只有設成 `true` 時，才會為尚不存在的那三個帳號寫入密碼，而且正式環境不能使用 `.env.example` 的 `clerk-demo`、`admin-demo`、`viewer-demo`。已存在的帳號維持原密碼。
 
 `CORS_ORIGINS` 設成對外的 `https://<app 名稱>.fly.dev`。同一個來源的請求即使沒設這項也會被接受；有別的前端來源時再把網址加進這個清單（逗號分隔，不要用 `*`）。
+
+只上線、不放示範帳號時：
 
 ```bash
 fly secrets set \
   SESSION_SECRET="$(openssl rand -hex 32)" \
-  SEED_USER_CLERK_PASSWORD="換成承辦密碼" \
-  SEED_USER_ADMIN_PASSWORD="換成管理員密碼" \
-  SEED_USER_VIEWER_PASSWORD="換成唯讀密碼" \
   CORS_ORIGINS="https://ai-use.fly.dev"
 ```
 
-把最後一行的網域換成你的 app 名稱。這些值不會出現在 git。
+若要在正式環境補上缺少的示範帳號，再額外設定（密碼不要用示範值）：
+
+```bash
+fly secrets set \
+  SEED_DEMO_USERS=true \
+  SEED_USER_CLERK_PASSWORD="換成承辦密碼" \
+  SEED_USER_ADMIN_PASSWORD="換成管理員密碼" \
+  SEED_USER_VIEWER_PASSWORD="換成唯讀密碼"
+```
+
+把網域換成你的 app 名稱。這些值不會出現在 git。帳號建立之後可以把 `SEED_DEMO_USERS` 改回 `false`；已寫入的使用者會留著。
 
 ## 部署
 
@@ -53,7 +64,7 @@ fly secrets set \
 fly deploy
 ```
 
-機器開機時會冪等執行資料庫 migration，並補上缺少的種子使用者、案件類別與示範範本。`GET /healthz` 會對 SQLite 做 `SELECT 1`，回 `{"ok":true}`。Fly 的健康檢查打的是這個路徑。
+機器開機時會冪等執行資料庫 migration，並補上缺少的案件類別與示範範本。示範使用者只在 `SEED_DEMO_USERS=true` 且該帳號尚不存在時建立，不會刪除已存在的使用者。`GET /healthz` 會對 SQLite 做 `SELECT 1`，回 `{"ok":true}`。Fly 的健康檢查打的是這個路徑。
 
 部署完成後：
 
@@ -78,11 +89,12 @@ min_machines_running = 0
 
 資料庫使用 WAL。同一個目錄裡會有 `app.sqlite`、`app.sqlite-wal`、`app.sqlite-shm`，全部在 `/data`。不要把 `DATABASE_PATH` 指到 `/app` 或其他會隨部署消失的路徑。
 
-| 變數            | 正式環境的值       | 開發時的預設             |
-| --------------- | ------------------ | ------------------------ |
-| `DATABASE_PATH` | `/data/app.sqlite` | `server/data/app.sqlite` |
-| `UPLOAD_DIR`    | `/data/uploads`    | `server/data/uploads`    |
-| `NODE_ENV`      | `production`       | `development`            |
+| 變數              | 正式環境的值       | 開發時的預設             |
+| ----------------- | ------------------ | ------------------------ |
+| `DATABASE_PATH`   | `/data/app.sqlite` | `server/data/app.sqlite` |
+| `UPLOAD_DIR`      | `/data/uploads`    | `server/data/uploads`    |
+| `NODE_ENV`        | `production`       | `development`            |
+| `SEED_DEMO_USERS` | `false`            | `true`（`.env.example`） |
 
 `NODE_ENV=production` 時 session cookie 會加上 `Secure`，而且 `HOST` 預設是 `0.0.0.0`，Fly 的 proxy 才連得上。`internal_port` 是 `3000`。
 

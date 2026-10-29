@@ -28,7 +28,7 @@ pnpm dev
 - 畫面：`http://localhost:5173`（`/api` 會轉到服務）
 - 服務：`http://127.0.0.1:3000`
 
-第一次啟動會建立 SQLite、寫入示範帳號，並放入 `public/samples/field-note.docx`。
+第一次啟動會建立 SQLite，並放入 `public/samples/field-note.docx`。`.env.example` 的 `SEED_DEMO_USERS=true` 會再寫入尚不存在的示範帳號。正式環境預設不寫入，也不會刪除已存在的使用者。
 
 ## 指令
 
@@ -49,7 +49,9 @@ pnpm dev
 
 `DATABASE_PATH` 與 `UPLOAD_DIR` 在開發時相對 `server/`。`SESSION_SECRET` 用來簽署 session cookie；正式環境少了它，或仍是 `.env.example` 的示範值，服務會拒絕啟動。
 
-預設示範帳號（密碼以 `.env.example` 為準）：
+`SEED_DEMO_USERS=true` 時，若資料庫還沒有 `clerk`、`admin`、`viewer`，啟動會建立這三個帳號，密碼來自 `SEED_USER_*`。開發的 `.env.example` 設為 `true`。正式環境請維持未設定或 `false`（`fly.toml` 是 `false`），這樣不需要 `SEED_USER_*` 也能啟動。啟動不會刪除或覆寫已經存在的使用者。
+
+預設示範帳號（只在有開啟種子時建立，密碼以 `.env.example` 為準）：
 
 | 帳號   | 角色       | 可以做的事                   |
 | ------ | ---------- | ---------------------------- |
