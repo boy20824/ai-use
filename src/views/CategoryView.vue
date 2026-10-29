@@ -1,51 +1,93 @@
 <script setup lang="ts">
 import EmptyState from '@/components/EmptyState.vue'
-import FileDropzone from '@/components/FileDropzone.vue'
-import GeneratePanel from '@/components/GeneratePanel.vue'
 import PageIntro from '@/components/PageIntro.vue'
-import PlaceholderGuide from '@/components/PlaceholderGuide.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
+import RocDateField from '@/components/RocDateField.vue'
 import { appName } from '@/config/app'
+import { renderDocx, templateMimeType, zipGeneratedFiles } from '@/services/docxTemplates'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
-import { formatBytes } from '@/utils/format'
+import type { CategoryStep } from '@/types/domain'
+import { downloadBlob, downloadBytes } from '@/utils/download'
 import { displayFileName } from '@/utils/fileName'
-import { formatStoredDate } from '@/utils/rocDate'
-import { templateOriginLabel, templateTone } from '@/utils/status'
-import { computed, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { applyRocDateFields, parseRocDate } from '@/utils/rocDate'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
 const router = useRouter()
 const categories = useCategoryStore()
 const templates = useTemplateStore()
 const session = useSessionStore()
-const feedback = ref('')
-const feedbackTone = ref<'ok' | 'warn'>('ok')
-const pickerOpen = ref(false)
-const pickerQuery = ref('')
-const selectedIds = ref<string[]>([])
-const linking = ref(false)
+const values = ref<Record<string, string>>({})
+const done = ref<Record<string, boolean>>({})
+const busy = ref(false)
+const message = ref('')
+const messageTone = ref<'ok' | 'warn'>('ok')
+const messageStepId = ref('')
 const confirmDelete = ref(false)
 const deleting = ref(false)
-
-const disabledReason =
-  '唯讀檢視只能閱讀步驟與已連結的範本，不能上傳或調整連結。若要變更，請登出後改以類別承辦或系統管理員進入。'
 
 const categoryId = computed(() => {
   const raw = route.params.id
   return (Array.isArray(raw) ? raw[0] : raw) ?? ''
 })
-
 const category = computed(() => categories.byId(categoryId.value))
-const categoryTemplates = computed(() => templates.forCategory(categoryId.value))
-const pickerMatches = computed(() => {
-  const query = pickerQuery.value.trim().toLocaleLowerCase()
-  if (!query) return templates.items
-  return templates.items.filter((item) =>
-    displayFileName(item.fileName).toLocaleLowerCase().includes(query),
-  )
+
+const linkedTemplates = computed(() => {
+  const ids = category.value?.steps.flatMap((step) => step.templateIds) ?? []
+  const seen = new Set<string>()
+  return ids
+    .filter((id) => {
+      if (seen.has(id)) return false
+      seen.add(id)
+      return true
+    })
+    .map((id) => templates.byId(id))
+    .filter((item) => item !== undefined)
+})
+
+const fieldNames = computed(() => {
+  const names = ['姓名', '日期']
+  const seen = new Set(names)
+  for (const template of linkedTemplates.value) {
+    for (const placeholder of template.placeholders) {
+      if (seen.has(placeholder) || placeholder === '日期_民國') continue
+      seen.add(placeholder)
+      names.push(placeholder)
+    }
+  }
+  return names
+})
+
+const missingFields = computed(() => {
+  const missing: string[] = []
+  for (const name of fieldNames.value) {
+    const raw = (values.value[name] ?? '').trim()
+    if (!raw) {
+      missing.push(name)
+      continue
+    }
+    if (name === '日期' && !parseRocDate(raw)) missing.push('日期格式')
+  }
+  return missing
+})
+
+const canGenerate = computed(() => missingFields.value.length === 0 && !busy.value)
+const generateHint = computed(() => {
+  if (missingFields.value.includes('日期格式')) return '日期不是有效的民國日期。'
+  if (missingFields.value.length === 0) return ''
+  return `請先在基本資料填寫：${missingFields.value.join('、')}。`
+})
+
+const dateToken = '{{日期}}'
+const dateSlashToken = '{{日期_民國}}'
+
+const dateValue = computed({
+  get: () => values.value['日期'] ?? '',
+  set: (value: string) => {
+    values.value = { ...values.value, 日期: value }
+  },
 })
 
 watch(
@@ -57,140 +99,134 @@ watch(
 )
 
 watch(categoryId, () => {
-  feedback.value = ''
-  pickerOpen.value = false
+  clearDraft()
   confirmDelete.value = false
-  selectedIds.value = []
 })
 
-function templateName(id: string) {
-  const found = templates.items.find((item) => item.id === id)
-  return found ? displayFileName(found.fileName) : '已不在範本庫'
+watch(
+  () => session.authenticated,
+  (signedIn) => {
+    if (!signedIn) clearDraft()
+  },
+)
+
+function clearDraft() {
+  values.value = {}
+  done.value = {}
+  message.value = ''
+  messageStepId.value = ''
 }
 
-function openPicker() {
-  selectedIds.value = categoryTemplates.value.map((item) => item.id)
-  pickerQuery.value = ''
-  pickerOpen.value = true
-  confirmDelete.value = false
+function fieldValue(name: string) {
+  return values.value[name] ?? ''
 }
 
-function toggleTemplate(id: string, event: Event) {
+function onFieldInput(name: string, event: Event) {
   const target = event.target
   if (!(target instanceof HTMLInputElement)) return
-  if (target.checked) {
-    if (!selectedIds.value.includes(id)) selectedIds.value = [...selectedIds.value, id]
-    return
+  values.value = { ...values.value, [name]: target.value }
+}
+
+function templatesFor(step: CategoryStep) {
+  return step.templateIds.map((id) => templates.byId(id)).filter((item) => item !== undefined)
+}
+
+function toggleDone(id: string, event: Event) {
+  const target = event.target
+  if (!(target instanceof HTMLInputElement)) return
+  done.value = { ...done.value, [id]: target.checked }
+}
+
+async function renderOne(id: string) {
+  const filled = applyRocDateFields(values.value)
+  if (!filled) throw new Error('invalid-date')
+  const template = templates.byId(id)
+  const bytes = await templates.bytesFor(id)
+  if (!template || !bytes) throw new Error('missing-template')
+  return {
+    name: `產生-${displayFileName(template.fileName)}`,
+    data: renderDocx(bytes, filled),
   }
-  selectedIds.value = selectedIds.value.filter((item) => item !== id)
 }
 
-function moveIds(ids: string[], index: number, delta: number) {
-  const nextIndex = index + delta
-  if (nextIndex < 0 || nextIndex >= ids.length) return ids
-  const next = [...ids]
-  const [item] = next.splice(index, 1)
-  if (item === undefined) return ids
-  next.splice(nextIndex, 0, item)
-  return next
-}
-
-function moveSelected(index: number, delta: number) {
-  selectedIds.value = moveIds(selectedIds.value, index, delta)
-}
-
-async function applyLinks() {
-  if (!category.value || linking.value) return
-  linking.value = true
-  feedback.value = ''
+async function produceOne(stepId: string, templateId: string) {
+  if (!canGenerate.value) return
+  busy.value = true
+  message.value = ''
+  messageStepId.value = stepId
   try {
-    await templates.setLinks(category.value.id, selectedIds.value)
-    await categories.reload()
-    pickerOpen.value = false
-    feedbackTone.value = 'ok'
-    feedback.value = `已更新連結，此類別目前使用 ${selectedIds.value.length} 份範本。`
-  } catch (cause) {
-    feedbackTone.value = 'warn'
-    feedback.value = cause instanceof Error ? cause.message : '無法更新範本連結。'
+    const rendered = await renderOne(templateId)
+    downloadBytes(rendered.data, rendered.name, templateMimeType)
+    messageTone.value = 'ok'
+    message.value = `已下載「${rendered.name}」。填寫內容沒有被保存。`
+  } catch (error) {
+    messageTone.value = 'warn'
+    message.value =
+      error instanceof Error && error.message === 'invalid-date'
+        ? '日期不是有效的民國日期。'
+        : '無法產生這份文件。請確認範本裡的欄位寫成雙大括號，且括號在同一段文字中。'
   } finally {
-    linking.value = false
+    busy.value = false
   }
 }
 
-async function saveOrder(ids: string[], message: string) {
-  if (!category.value) return
-  linking.value = true
-  feedback.value = ''
+async function produceStep(stepId: string, templateIds: string[], index: number) {
+  if (!canGenerate.value || !category.value || templateIds.length === 0) return
+  busy.value = true
+  message.value = ''
+  messageStepId.value = stepId
+  const rendered: { name: string; data: Uint8Array }[] = []
+  const failed: string[] = []
+  for (const templateId of templateIds) {
+    try {
+      rendered.push(await renderOne(templateId))
+    } catch {
+      const template = templates.byId(templateId)
+      failed.push(template ? displayFileName(template.fileName) : '範本')
+    }
+  }
   try {
-    await templates.setLinks(category.value.id, ids)
-    await categories.reload()
-    if (pickerOpen.value) selectedIds.value = ids
-    feedbackTone.value = 'ok'
-    feedback.value = message
-  } catch (cause) {
-    feedbackTone.value = 'warn'
-    feedback.value = cause instanceof Error ? cause.message : '無法更新範本連結。'
+    if (rendered.length === 0) {
+      messageTone.value = 'warn'
+      message.value = '沒有可以下載的文件。請確認日期有效，且範本欄位寫成雙大括號。'
+      return
+    }
+    const base = (category.value.code || category.value.name || '範本').replace(
+      /[\\/:*?"<>|]/g,
+      '_',
+    )
+    const zip = await zipGeneratedFiles(rendered)
+    downloadBlob(zip, `${base}-步驟${index + 2}.zip`)
+    messageTone.value = failed.length > 0 ? 'warn' : 'ok'
+    message.value =
+      failed.length > 0
+        ? `已下載 ${rendered.length} 份文件。無法產生：${failed.join('、')}。填寫內容沒有被保存。`
+        : `已下載 ${rendered.length} 份文件。填寫內容沒有被保存。`
   } finally {
-    linking.value = false
+    busy.value = false
   }
-}
-
-function moveLinked(index: number, delta: number) {
-  const ids = moveIds(
-    categoryTemplates.value.map((item) => item.id),
-    index,
-    delta,
-  )
-  void saveOrder(ids, '已調整範本順序。')
-}
-
-function unlink(id: string) {
-  const ids = categoryTemplates.value.map((item) => item.id).filter((item) => item !== id)
-  void saveOrder(ids, '已取消連結。範本仍留在範本庫。')
-}
-
-async function onFiles(files: File[]) {
-  if (!category.value || !session.canUpload) return
-  const before = new Set(categoryTemplates.value.map((item) => item.id))
-  const result = await templates.addFiles(files, category.value.id)
-  await categories.reload()
-  if (pickerOpen.value) {
-    const added = templates
-      .forCategory(category.value.id)
-      .map((item) => item.id)
-      .filter((id) => !before.has(id) && !selectedIds.value.includes(id))
-    selectedIds.value = [...selectedIds.value, ...added]
-  }
-  if (result.added === 0 && result.skipped > 0 && result.rejected.length === 0) {
-    feedbackTone.value = 'warn'
-    feedback.value = `範本庫最多 ${templates.limit} 份，沒有再加入。`
-    return
-  }
-  if (result.added === 0) {
-    feedbackTone.value = 'warn'
-    feedback.value = result.rejected[0] ?? '沒有可保存的 .docx 範本。'
-    return
-  }
-  feedbackTone.value = result.rejected.length > 0 || result.skipped > 0 ? 'warn' : 'ok'
-  const notes = [`已上傳 ${result.added} 份到範本庫，並連結到這個類別。`]
-  if (result.skipped > 0) notes.push(`另有 ${result.skipped} 份因筆數上限未加入。`)
-  if (result.rejected.length > 0) notes.push(`${result.rejected.join('。')}。`)
-  feedback.value = notes.join('')
 }
 
 async function removeCategory() {
   if (!category.value || deleting.value) return
   deleting.value = true
   try {
+    clearDraft()
     await categories.remove(category.value.id)
     await templates.reload()
     await router.push('/categories')
   } catch (cause) {
-    feedbackTone.value = 'warn'
-    feedback.value = cause instanceof Error ? cause.message : '無法刪除案件類別。'
+    messageTone.value = 'warn'
+    message.value = cause instanceof Error ? cause.message : '無法刪除案件類別。'
     deleting.value = false
   }
 }
+
+onBeforeRouteLeave(() => {
+  clearDraft()
+})
+
+onUnmounted(clearDraft)
 </script>
 
 <template>
@@ -203,21 +239,22 @@ async function removeCategory() {
     </RouterLink>
 
     <PageIntro
-      :eyebrow="category.code || '案件類別'"
+      eyebrow="各類案件流程"
       :title="category.name"
-      :description="category.summary || '尚未填寫簡述。'"
+      :description="
+        category.summary || '依步驟準備。第一步填基本資料，之後每個步驟產生自己連結的範本。'
+      "
     />
 
     <ul class="mb-4 flex flex-wrap gap-2" aria-label="類別資訊">
       <li class="rounded-full bg-white px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
-        {{ category.steps.length }} 個步驟
+        {{ category.code || '未設代號' }}
       </li>
       <li class="rounded-full bg-white px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
-        {{ categoryTemplates.length }} 份範本
+        {{ category.steps.length }} 個填寫步驟
       </li>
       <li class="rounded-full bg-white px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
-        更新
-        <time :datetime="category.updatedAt">{{ formatStoredDate(category.updatedAt) }}</time>
+        {{ category.templateCount }} 份範本
       </li>
     </ul>
     <div class="mb-8 flex flex-wrap gap-3">
@@ -249,14 +286,8 @@ async function removeCategory() {
         刪除「{{ category.name }}」
       </h2>
       <p class="mt-2 text-sm leading-6 text-stone-600">
-        只會刪除這個類別，以及它和範本的連結。範本檔仍留在範本庫，其他類別可以繼續使用。
+        只會刪除這個類別、它的步驟，以及步驟和範本的連結。範本檔仍留在範本庫。
       </p>
-      <ul v-if="categoryTemplates.length > 0" class="mt-3 list-disc space-y-1 pl-5">
-        <li v-for="item in categoryTemplates" :key="item.id" class="text-sm text-stone-700">
-          {{ displayFileName(item.fileName) }}
-        </li>
-      </ul>
-      <p v-else class="mt-3 text-sm text-stone-500">這個類別目前沒有連結範本。</p>
       <div class="mt-4 flex flex-wrap gap-3">
         <button
           type="button"
@@ -276,255 +307,144 @@ async function removeCategory() {
       </div>
     </div>
 
-    <div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-      <section class="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm">
-        <div class="flex items-center justify-between gap-3">
-          <h2 class="text-base font-semibold text-stone-950">填寫步驟</h2>
-          <RouterLink
-            v-if="session.canEditCategory"
-            :to="`/categories/${category.id}/edit`"
-            class="text-sm text-orange-800 hover:underline"
-          >
-            編輯步驟
-          </RouterLink>
-        </div>
-        <p class="mt-1 text-sm leading-6 text-stone-600">依序準備即可。這不是送審流程。</p>
-        <p v-if="category.steps.length === 0" class="mt-5 text-sm text-stone-500">
-          尚未設定填寫步驟。
-        </p>
-        <ol v-else class="mt-5">
-          <li
-            v-for="(step, index) in category.steps"
-            :key="`${category.id}-${index}`"
-            class="flex gap-4"
-          >
-            <div class="flex w-8 flex-col items-center">
-              <span
-                class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white"
-              >
-                {{ index + 1 }}
-              </span>
-              <span
-                v-if="index < category.steps.length - 1"
-                class="my-2 w-px flex-1 bg-stone-200"
-                aria-hidden="true"
-              ></span>
-            </div>
-            <p class="min-w-0 flex-1 pb-6 text-sm leading-6 whitespace-pre-wrap text-stone-700">
-              {{ step }}
-            </p>
-          </li>
-        </ol>
-      </section>
-
-      <section class="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-        <div class="flex items-center justify-between gap-3">
-          <h2 class="text-base font-semibold text-stone-950">範本文件</h2>
-          <RouterLink to="/templates" class="text-sm text-orange-800 hover:underline">
-            範本庫
-          </RouterLink>
-        </div>
-        <p class="mt-2 text-sm leading-6 text-stone-600">
-          範本集中存放在範本庫，這個類別只保存連結。同一份範本可以給多個類別使用。請勿在檔名放入個資、密碼或權杖。
-        </p>
-        <div class="mt-4">
-          <PlaceholderGuide />
-        </div>
-        <div v-if="session.canEditCategory" class="mt-4">
-          <button
-            type="button"
-            class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
-            :aria-expanded="pickerOpen"
-            aria-controls="template-picker"
-            @click="pickerOpen ? (pickerOpen = false) : openPicker()"
-          >
-            從範本庫選取
-          </button>
-        </div>
-
-        <div
-          v-if="pickerOpen"
-          id="template-picker"
-          class="mt-4 rounded-2xl border border-stone-200 bg-stone-50 p-4"
-        >
-          <div class="flex items-center justify-between gap-3">
-            <h3 class="text-sm font-semibold text-stone-950">從範本庫選取</h3>
-            <button
-              type="button"
-              class="text-sm text-stone-600 hover:text-stone-900"
-              @click="pickerOpen = false"
+    <section class="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm">
+      <h2 class="text-base font-semibold text-stone-950">填寫步驟</h2>
+      <p class="mt-1 text-sm leading-6 text-stone-600">
+        基本資料的欄位只留在這個畫面。離開這個類別或登出後會清除，也不會送到服務。
+      </p>
+      <ol class="mt-6">
+        <li class="flex gap-4">
+          <div class="flex w-8 flex-col items-center">
+            <span
+              class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white"
             >
-              關閉
-            </button>
+              1
+            </span>
+            <span class="my-2 w-px flex-1 bg-stone-200" aria-hidden="true"></span>
           </div>
-          <label for="template-picker-search" class="mt-3 block text-xs font-medium text-stone-600">
-            搜尋範本
-          </label>
-          <input
-            id="template-picker-search"
-            v-model="pickerQuery"
-            type="search"
-            placeholder="檔名"
-            class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
-          />
-          <p v-if="templates.items.length === 0" class="mt-3 text-sm text-stone-500">
-            範本庫還沒有文件。可先在下方上傳，上傳後會出現在這裡。
-          </p>
-          <p v-else-if="pickerMatches.length === 0" class="mt-3 text-sm text-stone-500">
-            沒有符合的範本。
-          </p>
-          <ul v-else class="mt-3 max-h-64 space-y-2 overflow-auto">
-            <li v-for="item in pickerMatches" :key="item.id">
-              <label class="flex items-start gap-2 text-sm text-stone-800">
+          <div class="min-w-0 flex-1 pb-8">
+            <h3 class="text-sm font-semibold text-stone-900">基本資料</h3>
+            <p class="mt-1 text-sm leading-6 text-stone-600">
+              姓名與日期會套進這個類別各步驟的範本。日期用民國年，{{ dateToken }} 會寫成
+              115年10月29日，{{ dateSlashToken }} 會寫成 115/10/29。
+            </p>
+            <div class="mt-4 grid max-w-xl gap-4">
+              <div v-for="(name, index) in fieldNames" :key="name">
+                <label class="block text-sm font-medium text-stone-800" :for="`draft-${index}`">
+                  {{ name }}
+                </label>
+                <RocDateField v-if="name === '日期'" v-model="dateValue" />
                 <input
-                  type="checkbox"
-                  class="mt-1"
-                  :checked="selectedIds.includes(item.id)"
-                  @change="toggleTemplate(item.id, $event)"
+                  v-else
+                  :id="`draft-${index}`"
+                  :value="fieldValue(name)"
+                  type="text"
+                  autocomplete="off"
+                  class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+                  @input="onFieldInput(name, $event)"
                 />
-                <span>
-                  <span class="break-all font-medium">{{ displayFileName(item.fileName) }}</span>
-                  <span class="mt-0.5 block text-xs text-stone-500">
-                    {{
-                      item.placeholders.length > 0 ? item.placeholders.join('、') : '沒有偵測到欄位'
-                    }}
-                  </span>
-                </span>
-              </label>
-            </li>
-          </ul>
-          <div class="mt-4">
-            <p class="text-xs font-medium text-stone-600">套用順序</p>
-            <p v-if="selectedIds.length === 0" class="mt-2 text-sm text-stone-500">尚未選取。</p>
-            <ol v-else class="mt-2 space-y-2">
-              <li
-                v-for="(id, index) in selectedIds"
-                :key="id"
-                class="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2"
-              >
-                <span class="min-w-0 break-all text-sm text-stone-800">
-                  {{ index + 1 }}. {{ templateName(id) }}
-                </span>
-                <span class="flex shrink-0 gap-2">
-                  <button
-                    type="button"
-                    class="text-sm text-stone-600 hover:text-stone-900 disabled:text-stone-300"
-                    :disabled="index === 0"
-                    @click="moveSelected(index, -1)"
-                  >
-                    上移
-                  </button>
-                  <button
-                    type="button"
-                    class="text-sm text-stone-600 hover:text-stone-900 disabled:text-stone-300"
-                    :disabled="index === selectedIds.length - 1"
-                    @click="moveSelected(index, 1)"
-                  >
-                    下移
-                  </button>
-                </span>
-              </li>
-            </ol>
+              </div>
+            </div>
           </div>
-          <button
-            type="button"
-            class="mt-4 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:bg-stone-300"
-            :disabled="linking"
-            @click="applyLinks"
-          >
-            套用連結
-          </button>
-        </div>
+        </li>
 
-        <div class="mt-4">
-          <FileDropzone
-            :enabled="session.canUpload"
-            :disabled-reason="disabledReason"
-            title="將 .docx 範本拖到這裡，或選擇檔案"
-            hint="上傳後會存進範本庫，並連結到這個類別。其他類別也可以再選用同一份。"
-            accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            @select="onFiles"
-          />
-        </div>
-        <p
-          v-if="feedback"
-          class="mt-3 rounded-xl px-3 py-2 text-sm leading-6"
-          :class="
-            feedbackTone === 'ok' ? 'bg-emerald-50 text-emerald-950' : 'bg-amber-50 text-amber-950'
-          "
-          role="status"
-        >
-          {{ feedback }}
-        </p>
-        <p v-if="templates.error" class="mt-3 text-sm text-rose-800" role="alert">
-          {{ templates.error }}
-        </p>
-        <p v-if="categoryTemplates.length === 0" class="mt-4 text-sm text-stone-500">
-          這個類別還沒有連結範本。從範本庫選取，或上傳 .docx。
-        </p>
-        <ol v-else class="mt-4 divide-y divide-stone-200">
-          <li
-            v-for="(item, index) in categoryTemplates"
-            :key="item.id"
-            class="flex items-start justify-between gap-3 py-3"
-          >
-            <span class="min-w-0">
-              <span class="block break-all text-sm font-medium text-stone-900">
-                {{ index + 1 }}. {{ displayFileName(item.fileName) }}
-              </span>
-              <span class="mt-1 block text-xs leading-5 text-stone-500">
-                {{ formatBytes(item.sizeBytes) }} · {{ formatStoredDate(item.addedAt) }}
-              </span>
-              <span class="mt-1 block text-xs leading-5 text-stone-500">
-                {{ item.placeholders.length > 0 ? item.placeholders.join('、') : '沒有偵測到欄位' }}
-              </span>
-              <span class="mt-2 inline-flex">
-                <StatusBadge
-                  :label="templateOriginLabel(item.origin)"
-                  :tone="templateTone(item.origin)"
-                />
-              </span>
+        <li v-if="category.steps.length === 0" class="flex gap-4">
+          <div class="flex w-8 flex-col items-center">
+            <span
+              class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-200 text-xs font-semibold text-stone-700"
+            >
+              2
             </span>
-            <span v-if="session.canEditCategory" class="flex shrink-0 flex-col items-end gap-1">
-              <button
-                type="button"
-                class="text-sm text-stone-600 hover:text-stone-900 disabled:text-stone-300"
-                :disabled="linking || index === 0"
-                @click="moveLinked(index, -1)"
-              >
-                上移
-              </button>
-              <button
-                type="button"
-                class="text-sm text-stone-600 hover:text-stone-900 disabled:text-stone-300"
-                :disabled="linking || index === categoryTemplates.length - 1"
-                @click="moveLinked(index, 1)"
-              >
-                下移
-              </button>
-              <button
-                type="button"
-                class="text-sm text-stone-600 hover:text-rose-800"
-                :disabled="linking"
-                :aria-label="`取消連結 ${displayFileName(item.fileName)}`"
-                @click="unlink(item.id)"
-              >
-                取消連結
-              </button>
-            </span>
-          </li>
-        </ol>
-      </section>
-    </div>
+          </div>
+          <p class="pb-2 text-sm leading-6 text-stone-500">尚未設定後續步驟。</p>
+        </li>
 
-    <div class="mt-6">
-      <GeneratePanel
-        :key="category.id"
-        :category-id="category.id"
-        :category-code="category.code"
-        :category-name="category.name"
-      />
-    </div>
+        <li v-for="(step, index) in category.steps" :key="step.id" class="flex gap-4">
+          <div class="flex w-8 flex-col items-center">
+            <span
+              class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white"
+            >
+              {{ index + 2 }}
+            </span>
+            <span
+              v-if="index < category.steps.length - 1"
+              class="my-2 w-px flex-1 bg-stone-200"
+              aria-hidden="true"
+            ></span>
+          </div>
+          <div class="min-w-0 flex-1 pb-8">
+            <h3 class="text-sm font-semibold text-stone-900 whitespace-pre-wrap">
+              {{ step.body }}
+            </h3>
+            <label class="mt-3 inline-flex items-center gap-2 text-sm text-stone-700">
+              <input
+                type="checkbox"
+                :checked="done[step.id] === true"
+                @change="toggleDone(step.id, $event)"
+              />
+              本步驟已完成
+            </label>
+            <p v-if="templatesFor(step).length === 0" class="mt-3 text-sm text-stone-500">
+              這個步驟還沒有範本。
+            </p>
+            <div v-else class="mt-4">
+              <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <p v-if="!canGenerate" class="text-sm text-amber-900">{{ generateHint }}</p>
+                <button
+                  v-if="templatesFor(step).length > 1"
+                  type="button"
+                  class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                  :disabled="!canGenerate"
+                  @click="produceStep(step.id, step.templateIds, index)"
+                >
+                  產生本步驟全部
+                </button>
+              </div>
+              <ul class="divide-y divide-stone-200 rounded-2xl border border-stone-200">
+                <li
+                  v-for="item in templatesFor(step)"
+                  :key="item.id"
+                  class="flex items-center justify-between gap-3 px-4 py-3"
+                >
+                  <span class="min-w-0">
+                    <span class="block break-all text-sm font-medium text-stone-900">{{
+                      displayFileName(item.fileName)
+                    }}</span>
+                    <span class="mt-1 block text-xs text-stone-500">
+                      {{
+                        item.placeholders.length > 0
+                          ? item.placeholders.join('、')
+                          : '沒有偵測到欄位'
+                      }}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    class="shrink-0 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 hover:bg-stone-50 disabled:cursor-not-allowed disabled:text-stone-400"
+                    :disabled="!canGenerate"
+                    @click="produceOne(step.id, item.id)"
+                  >
+                    產生
+                  </button>
+                </li>
+              </ul>
+            </div>
+            <p
+              v-if="message && messageStepId === step.id"
+              class="mt-3 rounded-xl px-3 py-2 text-sm leading-6"
+              :class="
+                messageTone === 'ok'
+                  ? 'bg-emerald-50 text-emerald-950'
+                  : 'bg-amber-50 text-amber-950'
+              "
+              role="status"
+            >
+              {{ message }}
+            </p>
+          </div>
+        </li>
+      </ol>
+    </section>
   </div>
 
   <div v-else-if="!categories.ready">
@@ -533,7 +453,7 @@ async function removeCategory() {
 
   <div v-else>
     <PageIntro
-      eyebrow="案件類別"
+      eyebrow="各類案件流程"
       title="找不到這個類別"
       description="這個類別不存在，或已經刪除。請回到列表重新選擇。"
     />

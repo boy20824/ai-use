@@ -52,13 +52,13 @@ function buildDocx(text: string) {
   return zip.generate({ type: 'nodebuffer' }) as Uint8Array
 }
 
-function multipart(fileName: string, data: Uint8Array, categoryId?: string) {
+function multipart(fileName: string, data: Uint8Array, stepId?: string) {
   const boundary = '----library'
   const chunks: Uint8Array[] = []
-  if (categoryId) {
+  if (stepId) {
     chunks.push(
       Buffer.from(
-        `--${boundary}\r\nContent-Disposition: form-data; name="categoryId"\r\n\r\n${categoryId}\r\n`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="stepId"\r\n\r\n${stepId}\r\n`,
       ),
     )
   }
@@ -119,7 +119,7 @@ describe('category library', () => {
     seedReferenceData(createQueries(sampled), passwords, { samplePath, seedSample: true })
     const sample = createQueries(sampled).getTemplateFile('sample-field-note')
     expect(sample?.origin).toBe('sample')
-    expect(sample?.categories).toEqual([])
+    expect(sample?.usages).toEqual([])
     expect(createQueries(sampled).listCategories()).toEqual([])
   })
 
@@ -203,18 +203,19 @@ describe('category library', () => {
       payload: {
         name: injectedName,
         summary: '財物遭竊',
-        steps: ['步驟密語XYZ', '通知事主'],
+        steps: [{ body: '步驟密語XYZ' }, { body: '通知事主' }],
       },
     })
     expect(created.statusCode).toBe(201)
     const theftId = created.json().category.id as string
+    const createdSteps = created.json().category.steps as { id: string; body: string }[]
     expect(created.json().category).toMatchObject({
       name: injectedName,
       code: '',
       summary: '財物遭竊',
-      steps: ['步驟密語XYZ', '通知事主'],
       templateCount: 0,
     })
+    expect(createdSteps.map((step) => step.body)).toEqual(['步驟密語XYZ', '通知事主'])
     expect(createQueries(db).listCategories()).toHaveLength(1)
 
     const duplicate = await app.inject({
@@ -229,10 +230,20 @@ describe('category library', () => {
       method: 'PATCH',
       url: `/api/categories/${theftId}`,
       ...clerk,
-      payload: { name: '竊盜案', code: 'A-01', summary: '', steps: ['通知事主', '製作筆錄'] },
+      payload: {
+        name: '竊盜案',
+        code: 'A-01',
+        summary: '',
+        steps: [
+          { id: createdSteps[0]?.id, body: '通知事主' },
+          { id: createdSteps[1]?.id, body: '製作筆錄' },
+        ],
+      },
     })
     expect(renamed.statusCode).toBe(200)
-    expect(renamed.json().category.steps).toEqual(['通知事主', '製作筆錄'])
+    const theftSteps = renamed.json().category.steps as { id: string; body: string }[]
+    expect(theftSteps.map((step) => step.body)).toEqual(['通知事主', '製作筆錄'])
+    expect(theftSteps.map((step) => step.id)).toEqual(createdSteps.map((step) => step.id))
     expect(renamed.json().category.code).toBe('A-01')
 
     const viewerPatch = await app.inject({
@@ -262,9 +273,9 @@ describe('category library', () => {
     })
     expect(first.statusCode).toBe(201)
     const firstId = first.json().template.id as string
-    expect(first.json().template.categories).toEqual([])
+    expect(first.json().template.usages).toEqual([])
 
-    const linkedUpload = multipart('清單.docx', buildDocx('{{物品}}'), theftId)
+    const linkedUpload = multipart('清單.docx', buildDocx('{{物品}}'), theftSteps[0]?.id)
     const second = await app.inject({
       method: 'POST',
       url: '/api/templates',
@@ -274,48 +285,76 @@ describe('category library', () => {
     })
     expect(second.statusCode).toBe(201)
     const secondId = second.json().template.id as string
-    expect(second.json().template.categories.map((item: { id: string }) => item.id)).toEqual([
-      theftId,
+    expect(second.json().template.usages).toEqual([
+      expect.objectContaining({
+        categoryId: theftId,
+        categoryName: '竊盜案',
+        stepId: theftSteps[0]?.id,
+        stepBody: '通知事主',
+      }),
     ])
 
     const viewerLink = await app.inject({
-      method: 'PUT',
-      url: `/api/categories/${theftId}/templates`,
+      method: 'PATCH',
+      url: `/api/categories/${theftId}`,
       ...viewer,
-      payload: { templateIds: [firstId, secondId] },
+      payload: {
+        name: '竊盜案',
+        steps: [{ id: theftSteps[0]?.id, body: '通知事主', templateIds: [firstId, secondId] }],
+      },
     })
     expect(viewerLink.statusCode).toBe(403)
 
     const missingTemplate = await app.inject({
-      method: 'PUT',
-      url: `/api/categories/${theftId}/templates`,
+      method: 'PATCH',
+      url: `/api/categories/${theftId}`,
       ...clerk,
-      payload: { templateIds: [firstId, 'missing-template'] },
+      payload: {
+        name: '竊盜案',
+        steps: [
+          { id: theftSteps[0]?.id, body: '通知事主', templateIds: [firstId, 'missing-template'] },
+        ],
+      },
     })
     expect(missingTemplate.statusCode).toBe(400)
 
     const duplicates = await app.inject({
-      method: 'PUT',
-      url: `/api/categories/${theftId}/templates`,
+      method: 'PATCH',
+      url: `/api/categories/${theftId}`,
       ...clerk,
-      payload: { templateIds: [firstId, firstId] },
+      payload: {
+        name: '竊盜案',
+        steps: [{ id: theftSteps[0]?.id, body: '通知事主', templateIds: [firstId, firstId] }],
+      },
     })
     expect(duplicates.statusCode).toBe(400)
 
     const linked = await app.inject({
-      method: 'PUT',
-      url: `/api/categories/${theftId}/templates`,
+      method: 'PATCH',
+      url: `/api/categories/${theftId}`,
       ...clerk,
-      payload: { templateIds: [secondId, firstId] },
+      payload: {
+        name: '竊盜案',
+        code: 'A-01',
+        steps: [
+          { id: theftSteps[0]?.id, body: '通知事主', templateIds: [secondId, firstId] },
+          { id: theftSteps[1]?.id, body: '製作筆錄', templateIds: [] },
+        ],
+      },
     })
     expect(linked.statusCode).toBe(200)
     expect(linked.json().category.templateCount).toBe(2)
+    expect(linked.json().category.steps[0].templateIds).toEqual([secondId, firstId])
 
     const shared = await app.inject({
-      method: 'PUT',
-      url: `/api/categories/${damageId}/templates`,
+      method: 'PATCH',
+      url: `/api/categories/${damageId}`,
       ...admin,
-      payload: { templateIds: [firstId] },
+      payload: {
+        name: '毀損案',
+        code: 'B-02',
+        steps: [{ body: '現場紀錄', templateIds: [firstId] }],
+      },
     })
     expect(shared.statusCode).toBe(200)
 
@@ -332,9 +371,14 @@ describe('category library', () => {
     const sharedTemplate = theftTemplates
       .json()
       .templates.find((item: { id: string }) => item.id === firstId)
-    expect(sharedTemplate.categories.map((item: { name: string }) => item.name).sort()).toEqual([
-      '毀損案',
-      '竊盜案',
+    expect(
+      sharedTemplate.usages.map((item: { categoryName: string; stepBody: string }) => ({
+        categoryName: item.categoryName,
+        stepBody: item.stepBody,
+      })),
+    ).toEqual([
+      { categoryName: '毀損案', stepBody: '現場紀錄' },
+      { categoryName: '竊盜案', stepBody: '通知事主' },
     ])
 
     const clerkDeleteCategory = await app.inject({
@@ -359,7 +403,12 @@ describe('category library', () => {
     expect(createQueries(db).getCategory(theftId)?.templateCount).toBe(2)
     expect(createQueries(db).getCategory(damageId)).toBeNull()
     const remainingLinks = db
-      .prepare('SELECT category_id FROM category_templates WHERE template_id = ?')
+      .prepare(
+        `SELECT cs.category_id
+         FROM step_templates st
+         JOIN category_steps cs ON cs.id = st.step_id
+         WHERE st.template_id = ?`,
+      )
       .all(firstId) as { category_id: string }[]
     expect(remainingLinks.map((row) => row.category_id)).toEqual([theftId])
 
@@ -379,9 +428,7 @@ describe('category library', () => {
     expect(createQueries(db).getTemplateFile(firstId)).toBeNull()
     expect(createQueries(db).getCategory(theftId)?.templateCount).toBe(1)
     expect(
-      db
-        .prepare('SELECT COUNT(*) AS count FROM category_templates WHERE template_id = ?')
-        .get(firstId),
+      db.prepare('SELECT COUNT(*) AS count FROM step_templates WHERE template_id = ?').get(firstId),
     ).toEqual({ count: 0 })
 
     const columns = db.prepare("SELECT name FROM pragma_table_info('categories')").all() as {

@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 
@@ -29,9 +30,17 @@ export interface UserRecord {
   role: Role
 }
 
-export interface CategoryLink {
+export interface CategoryStepRecord {
   id: string
-  name: string
+  body: string
+  templateIds: string[]
+}
+
+export interface TemplateUsage {
+  categoryId: string
+  categoryName: string
+  stepId: string
+  stepBody: string
   sortOrder: number
 }
 
@@ -41,7 +50,7 @@ export interface CategoryRecord {
   name: string
   summary: string
   updatedAt: string
-  steps: string[]
+  steps: CategoryStepRecord[]
   templateCount: number
 }
 
@@ -53,8 +62,14 @@ export interface TemplateRecord {
   addedAt: string
   placeholders: string[]
   origin: 'sample' | 'upload'
-  categories: CategoryLink[]
+  usages: TemplateUsage[]
   data?: Buffer
+}
+
+export interface StepInput {
+  id: string
+  body: string
+  templateIds: string[]
 }
 
 export interface CategoryInput {
@@ -63,7 +78,7 @@ export interface CategoryInput {
   name: string
   summary: string
   updatedAt: string
-  steps: string[]
+  steps: StepInput[]
 }
 
 interface UserRow {
@@ -84,8 +99,14 @@ interface CategoryRow {
 }
 
 interface StepRow {
+  id: string
   categoryId: string
   body: string
+}
+
+interface StepTemplateRow {
+  stepId: string
+  templateId: string
 }
 
 interface TemplateRow {
@@ -99,10 +120,12 @@ interface TemplateRow {
   data?: Buffer
 }
 
-interface LinkRow {
+interface UsageRow {
   template_id: string
   category_id: string
   category_name: string
+  step_id: string
+  step_body: string
   sort_order: number
 }
 
@@ -122,7 +145,7 @@ function mapUser(row: UserRow): UserRecord {
   }
 }
 
-function mapCategory(row: CategoryRow, steps: string[]): CategoryRecord {
+function mapCategory(row: CategoryRow, steps: CategoryStepRecord[]): CategoryRecord {
   return {
     id: row.id,
     code: row.code,
@@ -136,7 +159,7 @@ function mapCategory(row: CategoryRow, steps: string[]): CategoryRecord {
 
 function mapTemplate(
   row: TemplateRow,
-  categories: CategoryLink[],
+  usages: TemplateUsage[],
   includeData: boolean,
 ): TemplateRecord {
   const placeholders = JSON.parse(row.placeholders) as unknown
@@ -150,7 +173,7 @@ function mapTemplate(
       ? placeholders.filter((item) => typeof item === 'string')
       : [],
     origin: row.origin,
-    categories,
+    usages,
     data: includeData ? row.data : undefined,
   }
 }
@@ -169,7 +192,10 @@ function tableExists(db: AppDatabase, table: string): boolean {
   return Boolean(row)
 }
 
-function columnNames(db: AppDatabase, table: 'templates' | 'categories' | 'audit_log'): string[] {
+function columnNames(
+  db: AppDatabase,
+  table: 'templates' | 'categories' | 'audit_log' | 'category_steps',
+): string[] {
   if (!tableExists(db, table)) return []
   const rows = db.prepare(`SELECT name FROM pragma_table_info('${table}')`).all() as {
     name: string
@@ -220,11 +246,12 @@ const categoryTable = `
 
 const stepTable = `
   CREATE TABLE IF NOT EXISTS category_steps (
+    id TEXT PRIMARY KEY,
     category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
     sort_order INTEGER NOT NULL,
-    body TEXT NOT NULL,
-    PRIMARY KEY (category_id, sort_order)
+    body TEXT NOT NULL
   );
+  CREATE INDEX IF NOT EXISTS category_steps_by_category ON category_steps(category_id, sort_order);
 `
 
 const templateTable = `
@@ -241,13 +268,13 @@ const templateTable = `
 `
 
 const linkTable = `
-  CREATE TABLE IF NOT EXISTS category_templates (
-    category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+  CREATE TABLE IF NOT EXISTS step_templates (
+    step_id TEXT NOT NULL REFERENCES category_steps(id) ON DELETE CASCADE,
     template_id TEXT NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
     sort_order INTEGER NOT NULL,
-    PRIMARY KEY (category_id, template_id)
+    PRIMARY KEY (step_id, template_id)
   );
-  CREATE INDEX IF NOT EXISTS category_templates_by_template ON category_templates(template_id);
+  CREATE INDEX IF NOT EXISTS step_templates_by_template ON step_templates(template_id);
 `
 
 const auditTable = `
@@ -329,8 +356,18 @@ function upgradeLegacySchema(db: AppDatabase) {
         DROP TABLE categories;
         ALTER TABLE categories_next RENAME TO categories;
 
-        ${stepTable}
-        ${linkTable}
+        CREATE TABLE category_steps (
+          category_id TEXT NOT NULL,
+          sort_order INTEGER NOT NULL,
+          body TEXT NOT NULL,
+          PRIMARY KEY (category_id, sort_order)
+        );
+        CREATE TABLE category_templates (
+          category_id TEXT NOT NULL,
+          template_id TEXT NOT NULL,
+          sort_order INTEGER NOT NULL,
+          PRIMARY KEY (category_id, template_id)
+        );
 
         CREATE TABLE audit_log_next (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -370,13 +407,127 @@ function upgradeLegacySchema(db: AppDatabase) {
   }
 }
 
+function needsStepLinkMigration(db: AppDatabase): boolean {
+  if (tableExists(db, 'category_templates')) return true
+  return tableExists(db, 'category_steps') && !columnNames(db, 'category_steps').includes('id')
+}
+
+function upgradeStepLinks(db: AppDatabase) {
+  const stepsHaveId = columnNames(db, 'category_steps').includes('id')
+  const oldSteps = (
+    tableExists(db, 'category_steps')
+      ? stepsHaveId
+        ? db
+            .prepare(
+              'SELECT id, category_id, sort_order, body FROM category_steps ORDER BY category_id, sort_order, id',
+            )
+            .all()
+        : db
+            .prepare(
+              'SELECT category_id, sort_order, body FROM category_steps ORDER BY category_id, sort_order',
+            )
+            .all()
+      : []
+  ) as { id?: string; category_id: string; sort_order: number; body: string }[]
+  const oldLinks = (
+    tableExists(db, 'category_templates')
+      ? db
+          .prepare(
+            'SELECT category_id, template_id, sort_order FROM category_templates ORDER BY category_id, sort_order, template_id',
+          )
+          .all()
+      : []
+  ) as { category_id: string; template_id: string; sort_order: number }[]
+
+  db.pragma('foreign_keys = OFF')
+  try {
+    const apply = db.transaction(() => {
+      if (!stepsHaveId) {
+        db.exec(`
+          CREATE TABLE category_steps_next (
+            id TEXT PRIMARY KEY,
+            category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+            sort_order INTEGER NOT NULL,
+            body TEXT NOT NULL
+          );
+        `)
+        const insertStep = db.prepare(
+          'INSERT INTO category_steps_next (id, category_id, sort_order, body) VALUES (?, ?, ?, ?)',
+        )
+        for (const step of oldSteps) {
+          insertStep.run(
+            randomBytes(16).toString('hex'),
+            step.category_id,
+            step.sort_order,
+            step.body,
+          )
+        }
+        db.exec(`
+          DROP TABLE IF EXISTS category_steps;
+          ALTER TABLE category_steps_next RENAME TO category_steps;
+          CREATE INDEX IF NOT EXISTS category_steps_by_category ON category_steps(category_id, sort_order);
+        `)
+      }
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS step_templates (
+          step_id TEXT NOT NULL REFERENCES category_steps(id) ON DELETE CASCADE,
+          template_id TEXT NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+          sort_order INTEGER NOT NULL,
+          PRIMARY KEY (step_id, template_id)
+        );
+        CREATE INDEX IF NOT EXISTS step_templates_by_template ON step_templates(template_id);
+      `)
+
+      const firstStep = db.prepare(
+        'SELECT id FROM category_steps WHERE category_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1',
+      )
+      const insertStep = db.prepare(
+        'INSERT INTO category_steps (id, category_id, sort_order, body) VALUES (?, ?, ?, ?)',
+      )
+      const insertLink = db.prepare(
+        'INSERT OR IGNORE INTO step_templates (step_id, template_id, sort_order) VALUES (?, ?, ?)',
+      )
+      const grouped = new Map<string, { template_id: string; sort_order: number }[]>()
+      for (const link of oldLinks) {
+        const list = grouped.get(link.category_id) ?? []
+        list.push({ template_id: link.template_id, sort_order: link.sort_order })
+        grouped.set(link.category_id, list)
+      }
+      for (const [categoryId, links] of grouped) {
+        let step = firstStep.get(categoryId) as { id: string } | undefined
+        if (!step) {
+          const id = randomBytes(16).toString('hex')
+          insertStep.run(id, categoryId, 0, '產生文件')
+          step = { id }
+        }
+        const stepId = step.id
+        links
+          .sort(
+            (left, right) =>
+              left.sort_order - right.sort_order ||
+              left.template_id.localeCompare(right.template_id),
+          )
+          .forEach((link, index) => insertLink.run(stepId, link.template_id, index))
+      }
+      db.exec('DROP TABLE IF EXISTS category_templates')
+    })
+    apply()
+  } finally {
+    db.pragma('foreign_keys = ON')
+  }
+}
+
 function deleteSeededCategories(db: AppDatabase) {
-  const removeLinks = db.prepare('DELETE FROM category_templates WHERE category_id = ?')
+  const removeStepLinks = db.prepare(`
+    DELETE FROM step_templates
+    WHERE step_id IN (SELECT id FROM category_steps WHERE category_id = ?)
+  `)
   const removeSteps = db.prepare('DELETE FROM category_steps WHERE category_id = ?')
   const removeCategory = db.prepare('DELETE FROM categories WHERE id = ?')
   const apply = db.transaction(() => {
     for (const id of seededCategoryIds) {
-      removeLinks.run(id)
+      removeStepLinks.run(id)
       removeSteps.run(id)
       removeCategory.run(id)
     }
@@ -391,6 +542,7 @@ export function migrate(db: AppDatabase) {
     return
   }
   if (isLegacySchema(db)) upgradeLegacySchema(db)
+  if (needsStepLinkMigration(db)) upgradeStepLinks(db)
   db.exec(stepTable + linkTable)
   deleteSeededCategories(db)
 }
@@ -430,13 +582,23 @@ export function createQueries(db: AppDatabase) {
       name,
       summary,
       updated_at AS updatedAt,
-      (SELECT COUNT(*) FROM category_templates ct WHERE ct.category_id = categories.id) AS templateCount
+      (
+        SELECT COUNT(*)
+        FROM step_templates st
+        JOIN category_steps cs ON cs.id = st.step_id
+        WHERE cs.category_id = categories.id
+      ) AS templateCount
     FROM categories
   `)
   const listStepRows = db.prepare(`
-    SELECT category_id AS categoryId, body
+    SELECT id, category_id AS categoryId, body
     FROM category_steps
-    ORDER BY category_id, sort_order
+    ORDER BY category_id, sort_order, id
+  `)
+  const listStepTemplateRows = db.prepare(`
+    SELECT step_id AS stepId, template_id AS templateId
+    FROM step_templates
+    ORDER BY step_id, sort_order, template_id
   `)
   const getCategoryRow = db.prepare(`
     SELECT
@@ -445,12 +607,21 @@ export function createQueries(db: AppDatabase) {
       name,
       summary,
       updated_at AS updatedAt,
-      (SELECT COUNT(*) FROM category_templates ct WHERE ct.category_id = categories.id) AS templateCount
+      (
+        SELECT COUNT(*)
+        FROM step_templates st
+        JOIN category_steps cs ON cs.id = st.step_id
+        WHERE cs.category_id = categories.id
+      ) AS templateCount
     FROM categories
     WHERE id = ?
   `)
   const listStepsForCategory = db.prepare(
-    'SELECT body FROM category_steps WHERE category_id = ? ORDER BY sort_order',
+    'SELECT id, category_id AS categoryId, body FROM category_steps WHERE category_id = ? ORDER BY sort_order, id',
+  )
+  const listStepIds = db.prepare('SELECT id FROM category_steps WHERE category_id = ?')
+  const getStepRow = db.prepare(
+    'SELECT id, category_id AS categoryId, body FROM category_steps WHERE id = ?',
   )
   const findNameOwner = db.prepare(
     'SELECT id FROM categories WHERE name = ? COLLATE NOCASE AND id <> ?',
@@ -461,10 +632,15 @@ export function createQueries(db: AppDatabase) {
   const updateCategory = db.prepare(
     'UPDATE categories SET code = ?, name = ?, summary = ?, updated_at = ? WHERE id = ?',
   )
-  const deleteCategorySteps = db.prepare('DELETE FROM category_steps WHERE category_id = ?')
-  const insertStep = db.prepare(
-    'INSERT INTO category_steps (category_id, sort_order, body) VALUES (?, ?, ?)',
-  )
+  const deleteStep = db.prepare('DELETE FROM category_steps WHERE id = ?')
+  const upsertStep = db.prepare(`
+    INSERT INTO category_steps (id, category_id, sort_order, body) VALUES (?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      category_id = excluded.category_id,
+      sort_order = excluded.sort_order,
+      body = excluded.body
+  `)
+  const deleteStepLinks = db.prepare('DELETE FROM step_templates WHERE step_id = ?')
   const deleteCategoryRow = db.prepare('DELETE FROM categories WHERE id = ?')
   const touchCategory = db.prepare('UPDATE categories SET updated_at = ? WHERE id = ?')
 
@@ -482,29 +658,37 @@ export function createQueries(db: AppDatabase) {
   const listTemplatesByCategory = db.prepare(`
     SELECT t.id, t.file_name, t.mime_type, t.size_bytes, t.added_at, t.placeholders, t.origin
     FROM templates t
-    JOIN category_templates ct ON ct.template_id = t.id
-    WHERE ct.category_id = ?
-    ORDER BY ct.sort_order ASC, t.id ASC
+    JOIN step_templates st ON st.template_id = t.id
+    JOIN category_steps cs ON cs.id = st.step_id
+    WHERE cs.category_id = ?
+    GROUP BY t.id
+    ORDER BY MIN(cs.sort_order), MIN(st.sort_order), t.id
   `)
   const getTemplateFile = db.prepare(
     'SELECT id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data FROM templates WHERE id = ?',
   )
   const deleteTemplate = db.prepare('DELETE FROM templates WHERE id = ?')
-  const listLinks = db.prepare(`
-    SELECT ct.template_id, ct.category_id, c.name AS category_name, ct.sort_order
-    FROM category_templates ct
-    JOIN categories c ON c.id = ct.category_id
-    ORDER BY ct.sort_order ASC, c.name COLLATE NOCASE ASC
+  const listUsages = db.prepare(`
+    SELECT
+      st.template_id,
+      c.id AS category_id,
+      c.name AS category_name,
+      cs.id AS step_id,
+      cs.body AS step_body,
+      st.sort_order
+    FROM step_templates st
+    JOIN category_steps cs ON cs.id = st.step_id
+    JOIN categories c ON c.id = cs.category_id
+    ORDER BY c.name COLLATE NOCASE, cs.sort_order, st.sort_order, st.template_id
   `)
-  const deleteLinksForCategory = db.prepare('DELETE FROM category_templates WHERE category_id = ?')
   const insertLink = db.prepare(
-    'INSERT INTO category_templates (category_id, template_id, sort_order) VALUES (?, ?, ?)',
+    'INSERT INTO step_templates (step_id, template_id, sort_order) VALUES (?, ?, ?)',
   )
   const nextSort = db.prepare(
-    'SELECT COALESCE(MAX(sort_order), -1) + 1 AS sortOrder FROM category_templates WHERE category_id = ?',
+    'SELECT COALESCE(MAX(sort_order), -1) + 1 AS sortOrder FROM step_templates WHERE step_id = ?',
   )
   const linkExists = db.prepare(
-    'SELECT 1 AS ok FROM category_templates WHERE category_id = ? AND template_id = ?',
+    'SELECT 1 AS ok FROM step_templates WHERE step_id = ? AND template_id = ?',
   )
 
   const insertAudit = db.prepare(
@@ -521,35 +705,68 @@ export function createQueries(db: AppDatabase) {
   )
   const clearFailures = db.prepare('DELETE FROM login_events WHERE username = ? AND success = 0')
 
-  function stepsByCategory(): Map<string, string[]> {
+  function templatesByStep(): Map<string, string[]> {
     const grouped = new Map<string, string[]>()
-    const rows = listStepRows.all() as StepRow[]
-    for (const row of rows) {
+    for (const row of listStepTemplateRows.all() as StepTemplateRow[]) {
+      const list = grouped.get(row.stepId) ?? []
+      list.push(row.templateId)
+      grouped.set(row.stepId, list)
+    }
+    return grouped
+  }
+
+  function stepsByCategory(): Map<string, CategoryStepRecord[]> {
+    const templates = templatesByStep()
+    const grouped = new Map<string, CategoryStepRecord[]>()
+    for (const row of listStepRows.all() as StepRow[]) {
       const list = grouped.get(row.categoryId) ?? []
-      list.push(row.body)
+      list.push({ id: row.id, body: row.body, templateIds: templates.get(row.id) ?? [] })
       grouped.set(row.categoryId, list)
     }
     return grouped
   }
 
-  function linksByTemplate(rows: LinkRow[]): Map<string, CategoryLink[]> {
-    const grouped = new Map<string, CategoryLink[]>()
-    for (const row of rows) {
+  function usagesByTemplate(): Map<string, TemplateUsage[]> {
+    const grouped = new Map<string, TemplateUsage[]>()
+    for (const row of listUsages.all() as UsageRow[]) {
       const list = grouped.get(row.template_id) ?? []
-      list.push({ id: row.category_id, name: row.category_name, sortOrder: row.sort_order })
+      list.push({
+        categoryId: row.category_id,
+        categoryName: row.category_name,
+        stepId: row.step_id,
+        stepBody: row.step_body,
+        sortOrder: row.sort_order,
+      })
       grouped.set(row.template_id, list)
     }
     return grouped
   }
 
   function hydrateTemplates(rows: TemplateRow[], includeData: boolean): TemplateRecord[] {
-    const grouped = linksByTemplate(listLinks.all() as LinkRow[])
+    const grouped = usagesByTemplate()
     return rows.map((row) => mapTemplate(row, grouped.get(row.id) ?? [], includeData))
   }
 
-  function writeSteps(categoryId: string, steps: string[]) {
-    deleteCategorySteps.run(categoryId)
-    steps.forEach((body, index) => insertStep.run(categoryId, index, body))
+  function stepsFor(categoryId: string): CategoryStepRecord[] {
+    const templates = templatesByStep()
+    return (listStepsForCategory.all(categoryId) as StepRow[]).map((row) => ({
+      id: row.id,
+      body: row.body,
+      templateIds: templates.get(row.id) ?? [],
+    }))
+  }
+
+  function writeSteps(categoryId: string, steps: StepInput[]) {
+    const existing = new Set((listStepIds.all(categoryId) as { id: string }[]).map((row) => row.id))
+    const keep = new Set(steps.map((step) => step.id))
+    for (const id of existing) {
+      if (!keep.has(id)) deleteStep.run(id)
+    }
+    steps.forEach((step, index) => {
+      upsertStep.run(step.id, categoryId, index, step.body)
+      deleteStepLinks.run(step.id)
+      step.templateIds.forEach((templateId, order) => insertLink.run(step.id, templateId, order))
+    })
   }
 
   function writeAudit(
@@ -613,8 +830,14 @@ export function createQueries(db: AppDatabase) {
     getCategory(id: string) {
       const row = getCategoryRow.get(id) as CategoryRow | undefined
       if (!row) return null
-      const steps = (listStepsForCategory.all(id) as { body: string }[]).map((item) => item.body)
-      return mapCategory(row, steps)
+      return mapCategory(row, stepsFor(id))
+    },
+    stepIdsFor(categoryId: string) {
+      return (listStepIds.all(categoryId) as { id: string }[]).map((row) => row.id)
+    },
+    getStep(id: string) {
+      const row = getStepRow.get(id) as StepRow | undefined
+      return row ? { id: row.id, categoryId: row.categoryId, body: row.body } : null
     },
     nameTaken(name: string, exceptId = '') {
       return Boolean(findNameOwner.get(name, exceptId))
@@ -667,7 +890,7 @@ export function createQueries(db: AppDatabase) {
       const row = countTemplate.get(id) as { count: number }
       return row.count > 0
     },
-    insertTemplate(record: TemplateRecord & { data: Buffer }, linkCategoryId?: string) {
+    insertTemplate(record: TemplateRecord & { data: Buffer }, stepId?: string) {
       const apply = db.transaction(() => {
         insertTemplate.run(
           record.id,
@@ -679,33 +902,12 @@ export function createQueries(db: AppDatabase) {
           record.origin,
           record.data,
         )
-        if (linkCategoryId && !linkExists.get(linkCategoryId, record.id)) {
-          const sort = nextSort.get(linkCategoryId) as { sortOrder: number }
-          insertLink.run(linkCategoryId, record.id, sort.sortOrder)
-          touchCategory.run(record.addedAt, linkCategoryId)
+        if (stepId && !linkExists.get(stepId, record.id)) {
+          const sort = nextSort.get(stepId) as { sortOrder: number }
+          insertLink.run(stepId, record.id, sort.sortOrder)
+          const step = getStepRow.get(stepId) as StepRow | undefined
+          if (step) touchCategory.run(record.addedAt, step.categoryId)
         }
-      })
-      apply()
-    },
-    replaceCategoryTemplates(
-      categoryId: string,
-      templateIds: string[],
-      actorUsername: string,
-      categoryName: string,
-      updatedAt: string,
-    ) {
-      const apply = db.transaction(() => {
-        deleteLinksForCategory.run(categoryId)
-        templateIds.forEach((templateId, index) => insertLink.run(categoryId, templateId, index))
-        touchCategory.run(updatedAt, categoryId)
-        writeAudit(
-          actorUsername,
-          'category_update',
-          '',
-          '',
-          categoryId,
-          `${categoryName} · 範本連結`,
-        )
       })
       apply()
     },

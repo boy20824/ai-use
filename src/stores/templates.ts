@@ -24,6 +24,7 @@ export interface AddTemplatesResult {
   added: number
   skipped: number
   rejected: string[]
+  ids: string[]
 }
 
 function sampleSeedEnabled() {
@@ -43,7 +44,7 @@ function toSummary(record: StoredTemplate): TemplateSummary {
     addedAt: record.addedAt,
     placeholders: [...record.placeholders],
     origin: record.origin,
-    categories: record.categories.map((link) => ({ ...link })),
+    usages: record.usages.map((usage) => ({ ...usage })),
   }
 }
 
@@ -67,7 +68,7 @@ async function ensureSample(repository: TemplateRepository) {
     addedAt: '2026-10-29 09:00',
     placeholders: listPlaceholders(data),
     origin: 'sample',
-    categories: [],
+    usages: [],
     data,
   })
   await repository.setMeta(sampleSeedKey, '1')
@@ -111,22 +112,17 @@ export const useTemplateStore = defineStore('templates', () => {
     return pending
   }
 
-  function forCategory(categoryId: string) {
-    return items.value
-      .filter((item) => item.categories.some((link) => link.id === categoryId))
-      .sort((left, right) => {
-        const leftOrder = left.categories.find((link) => link.id === categoryId)?.sortOrder ?? 0
-        const rightOrder = right.categories.find((link) => link.id === categoryId)?.sortOrder ?? 0
-        return leftOrder - rightOrder || left.fileName.localeCompare(right.fileName, 'zh-Hant')
-      })
+  function byId(id: string) {
+    return items.value.find((item) => item.id === id)
   }
 
-  async function addFiles(files: File[], categoryId?: string): Promise<AddTemplatesResult> {
+  async function addFiles(files: File[], stepId?: string): Promise<AddTemplatesResult> {
     await load()
     const rejected: string[] = []
+    const ids: string[] = []
     const room = templateLimit - items.value.length
     if (room <= 0) {
-      return { added: 0, skipped: files.length, rejected }
+      return { added: 0, skipped: files.length, rejected, ids }
     }
 
     const accepted = files.slice(0, room)
@@ -156,7 +152,7 @@ export const useTemplateStore = defineStore('templates', () => {
         continue
       }
       try {
-        await repository.put(
+        const createdId = await repository.put(
           {
             id: crypto.randomUUID(),
             fileName,
@@ -165,11 +161,12 @@ export const useTemplateStore = defineStore('templates', () => {
             addedAt: formatStamp(new Date()),
             placeholders,
             origin: 'upload',
-            categories: [],
+            usages: [],
             data,
           },
-          categoryId,
+          stepId,
         )
+        ids.push(createdId)
         added += 1
       } catch (cause) {
         rejected.push(cause instanceof Error ? cause.message : `${fileName} 無法上傳`)
@@ -177,13 +174,7 @@ export const useTemplateStore = defineStore('templates', () => {
     }
 
     if (added > 0) await reload()
-    return { added, skipped, rejected }
-  }
-
-  async function setLinks(categoryId: string, templateIds: string[]) {
-    await load()
-    await repository.setCategoryTemplates(categoryId, templateIds)
-    await reload()
+    return { added, skipped, rejected, ids }
   }
 
   async function remove(id: string) {
@@ -213,9 +204,8 @@ export const useTemplateStore = defineStore('templates', () => {
     limit: templateLimit,
     load,
     reload,
-    forCategory,
+    byId,
     addFiles,
-    setLinks,
     remove,
     bytesFor,
   }

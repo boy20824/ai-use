@@ -1,8 +1,10 @@
 import type { TemplateOrigin } from '@/types/domain'
 
-export interface CategoryLink {
-  id: string
-  name: string
+export interface TemplateUsage {
+  categoryId: string
+  categoryName: string
+  stepId: string
+  stepBody: string
   sortOrder: number
 }
 
@@ -14,7 +16,7 @@ export interface TemplateSummary {
   addedAt: string
   placeholders: string[]
   origin: TemplateOrigin
-  categories: CategoryLink[]
+  usages: TemplateUsage[]
 }
 
 export interface StoredTemplate extends TemplateSummary {
@@ -24,9 +26,8 @@ export interface StoredTemplate extends TemplateSummary {
 export interface TemplateRepository {
   list(): Promise<StoredTemplate[]>
   get(id: string): Promise<StoredTemplate | null>
-  put(record: StoredTemplate, linkCategoryId?: string): Promise<void>
+  put(record: StoredTemplate, stepId?: string): Promise<string>
   delete(id: string): Promise<void>
-  setCategoryTemplates(categoryId: string, templateIds: string[]): Promise<void>
   getMeta(key: string): Promise<string | null>
   setMeta(key: string, value: string): Promise<void>
 }

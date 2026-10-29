@@ -206,7 +206,7 @@ describe('api', () => {
       method: 'POST',
       url: '/api/categories',
       ...clerkAuth,
-      payload: { name: '文件摘要', code: 'SUM', summary: '摘要用', steps: ['核對原文'] },
+      payload: { name: '文件摘要', code: 'SUM', summary: '摘要用', steps: [{ body: '核對原文' }] },
     })
     expect(created.statusCode).toBe(201)
     const categoryId = created.json().category.id as string

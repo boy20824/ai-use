@@ -10,21 +10,33 @@ export interface PermissionRow {
   roles: AppRole[]
 }
 
+export interface CategoryStep {
+  id: string
+  body: string
+  templateIds: string[]
+}
+
 export interface CaseCategory {
   id: string
   code: string
   name: string
   summary: string
   updatedAt: string
-  steps: string[]
+  steps: CategoryStep[]
   templateCount: number
+}
+
+export interface CategoryStepInput {
+  id?: string
+  body: string
+  templateIds: string[]
 }
 
 export interface CategoryInput {
   name: string
   code: string
   summary: string
-  steps: string[]
+  steps: CategoryStepInput[]
 }
 
 export interface AccessRole {

@@ -3,10 +3,10 @@ import { createIndexedDbTemplateRepository } from '@/storage/indexedDbTemplateRe
 import type { TemplateRepository } from '@/storage/templateRepository'
 
 export type {
-  CategoryLink,
   StoredTemplate,
   TemplateRepository,
   TemplateSummary,
+  TemplateUsage,
 } from '@/storage/templateRepository'
 
 export function templateStorageMode(): 'api' | 'indexeddb' {

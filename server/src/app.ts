@@ -20,6 +20,7 @@ import {
   type AppQueries,
   type CategoryRecord,
   type Role,
+  type StepInput,
   type TemplateRecord,
 } from './db.ts'
 
@@ -62,18 +63,25 @@ const categoryQuerySchema = z
   })
   .strict()
 
+const stepIdSchema = z.string().regex(/^[a-z0-9-]{1,64}$/)
+
 const categoryBodySchema = z
   .object({
     name: z.string().trim().min(1).max(80),
     code: z.string().trim().max(32).optional(),
     summary: z.string().trim().max(400).optional(),
-    steps: z.array(z.string().trim().min(1).max(500)).max(30).optional(),
-  })
-  .strict()
-
-const linkBodySchema = z
-  .object({
-    templateIds: z.array(templateIdSchema).max(30),
+    steps: z
+      .array(
+        z
+          .object({
+            id: stepIdSchema.optional(),
+            body: z.string().trim().min(1).max(500),
+            templateIds: z.array(templateIdSchema).max(30).optional(),
+          })
+          .strict(),
+      )
+      .max(30)
+      .optional(),
   })
   .strict()
 
@@ -102,7 +110,7 @@ function publicTemplate(template: TemplateRecord) {
     addedAt: template.addedAt,
     placeholders: template.placeholders,
     origin: template.origin,
-    categories: template.categories,
+    usages: template.usages,
   }
 }
 
@@ -117,6 +125,31 @@ function categoryInputMessage(error: { issues: { path: PropertyKey[] }[] }): str
 
 function stamp(date = new Date()): string {
   return date.toISOString().slice(0, 16).replace('T', ' ')
+}
+
+function normalizeSteps(
+  queries: AppQueries,
+  categoryId: string,
+  steps: { id?: string; body: string; templateIds?: string[] }[],
+): StepInput[] {
+  const owned = new Set(queries.stepIdsFor(categoryId))
+  const used = new Set<string>()
+  return steps.map((step) => {
+    const reusable = step.id && owned.has(step.id) && !used.has(step.id) ? step.id : ''
+    const id = reusable || randomBytes(16).toString('hex')
+    used.add(id)
+    return { id, body: step.body, templateIds: step.templateIds ?? [] }
+  })
+}
+
+function templateListError(queries: AppQueries, steps: StepInput[]): string | null {
+  for (const step of steps) {
+    if (new Set(step.templateIds).size !== step.templateIds.length) return '輸入格式不正確。'
+    if (step.templateIds.some((templateId) => !queries.hasTemplate(templateId))) {
+      return '找不到這份範本。'
+    }
+  }
+  return null
 }
 
 function tokensMatch(left: string, right: string) {
@@ -342,6 +375,9 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       return fail(reply, 409, 'conflict', '這個類別名稱已經存在。')
     }
     const id = randomBytes(16).toString('hex')
+    const steps = normalizeSteps(queries, id, parsed.data.steps ?? [])
+    const templateError = templateListError(queries, steps)
+    if (templateError) return fail(reply, 400, 'invalid-input', templateError)
     const saved = queries.createCategory(
       {
         id,
@@ -349,7 +385,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
         name,
         summary: parsed.data.summary ?? '',
         updatedAt: stamp(),
-        steps: parsed.data.steps ?? [],
+        steps,
       },
       user.username,
     )
@@ -375,6 +411,9 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     if (queries.nameTaken(parsed.data.name, id.data)) {
       return fail(reply, 409, 'conflict', '這個類別名稱已經存在。')
     }
+    const steps = normalizeSteps(queries, id.data, parsed.data.steps ?? [])
+    const templateError = templateListError(queries, steps)
+    if (templateError) return fail(reply, 400, 'invalid-input', templateError)
     const saved = queries.updateCategory(
       {
         id: id.data,
@@ -382,7 +421,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
         name: parsed.data.name,
         summary: parsed.data.summary ?? '',
         updatedAt: stamp(),
-        steps: parsed.data.steps ?? [],
+        steps,
       },
       user.username,
     )
@@ -394,31 +433,6 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const category = queries.getCategory(id.data)
     if (!category) return fail(reply, 404, 'not-found', '找不到這個案件類別。')
     return { category: publicCategory(category) }
-  })
-
-  app.put('/api/categories/:id/templates', async (request, reply) => {
-    const user = requireUser(request, reply)
-    if (!user) return
-    if (!canEditCategory(user.role)) {
-      return fail(reply, 403, 'forbidden', '唯讀身分不能調整範本連結。')
-    }
-    const id = categoryIdSchema.safeParse(requestId(request))
-    if (!id.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
-    const category = queries.getCategory(id.data)
-    if (!category) return fail(reply, 404, 'not-found', '找不到這個案件類別。')
-    const parsed = linkBodySchema.safeParse(request.body)
-    if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
-    const templateIds = parsed.data.templateIds
-    if (new Set(templateIds).size !== templateIds.length) {
-      return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
-    }
-    if (templateIds.some((templateId) => !queries.hasTemplate(templateId))) {
-      return fail(reply, 400, 'invalid-input', '找不到這份範本。')
-    }
-    queries.replaceCategoryTemplates(id.data, templateIds, user.username, category.name, stamp())
-    const updated = queries.getCategory(id.data)
-    if (!updated) return fail(reply, 404, 'not-found', '找不到這個案件類別。')
-    return { category: publicCategory(updated) }
   })
 
   app.delete('/api/categories/:id', async (request, reply) => {
@@ -470,19 +484,18 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
 
     const file = await request.file()
     if (!file) return fail(reply, 400, 'invalid-input', '請選擇 .docx 檔案。')
-    const categoryField = file.fields.categoryId
-    const rawCategory =
-      categoryField && typeof categoryField === 'object' && 'value' in categoryField
-        ? categoryField.value
-        : ''
-    const categoryText = typeof rawCategory === 'string' ? rawCategory.trim() : ''
-    let linkedCategory: string | null = null
-    if (categoryText) {
-      const categoryId = categoryIdSchema.safeParse(categoryText)
-      if (!categoryId.success || !queries.getCategory(categoryId.data)) {
-        return fail(reply, 400, 'invalid-input', '找不到這個案件類別。')
-      }
-      linkedCategory = categoryId.data
+    const stepField = file.fields.stepId
+    const rawStep =
+      stepField && typeof stepField === 'object' && 'value' in stepField ? stepField.value : ''
+    const stepText = typeof rawStep === 'string' ? rawStep.trim() : ''
+    let linkedStepId: string | null = null
+    let linkedCategoryId = ''
+    if (stepText) {
+      const stepId = stepIdSchema.safeParse(stepText)
+      const step = stepId.success ? queries.getStep(stepId.data) : null
+      if (!step) return fail(reply, 400, 'invalid-input', '找不到這個填寫步驟。')
+      linkedStepId = step.id
+      linkedCategoryId = step.categoryId
     }
     const fileName = sanitizeTemplateFileName(file.filename)
     if (!fileName || !isAllowedDocxMime(file.mimetype)) {
@@ -510,11 +523,11 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       addedAt: stamp(),
       placeholders,
       origin: 'upload' as const,
-      categories: [],
+      usages: [],
       data,
     }
-    queries.insertTemplate(record, linkedCategory ?? undefined)
-    queries.insertAudit(user.username, 'upload', record.id, record.fileName, linkedCategory ?? '')
+    queries.insertTemplate(record, linkedStepId ?? undefined)
+    queries.insertAudit(user.username, 'upload', record.id, record.fileName, linkedCategoryId)
     const stored = queries.getTemplateFile(record.id)
     if (!stored) return fail(reply, 500, 'internal', '伺服器暫時無法完成這項操作。')
     return reply.code(201).send({ template: publicTemplate(stored) })
@@ -530,14 +543,16 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
     const existing = queries.getTemplateFile(parsed.data)
     if (!existing) return fail(reply, 404, 'not-found', '找不到這份範本。')
-    const linkedNames = existing.categories.map((item) => item.name).join('、')
+    const linkedNames = existing.usages
+      .map((item) => `${item.categoryName} → ${item.stepBody}`)
+      .join('、')
     queries.deleteTemplate(parsed.data)
     queries.insertAudit(
       user.username,
       'delete',
       existing.id,
       existing.fileName,
-      existing.categories[0]?.id ?? '',
+      existing.usages[0]?.categoryId ?? '',
       linkedNames,
     )
     return reply.code(204).send()

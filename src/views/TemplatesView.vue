@@ -37,14 +37,24 @@ const requestedCategory = computed(() => {
 const visible = computed(() => {
   const categoryId = requestedCategory.value
   if (!categoryId) return templates.items
-  return templates.items.filter((item) => item.categories.some((link) => link.id === categoryId))
+  return templates.items.filter((item) =>
+    item.usages.some((usage) => usage.categoryId === categoryId),
+  )
 })
 
 function usageLinks(item: TemplateSummary) {
-  return item.categories
-    .map((link) => ({ id: link.id, name: categories.byId(link.id)?.name ?? link.name }))
-    .filter((link) => link.name.length > 0)
-    .sort((left, right) => left.name.localeCompare(right.name, 'zh-Hant'))
+  return item.usages
+    .map((usage) => {
+      const categoryName = categories.byId(usage.categoryId)?.name ?? usage.categoryName
+      const step = usage.stepBody.replace(/\s+/g, ' ').trim()
+      const short = step.length > 24 ? `${step.slice(0, 24)}…` : step
+      return {
+        id: `${usage.categoryId}-${usage.stepId}`,
+        categoryId: usage.categoryId,
+        label: short ? `${categoryName} → ${short}` : categoryName,
+      }
+    })
+    .filter((usage) => usage.label.length > 0)
 }
 
 function onFilter(event: Event) {
@@ -202,15 +212,15 @@ async function onFiles(files: File[]) {
           </p>
           <p class="mt-2 text-xs leading-5 text-stone-600">
             <span>使用於：</span>
-            <template v-if="usageLinks(item).length === 0">尚未被任何類別使用</template>
+            <template v-if="usageLinks(item).length === 0">尚未被任何步驟使用</template>
             <template v-else>
               <RouterLink
                 v-for="(link, index) in usageLinks(item)"
                 :key="link.id"
-                :to="`/categories/${link.id}`"
+                :to="`/categories/${link.categoryId}`"
                 class="text-orange-800 hover:underline"
               >
-                {{ link.name }}<span v-if="index < usageLinks(item).length - 1">、</span>
+                {{ link.label }}<span v-if="index < usageLinks(item).length - 1">、</span>
               </RouterLink>
             </template>
           </p>
@@ -250,17 +260,17 @@ async function onFiles(files: File[]) {
         <template v-if="usageLinks(pendingDelete).length > 0">
           「{{
             displayFileName(pendingDelete.fileName)
-          }}」目前連結到下列案件類別。確定後會解除這些連結，並從範本庫刪除檔案。類別本身會保留。
+          }}」目前用在下列案件類別的步驟。確定後會解除這些連結，並從範本庫刪除檔案。類別與步驟會保留。
         </template>
         <template v-else>
           「{{
             displayFileName(pendingDelete.fileName)
-          }}」尚未連結任何類別。確定後會從範本庫刪除檔案。
+          }}」尚未連結任何步驟。確定後會從範本庫刪除檔案。
         </template>
       </p>
       <ul v-if="usageLinks(pendingDelete).length > 0" class="mt-3 list-disc space-y-1 pl-5">
         <li v-for="link in usageLinks(pendingDelete)" :key="link.id" class="text-sm text-stone-800">
-          {{ link.name }}
+          {{ link.label }}
         </li>
       </ul>
       <div class="mt-5 flex flex-wrap gap-3">

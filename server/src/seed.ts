@@ -39,7 +39,7 @@ export function seedReferenceData(
     addedAt: '2026-10-29 09:00',
     placeholders: listPlaceholders(data),
     origin: 'sample',
-    categories: [],
+    usages: [],
     data,
   })
 }

@@ -14,7 +14,7 @@ export function createApiTemplateRepository(): TemplateRepository {
       const body = (await response.json()) as { templates: TemplateSummary[] }
       return body.templates.map((item) => ({
         ...item,
-        categories: item.categories ?? [],
+        usages: item.usages ?? [],
         data: new ArrayBuffer(0),
       }))
     },
@@ -31,16 +31,19 @@ export function createApiTemplateRepository(): TemplateRepository {
         addedAt: '',
         placeholders: [],
         origin: 'upload',
-        categories: [],
+        usages: [],
         data,
       } satisfies StoredTemplate
     },
-    async put(record, linkCategoryId) {
+    async put(record, stepId) {
       const body = new FormData()
-      if (linkCategoryId) body.set('categoryId', linkCategoryId)
+      if (stepId) body.set('stepId', stepId)
       body.set('file', new File([record.data], record.fileName, { type: record.mimeType }))
       const response = await apiRequest('/api/templates', { method: 'POST', body })
       if (!response.ok) throw new Error(await apiErrorMessage(response, '無法上傳範本。'))
+      const payload = (await response.json()) as { template?: { id?: string } }
+      if (!payload.template?.id) throw new Error('無法上傳範本。')
+      return payload.template.id
     },
     async delete(id) {
       const response = await apiRequest(`/api/templates/${encodeURIComponent(id)}`, {
@@ -48,16 +51,6 @@ export function createApiTemplateRepository(): TemplateRepository {
       })
       if (response.status === 404) return
       if (!response.ok) throw new Error(await apiErrorMessage(response, '無法移除範本。'))
-    },
-    async setCategoryTemplates(categoryId, templateIds) {
-      const response = await apiRequest(
-        `/api/categories/${encodeURIComponent(categoryId)}/templates`,
-        {
-          method: 'PUT',
-          body: JSON.stringify({ templateIds }),
-        },
-      )
-      if (!response.ok) throw new Error(await apiErrorMessage(response, '無法更新範本連結。'))
     },
     async getMeta() {
       return '1'

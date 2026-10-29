@@ -45,11 +45,16 @@ const stats = computed(() => [
 
 const latestTemplates = computed(() => templates.items.slice(0, 4))
 
-function usageLabel(categoryIds: { id: string; name: string }[]) {
-  const names = categoryIds
-    .map((link) => categories.byId(link.id)?.name ?? link.name)
-    .filter((name) => name.length > 0)
-  return names.length > 0 ? names.join('、') : '尚未連結類別'
+function usageLabel(usages: { categoryId: string; categoryName: string; stepBody: string }[]) {
+  const labels = usages
+    .map((usage) => {
+      const categoryName = categories.byId(usage.categoryId)?.name ?? usage.categoryName
+      const step = usage.stepBody.replace(/\s+/g, ' ').trim()
+      if (!categoryName) return step
+      return step ? `${categoryName} → ${step}` : categoryName
+    })
+    .filter((label) => label.length > 0)
+  return labels.length > 0 ? labels.join('、') : '尚未連結步驟'
 }
 </script>
 
@@ -160,7 +165,7 @@ function usageLabel(categoryIds: { id: string; name: string }[]) {
             {{ displayFileName(item.fileName) }}
           </RouterLink>
           <p class="mt-1 text-xs text-stone-500">
-            {{ usageLabel(item.categories) }} · {{ formatBytes(item.sizeBytes) }}
+            {{ usageLabel(item.usages) }} · {{ formatBytes(item.sizeBytes) }}
           </p>
           <div class="mt-2 flex items-center justify-between gap-3">
             <StatusBadge

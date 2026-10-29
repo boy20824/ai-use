@@ -80,13 +80,38 @@ async function write(storeName: 'templates' | 'meta', run: (store: IDBObjectStor
   }
 }
 
-function normalize(row: StoredTemplate & { categoryId?: string }): StoredTemplate {
+function normalize(
+  row: StoredTemplate & {
+    categoryId?: string
+    categories?: { id: string; name: string; sortOrder: number }[]
+  },
+  stepId?: string,
+): StoredTemplate {
   const legacyId = row.categoryId
-  const categories = Array.isArray(row.categories)
-    ? row.categories
+  const fromCategories = Array.isArray(row.categories)
+    ? row.categories.map((link) => ({
+        categoryId: link.id,
+        categoryName: link.name,
+        stepId: '',
+        stepBody: '',
+        sortOrder: link.sortOrder,
+      }))
     : legacyId
-      ? [{ id: legacyId, name: '', sortOrder: 0 }]
+      ? [{ categoryId: legacyId, categoryName: '', stepId: '', stepBody: '', sortOrder: 0 }]
       : []
+  const usages = Array.isArray(row.usages) ? row.usages : fromCategories
+  const next = stepId
+    ? [
+        ...usages.filter((usage) => usage.stepId !== stepId),
+        {
+          categoryId: '',
+          categoryName: '',
+          stepId,
+          stepBody: '',
+          sortOrder: usages.length,
+        },
+      ]
+    : usages
   return {
     id: row.id,
     fileName: row.fileName,
@@ -95,7 +120,7 @@ function normalize(row: StoredTemplate & { categoryId?: string }): StoredTemplat
     addedAt: row.addedAt,
     placeholders: Array.isArray(row.placeholders) ? row.placeholders : [],
     origin: row.origin,
-    categories,
+    usages: next,
     data: row.data,
   }
 }
@@ -110,25 +135,16 @@ export function createIndexedDbTemplateRepository(): TemplateRepository {
       const row = await read('templates', (store) => store.get(id))
       return row ? normalize(row as StoredTemplate) : null
     },
-    async put(record) {
+    async put(record, stepId) {
       await write('templates', (store) => {
-        store.put(normalize(record))
+        store.put(normalize(record, stepId))
       })
+      return record.id
     },
     async delete(id) {
       await write('templates', (store) => {
         store.delete(id)
       })
-    },
-    async setCategoryTemplates(categoryId, templateIds) {
-      const rows = await this.list()
-      for (const row of rows) {
-        const without = row.categories.filter((link) => link.id !== categoryId)
-        const index = templateIds.indexOf(row.id)
-        const categories =
-          index === -1 ? without : [...without, { id: categoryId, name: '', sortOrder: index }]
-        await this.put({ ...row, categories })
-      }
     },
     async getMeta(key) {
       const row = await read('meta', (store) => store.get(key))

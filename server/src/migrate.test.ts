@@ -112,10 +112,20 @@ describe('category migration', () => {
     const userTemplate = queries.getTemplateFile('user-template')
     const seededTemplate = queries.getTemplateFile('sample-field-note')
     expect(userTemplate?.data?.toString()).toBe('USER-FILE')
-    expect(userTemplate?.categories.map((item) => item.id)).toEqual(['user-keep'])
+    expect(userTemplate?.usages).toEqual([
+      expect.objectContaining({
+        categoryId: 'user-keep',
+        stepBody: '產生文件',
+      }),
+    ])
     expect(seededTemplate?.data?.toString()).toBe('SEEDED-FILE')
-    expect(seededTemplate?.categories).toEqual([])
+    expect(seededTemplate?.usages).toEqual([])
     expect(queries.listTemplates('user-keep').map((item) => item.id)).toEqual(['user-template'])
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+      name: string
+    }[]
+    expect(tables.map((table) => table.name)).not.toContain('category_templates')
+    expect(tables.map((table) => table.name)).toContain('step_templates')
 
     const columns = db.prepare("SELECT name FROM pragma_table_info('categories')").all() as {
       name: string
@@ -136,7 +146,116 @@ describe('category migration', () => {
     const removed = queries.deleteCategory('user-keep', 'admin', '使用者自建類別')
     expect(removed).toBe(true)
     expect(queries.getTemplateFile('user-template')?.data?.toString()).toBe('USER-FILE')
-    expect(queries.getTemplateFile('user-template')?.categories).toEqual([])
+    expect(queries.getTemplateFile('user-template')?.usages).toEqual([])
+    db.close()
+  })
+
+  it('moves category template links onto the first step', () => {
+    const db = openDatabase(':memory:')
+    db.exec(`
+      CREATE TABLE categories (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL DEFAULT '',
+        name TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE category_steps (
+        category_id TEXT NOT NULL,
+        sort_order INTEGER NOT NULL,
+        body TEXT NOT NULL,
+        PRIMARY KEY (category_id, sort_order)
+      );
+      CREATE TABLE templates (
+        id TEXT PRIMARY KEY,
+        file_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        added_at TEXT NOT NULL,
+        placeholders TEXT NOT NULL,
+        origin TEXT NOT NULL CHECK (origin IN ('sample', 'upload')),
+        data BLOB NOT NULL
+      );
+      CREATE TABLE category_templates (
+        category_id TEXT NOT NULL,
+        template_id TEXT NOT NULL,
+        sort_order INTEGER NOT NULL,
+        PRIMARY KEY (category_id, template_id)
+      );
+      CREATE TABLE audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT NOT NULL,
+        actor_username TEXT NOT NULL,
+        action TEXT NOT NULL,
+        template_id TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        category_id TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT ''
+      );
+    `)
+    db.prepare(
+      'INSERT INTO categories (id, code, name, summary, updated_at) VALUES (?, ?, ?, ?, ?)',
+    ).run('case-keep', 'A', '竊盜案', '', '2026-10-29')
+    db.prepare('INSERT INTO category_steps (category_id, sort_order, body) VALUES (?, ?, ?)').run(
+      'case-keep',
+      0,
+      '製作筆錄',
+    )
+    db.prepare('INSERT INTO category_steps (category_id, sort_order, body) VALUES (?, ?, ?)').run(
+      'case-keep',
+      1,
+      '通知事主',
+    )
+    db.prepare(
+      'INSERT INTO categories (id, code, name, summary, updated_at) VALUES (?, ?, ?, ?, ?)',
+    ).run('case-empty', 'B', '毀損案', '', '2026-10-29')
+    const insertTemplate = db.prepare(
+      'INSERT INTO templates (id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    )
+    insertTemplate.run(
+      'tpl-a',
+      '甲.docx',
+      'application/octet-stream',
+      1,
+      '2026-10-29',
+      '[]',
+      'upload',
+      Buffer.from('A'),
+    )
+    insertTemplate.run(
+      'tpl-b',
+      '乙.docx',
+      'application/octet-stream',
+      1,
+      '2026-10-29',
+      '[]',
+      'upload',
+      Buffer.from('B'),
+    )
+    db.prepare(
+      'INSERT INTO category_templates (category_id, template_id, sort_order) VALUES (?, ?, ?)',
+    ).run('case-keep', 'tpl-b', 0)
+    db.prepare(
+      'INSERT INTO category_templates (category_id, template_id, sort_order) VALUES (?, ?, ?)',
+    ).run('case-keep', 'tpl-a', 1)
+    db.prepare(
+      'INSERT INTO category_templates (category_id, template_id, sort_order) VALUES (?, ?, ?)',
+    ).run('case-empty', 'tpl-a', 0)
+
+    migrate(db)
+    const queries = createQueries(db)
+    const kept = queries.getCategory('case-keep')
+    expect(kept?.steps.map((step) => step.body)).toEqual(['製作筆錄', '通知事主'])
+    expect(kept?.steps[0]?.templateIds).toEqual(['tpl-b', 'tpl-a'])
+    expect(kept?.steps[1]?.templateIds).toEqual([])
+    const empty = queries.getCategory('case-empty')
+    expect(empty?.steps.map((step) => step.body)).toEqual(['產生文件'])
+    expect(empty?.steps[0]?.templateIds).toEqual(['tpl-a'])
+    expect(queries.getTemplateFile('tpl-a')?.data?.toString()).toBe('A')
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
+      name: string
+    }[]
+    expect(tables.map((table) => table.name)).not.toContain('category_templates')
     db.close()
   })
 
@@ -147,7 +266,10 @@ describe('category migration', () => {
       name: string
     }[]
     const names = tables.map((table) => table.name)
-    expect(names).toEqual(expect.arrayContaining(['categories', 'category_templates', 'templates']))
+    expect(names).toEqual(
+      expect.arrayContaining(['categories', 'category_steps', 'step_templates', 'templates']),
+    )
+    expect(names).not.toContain('category_templates')
     expect(createQueries(db).listCategories()).toEqual([])
     db.close()
   })
