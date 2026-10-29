@@ -1,7 +1,9 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import PizZip from 'pizzip'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { buildApp } from './app.ts'
 import type { AppConfig, SeedPasswords } from './config.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
@@ -70,12 +72,15 @@ function multipart(
 }
 
 const allowedOrigin = 'http://localhost:5173'
+const scratch = mkdtempSync(path.join(tmpdir(), 'ai-use-api-'))
 
 function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     host: '127.0.0.1',
     port: 0,
     databasePath: ':memory:',
+    uploadDir: mkdtempSync(path.join(scratch, 'up-')),
+    sessionSecret: '',
     sessionTtlHours: 1,
     cookieSecure: false,
     corsOrigins: [allowedOrigin],
@@ -87,16 +92,20 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     loginRatePerMinute: 30,
     sampleTemplatePath: samplePath,
     seedSampleData: false,
+    staticDir: undefined,
+    trustProxy: false,
+    seedDemoUsers: true,
     passwords,
     ...overrides,
   }
 }
 
 async function createApp() {
+  const config = testConfig()
   const db = openDatabase(':memory:')
   migrate(db)
-  seedReferenceData(createQueries(db), passwords, { samplePath, seedSample: false })
-  const app = await buildApp(db, testConfig())
+  seedReferenceData(createQueries(db), passwords, samplePath, config.uploadDir, false)
+  const app = await buildApp(db, config)
   return { app, db }
 }
 
@@ -133,6 +142,10 @@ describe('api', () => {
 
   afterEach(() => {
     for (const db of databases.splice(0)) db.close()
+  })
+
+  afterAll(() => {
+    rmSync(scratch, { recursive: true, force: true })
   })
 
   it('logs in with a bcrypt hash, restores the session, and logs out', async () => {
@@ -307,10 +320,11 @@ describe('api', () => {
   })
 
   it('rejects an oversized upload', async () => {
+    const config = testConfig({ maxUploadBytes: 32 })
     const db = openDatabase(':memory:')
     migrate(db)
-    seedReferenceData(createQueries(db), passwords, { samplePath, seedSample: false })
-    const app = await buildApp(db, testConfig({ maxUploadBytes: 32 }))
+    seedReferenceData(createQueries(db), passwords, samplePath, config.uploadDir, false)
+    const app = await buildApp(db, config)
     const loggedIn = await login(app, 'admin', passwords.admin)
     const adminAuth = authFrom(loggedIn)
     const body = multipart(

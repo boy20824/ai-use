@@ -182,6 +182,11 @@ export function openDatabase(filename: string): AppDatabase {
   if (filename !== ':memory:') mkdirSync(path.dirname(filename), { recursive: true })
   const db = new Database(filename)
   db.pragma('foreign_keys = ON')
+  if (filename !== ':memory:') {
+    db.pragma('journal_mode = WAL')
+    db.pragma('synchronous = NORMAL')
+    db.pragma('busy_timeout = 5000')
+  }
   return db
 }
 

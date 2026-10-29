@@ -1,0 +1,54 @@
+name: Deploy to Fly.io
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: fly-deploy-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@1.6
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "FLY_API_TOKEN is not set; skipping deploy."
+            exit 0
+          fi
+          flyctl deploy --remote-only --ha=false
+
+      - name: Check health
+        run: |
+          url="https://ai-use.fly.dev/healthz"
+          last=""
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            body="$(curl -fsS --max-time 30 "$url" || true)"
+            last="$body"
+            if printf '%s' "$body" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
+              printf '%s\n' "$body"
+              echo "healthz ok"
+              exit 0
+            fi
+            echo "healthz not ok (attempt ${attempt}/12); retrying in 5s"
+            sleep 5
+          done
+          echo "https://ai-use.fly.dev/healthz did not return ok"
+          printf '%s\n' "$last"
+          exit 1

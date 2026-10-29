@@ -1,7 +1,9 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import PizZip from 'pizzip'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { buildApp } from './app.ts'
 import type { AppConfig, SeedPasswords } from './config.ts'
 import { cookieSecureFromEnv } from './config.ts'
@@ -19,12 +21,15 @@ const samplePath = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../public/samples/field-note.docx',
 )
+const scratch = mkdtempSync(path.join(tmpdir(), 'ai-use-security-'))
 
 function config(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     host: '127.0.0.1',
     port: 0,
     databasePath: ':memory:',
+    uploadDir: mkdtempSync(path.join(scratch, 'up-')),
+    sessionSecret: '',
     sessionTtlHours: 1,
     cookieSecure: false,
     corsOrigins: [origin],
@@ -36,6 +41,9 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     loginRatePerMinute: 20,
     sampleTemplatePath: samplePath,
     seedSampleData: false,
+    staticDir: undefined,
+    trustProxy: false,
+    seedDemoUsers: true,
     passwords,
     ...overrides,
   }
@@ -79,10 +87,11 @@ function multipart(name: string, type: string, data: Uint8Array, categoryId?: st
 }
 
 async function boot(overrides: Partial<AppConfig> = {}) {
+  const appConfig = config(overrides)
   const db = openDatabase(':memory:')
   migrate(db)
-  seedReferenceData(createQueries(db), passwords, { samplePath, seedSample: false })
-  const app = await buildApp(db, config(overrides))
+  seedReferenceData(createQueries(db), passwords, samplePath, appConfig.uploadDir, false)
+  const app = await buildApp(db, appConfig)
   return { app, db }
 }
 
@@ -111,6 +120,9 @@ describe('security controls', () => {
   const databases: AppDatabase[] = []
   afterEach(() => {
     for (const db of databases.splice(0)) db.close()
+  })
+  afterAll(() => {
+    rmSync(scratch, { recursive: true, force: true })
   })
 
   it('locks login after repeated failures and limits the request rate', async () => {

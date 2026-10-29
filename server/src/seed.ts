@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import type { SeedPasswords } from './config.ts'
 import { listPlaceholders } from './docx.ts'
 import type { AppQueries } from './db.ts'
+import { writeTemplateFile } from './files.ts'
 
 const users = [
   { id: 'user-clerk', username: 'clerk', displayName: '示範承辦', role: 'clerk' },
@@ -14,11 +15,16 @@ const sampleTemplateId = 'sample-field-note'
 
 export function seedReferenceData(
   queries: AppQueries,
-  passwords: SeedPasswords,
-  options: { samplePath: string; seedSample: boolean },
+  passwords: SeedPasswords | undefined,
+  samplePath: string,
+  uploadDir: string,
+  seedSample = false,
 ) {
-  if (queries.countUsers() === 0) {
+  // Insert missing demo users only when SEED_DEMO_USERS loaded passwords.
+  // Existing accounts are left as they are; nothing here deletes users.
+  if (passwords) {
     for (const user of users) {
+      if (queries.findUserByUsername(user.username)) continue
       queries.insertUser(
         user.id,
         user.username,
@@ -29,8 +35,9 @@ export function seedReferenceData(
     }
   }
 
-  if (!options.seedSample || queries.hasTemplate(sampleTemplateId)) return
-  const data = readFileSync(options.samplePath)
+  if (!seedSample || queries.hasTemplate(sampleTemplateId)) return
+  const data = readFileSync(samplePath)
+  writeTemplateFile(uploadDir, sampleTemplateId, data)
   queries.insertTemplate({
     id: sampleTemplateId,
     fileName: '欄位示範範本.docx',

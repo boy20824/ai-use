@@ -28,7 +28,7 @@ pnpm dev
 - 畫面：`http://localhost:5173`（`/api` 會轉到服務）
 - 服務：`http://127.0.0.1:3000`
 
-第一次啟動會建立 SQLite 並寫入示範帳號。案件類別不會預先建立。`SEED_SAMPLE_DATA=true` 且不是 production 時，才會放入 `public/samples/field-note.docx`。
+第一次啟動會建立 SQLite。案件類別不會預先建立。`.env.example` 的 `SEED_DEMO_USERS=true` 會寫入尚不存在的示範帳號；正式環境預設不寫入，也不會刪除已存在的使用者。`SEED_SAMPLE_DATA=true` 且不是 production 時，才會放入欄位示範範本。
 
 ## 指令
 
@@ -49,7 +49,11 @@ pnpm dev
 
 `SEED_SAMPLE_DATA=true` 或 `SEED_DEMO_USERS=true` 時，開發環境會放一份欄位示範範本到範本庫，不建立案件類別。`NODE_ENV=production` 時這兩個旗標都不會寫入示範範本。
 
-預設示範帳號（密碼以 `.env.example` 為準）：
+`DATABASE_PATH` 與 `UPLOAD_DIR` 在開發時相對 `server/`。`SESSION_SECRET` 用來簽署 session cookie；正式環境少了它，或仍是 `.env.example` 的示範值，服務會拒絕啟動。
+
+`SEED_DEMO_USERS=true` 時，若資料庫還沒有 `clerk`、`admin`、`viewer`，啟動會建立這三個帳號，密碼來自 `SEED_USER_*`。開發的 `.env.example` 設為 `true`。正式環境請維持未設定或 `false`（`fly.toml` 是 `false`），這樣不需要 `SEED_USER_*` 也能啟動。啟動不會刪除或覆寫已經存在的使用者。
+
+預設示範帳號（只在有開啟種子時建立，密碼以 `.env.example` 為準）：
 
 | 帳號   | 角色       | 可以做的事                                     |
 | ------ | ---------- | ---------------------------------------------- |
@@ -58,6 +62,10 @@ pnpm dev
 | viewer | 唯讀檢視   | 閱讀與產生文件，不能改類別或範本               |
 
 登入使用 httpOnly、`SameSite=Strict` 的階段 cookie。重新整理後會向 `/api/auth/me` 恢復身分。
+
+## 部署
+
+正式環境由 Fastify 在同一個來源提供建置後的畫面與 `/api`。Fly.io 的指令、volume、機密與費用見 [docs/DEPLOY-fly.md](docs/DEPLOY-fly.md)。
 
 ## 路由
 
@@ -93,6 +101,8 @@ pnpm dev
 src/             畫面
 server/          Fastify 與 SQLite
 public/samples/  虛構的 .docx 範本
+Dockerfile       正式映像
+fly.toml         Fly.io app
 ```
 
 ## 範圍

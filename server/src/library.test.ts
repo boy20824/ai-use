@@ -1,3 +1,5 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import PizZip from 'pizzip'
@@ -19,11 +21,15 @@ const samplePath = path.resolve(
   '../../public/samples/field-note.docx',
 )
 
+const scratch = mkdtempSync(path.join(tmpdir(), 'ai-use-library-'))
+
 function config(): AppConfig {
   return {
     host: '127.0.0.1',
     port: 0,
     databasePath: ':memory:',
+    uploadDir: mkdtempSync(path.join(scratch, 'up-')),
+    sessionSecret: '',
     sessionTtlHours: 1,
     cookieSecure: false,
     corsOrigins: [origin],
@@ -35,6 +41,9 @@ function config(): AppConfig {
     loginRatePerMinute: 30,
     sampleTemplatePath: samplePath,
     seedSampleData: false,
+    staticDir: undefined,
+    trustProxy: false,
+    seedDemoUsers: true,
     passwords,
   }
 }
@@ -78,7 +87,7 @@ function multipart(fileName: string, data: Uint8Array, stepId?: string) {
 async function boot() {
   const db = openDatabase(':memory:')
   migrate(db)
-  seedReferenceData(createQueries(db), passwords, { samplePath, seedSample: false })
+  seedReferenceData(createQueries(db), passwords, samplePath, config().uploadDir, false)
   const app = await buildApp(db, config())
   return { app, db }
 }
@@ -107,7 +116,7 @@ describe('category library', () => {
     const quiet = openDatabase(':memory:')
     databases.push(quiet)
     migrate(quiet)
-    seedReferenceData(createQueries(quiet), passwords, { samplePath, seedSample: false })
+    seedReferenceData(createQueries(quiet), passwords, samplePath, config().uploadDir, false)
     const quietQueries = createQueries(quiet)
     expect(quietQueries.listCategories()).toEqual([])
     expect(quietQueries.hasTemplate('sample-field-note')).toBe(false)
@@ -116,7 +125,8 @@ describe('category library', () => {
     const sampled = openDatabase(':memory:')
     databases.push(sampled)
     migrate(sampled)
-    seedReferenceData(createQueries(sampled), passwords, { samplePath, seedSample: true })
+    const sampleDir = config().uploadDir
+    seedReferenceData(createQueries(sampled), passwords, samplePath, sampleDir, true)
     const sample = createQueries(sampled).getTemplateFile('sample-field-note')
     expect(sample?.origin).toBe('sample')
     expect(sample?.usages).toEqual([])
