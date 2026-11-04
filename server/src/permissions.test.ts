@@ -38,6 +38,7 @@ function config(): AppConfig {
     maxZipUncompressedBytes: 8 * 1024 * 1024,
     loginMaxFailures: 5,
     loginLockoutMinutes: 15,
+    globalRatePerMinute: 120,
     loginRatePerMinute: 30,
     registerIpLimit: 5,
     registerGlobalLimit: 30,

@@ -54,6 +54,7 @@ export interface AppConfig {
   maxZipUncompressedBytes: number
   loginMaxFailures: number
   loginLockoutMinutes: number
+  globalRatePerMinute: number
   loginRatePerMinute: number
   registerIpLimit: number
   registerGlobalLimit: number
@@ -240,6 +241,7 @@ export function loadConfig(): AppConfig {
     maxZipUncompressedBytes: numberEnv('MAX_ZIP_UNCOMPRESSED_BYTES', 32 * 1024 * 1024),
     loginMaxFailures: numberEnv('LOGIN_MAX_FAILURES', 5),
     loginLockoutMinutes: numberEnv('LOGIN_LOCKOUT_MINUTES', 15),
+    globalRatePerMinute: numberEnv('GLOBAL_RATE_PER_MINUTE', 120),
     loginRatePerMinute: numberEnv('LOGIN_RATE_PER_MINUTE', 20),
     registerIpLimit: numberEnv('REGISTER_IP_LIMIT', 5),
     registerGlobalLimit: numberEnv('REGISTER_GLOBAL_LIMIT', 30),

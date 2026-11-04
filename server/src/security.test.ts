@@ -38,6 +38,7 @@ function config(overrides: Partial<AppConfig> = {}): AppConfig {
     maxZipUncompressedBytes: 64 * 1024,
     loginMaxFailures: 2,
     loginLockoutMinutes: 15,
+    globalRatePerMinute: 120,
     loginRatePerMinute: 20,
     registerIpLimit: 5,
     registerGlobalLimit: 30,

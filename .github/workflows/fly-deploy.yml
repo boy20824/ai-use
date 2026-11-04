@@ -37,6 +37,16 @@ jobs:
           fi
           flyctl deploy --remote-only --ha=false
 
+      - name: Keep a single machine
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "FLY_API_TOKEN is not set; skipping scale."
+            exit 0
+          fi
+          flyctl scale count 1 --yes --app ai-use
+
       - name: Check health
         run: |
           url="https://ai-use.fly.dev/healthz"

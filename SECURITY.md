@@ -28,6 +28,8 @@
 
 登入階段是 httpOnly cookie。CSRF 權杖不是 httpOnly，讓同一個來源的頁面能放進標頭；其他網站讀不到這個 cookie。
 
+全域限流以單機記憶體記錄每 IP 每分鐘 120 次（`GLOBAL_RATE_PER_MINUTE` 可覆寫，重啟後重設）；`/healthz` 豁免，超限回 429 與 `error: rate-limited`，原有登入／註冊限流仍保留。IP 依 Fastify 的 `TRUST_PROXY` 設定判定。一般本文上限 1 MiB，範本 multipart 仍依 `MAX_UPLOAD_BYTES`（預設 8 MiB）限制。Fly 維持單機，並行請求 soft/hard limit 為 20/30。
+
 ## 依賴稽核
 
 `pnpm audit` 在這次變更時沒有已知漏洞。之後若出現公告，先升級能相容的套件，再把仍無法排除的項目記在這裡。

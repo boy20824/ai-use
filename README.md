@@ -54,6 +54,8 @@ pnpm dev
 
 `SEED_DEMO_USERS=true` 時，若資料庫還沒有 `clerk`、`admin`、`viewer`，啟動會建立這三個帳號，密碼來自 `SEED_USER_*`。開發的 `.env.example` 設為 `true`。正式環境請維持未設定或 `false`（`fly.toml` 是 `false`），這樣不需要 `SEED_USER_*` 也能啟動。啟動不會刪除或覆寫已經存在的使用者。
 
+全域限流預設為每 IP 每分鐘 120 次，可用正數 `GLOBAL_RATE_PER_MINUTE` 覆寫；`/healthz` 豁免，超過回傳 429 JSON（`error: rate-limited`）。登入與註冊仍有各自的限制。一般請求本文上限為 1 MiB；範本 multipart 上傳仍由 `MAX_UPLOAD_BYTES` 控制（預設 8 MiB）。
+
 角色只有兩種：系統管理員（`sysadmin`）與一般使用者（`user`）。既有資料庫在啟動時會把 `admin` 改成 `sysadmin`、`clerk` 與 `viewer` 改成 `user`；帳號 `boy20824` 會成為系統管理員。`can_manage_categories` 預設為否，由系統管理員逐一開放。這段遷移可以重複執行，包在交易裡，不會刪除使用者或案件類別。
 
 預設示範帳號（只在有開啟種子時建立，密碼以 `.env.example` 為準）：
@@ -71,6 +73,8 @@ pnpm dev
 ## 部署
 
 正式環境由 Fastify 在同一個來源提供建置後的畫面與 `/api`。Fly.io 的指令、volume、機密與費用見 [docs/DEPLOY-fly.md](docs/DEPLOY-fly.md)。
+
+Fly HTTP 並行請求 soft/hard limit 為 20/30；部署後執行 `flyctl scale count 1 --yes --app ai-use` 維持單機，沒有 `FLY_API_TOKEN` 時跳過部署與縮放。閒置自動停止、請求自動啟動，`min_machines_running=0` 維持不變。
 
 推上 `main` 時，部署 workflow 會先跑 `pnpm smoke:docker`（`scripts/smoke-docker.sh`）。它建置 Docker 映像，以 `NODE_ENV=production`、至少 32 字元且不是示範值的 `SESSION_SECRET` 啟動容器，把暫存目錄掛到 `/data`，再請求 `/healthz`。回應不是 ok 就失敗，不會繼續部署。本機需要 Docker：
 

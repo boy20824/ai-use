@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import PizZip from 'pizzip'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
 import type { AppConfig, SeedPasswords } from './config.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
@@ -89,6 +89,7 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     maxZipUncompressedBytes: 8 * 1024 * 1024,
     loginMaxFailures: 5,
     loginLockoutMinutes: 15,
+    globalRatePerMinute: 120,
     loginRatePerMinute: 30,
     registerIpLimit: 5,
     registerGlobalLimit: 30,
@@ -149,6 +150,55 @@ describe('api', () => {
 
   afterAll(() => {
     rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it('limits requests per IP across routes and resets after one minute', async () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const app = await buildApp(db, testConfig({ globalRatePerMinute: 2 }))
+    const now = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+    try {
+      expect((await app.inject('/api/auth/me')).statusCode).toBe(401)
+      expect((await app.inject('/api/categories')).statusCode).toBe(401)
+      const blocked = await app.inject('/api/auth/me')
+      expect(blocked.statusCode).toBe(429)
+      expect(blocked.json()).toEqual({
+        error: 'rate-limited',
+        message: '請求過多，請稍後再試。',
+      })
+      expect(blocked.headers['retry-after']).toBe('60')
+      expect(
+        (await app.inject({ url: '/api/auth/me', remoteAddress: '192.0.2.1' })).statusCode,
+      ).toBe(401)
+      clock.mockReturnValue(now + 60_000)
+      expect((await app.inject('/api/auth/me')).statusCode).toBe(401)
+    } finally {
+      clock.mockRestore()
+      await app.close()
+      db.close()
+    }
+  })
+
+  it('exempts health checks, including query strings, from consuming the quota', async () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    const app = await buildApp(db, testConfig({ globalRatePerMinute: 1 }))
+    try {
+      for (let index = 0; index < 3; index += 1) {
+        const health = await app.inject('/healthz?probe=1')
+        expect(health.statusCode).toBe(200)
+        expect(health.json()).toEqual({ ok: true })
+      }
+      expect((await app.inject('/api/auth/me')).statusCode).toBe(401)
+      expect((await app.inject('/api/auth/me')).statusCode).toBe(429)
+      const health = await app.inject('/healthz')
+      expect(health.statusCode).toBe(200)
+      expect(health.json()).toEqual({ ok: true })
+    } finally {
+      await app.close()
+      db.close()
+    }
   })
 
   it('logs in with a bcrypt hash, restores the session, and logs out', async () => {
@@ -333,6 +383,54 @@ describe('api', () => {
     }[]
     expect(columns.map((column) => column.name)).not.toContain('姓名')
     expect(columns.map((column) => column.name)).not.toContain('case_values')
+  })
+
+  it('accepts a template larger than the JSON body limit within the upload limit', async () => {
+    const config = testConfig({ maxUploadBytes: 2 * 1024 * 1024 })
+    const db = openDatabase(':memory:')
+    migrate(db)
+    seedReferenceData(createQueries(db), passwords, samplePath, config.uploadDir, false)
+    const app = await buildApp(db, config)
+    try {
+      const adminAuth = authFrom(await login(app, 'admin', passwords.admin))
+      const data = buildDocx('a'.repeat(1024 * 1024))
+      expect(data.byteLength).toBeGreaterThan(1024 * 1024)
+      const body = multipart(
+        {},
+        {
+          name: 'large.docx',
+          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          data,
+        },
+      )
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/templates',
+        cookies: adminAuth.cookies,
+        headers: { ...body.headers, ...adminAuth.headers },
+        payload: body.payload,
+      })
+      expect(response.statusCode).toBe(201)
+    } finally {
+      await app.close()
+      db.close()
+    }
+  })
+
+  it('rejects a JSON body above 1 MiB with the existing JSON error format', async () => {
+    const { app, db } = await createApp()
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { username: 'a'.repeat(1024 * 1024), password: 'password' },
+      })
+      expect(response.statusCode).toBe(413)
+      expect(response.json().error).toBe('payload-too-large')
+    } finally {
+      await app.close()
+      db.close()
+    }
   })
 
   it('rejects an oversized upload', async () => {

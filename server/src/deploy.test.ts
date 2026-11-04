@@ -54,6 +54,7 @@ function appConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     maxZipUncompressedBytes: 64 * 1024,
     loginMaxFailures: 5,
     loginLockoutMinutes: 15,
+    globalRatePerMinute: 120,
     loginRatePerMinute: 20,
     registerIpLimit: 5,
     registerGlobalLimit: 30,
@@ -105,11 +106,13 @@ describe('deployment config', () => {
         SEED_USER_CLERK_PASSWORD: 'clerk-demo',
         SEED_USER_ADMIN_PASSWORD: 'admin-demo',
         SEED_USER_VIEWER_PASSWORD: 'viewer-demo',
+        GLOBAL_RATE_PER_MINUTE: '3',
         DATABASE_PATH: 'data/app.sqlite',
         UPLOAD_DIR: 'data/uploads',
       },
       () => {
         const config = loadConfig()
+        expect(config.globalRatePerMinute).toBe(3)
         expect(config.host).toBe('127.0.0.1')
         expect(
           config.databasePath.endsWith(`${path.sep}server${path.sep}data${path.sep}app.sqlite`),
