@@ -434,6 +434,8 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   const app = Fastify({
     logger: false,
     trustProxy: config.trustProxy,
+    // Multipart files are streamed and retain their separate maxUploadBytes limit.
+    bodyLimit: 1024 * 1024,
   })
   app.decorateRequest('authUser', null)
 
@@ -456,6 +458,30 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     crossOriginResourcePolicy: { policy: 'same-site' },
   })
   await app.register(cookie, config.sessionSecret ? { secret: config.sessionSecret } : {})
+  const requestCounts = new Map<string, { count: number; expiresAt: number }>()
+  let nextRateCleanup = 0
+  app.addHook('onRequest', async (request, reply) => {
+    if (request.url.split('?')[0] === '/healthz') return
+    const now = Date.now()
+    if (now >= nextRateCleanup) {
+      for (const [ip, entry] of requestCounts) {
+        if (entry.expiresAt <= now) requestCounts.delete(ip)
+      }
+      nextRateCleanup = now + 60_000
+    }
+    const ip = request.ip
+    let entry = requestCounts.get(ip)
+    if (!entry || entry.expiresAt <= now) {
+      entry = { count: 0, expiresAt: now + 60_000 }
+      requestCounts.set(ip, entry)
+    }
+    if (entry.count >= config.globalRatePerMinute) {
+      reply.header('retry-after', Math.ceil((entry.expiresAt - now) / 1000))
+      return fail(reply, 429, 'rate-limited', '請求過多，請稍後再試。')
+    }
+    entry.count += 1
+  })
+
   await app.register(cors, {
     origin(origin, callback) {
       if (!origin || config.corsOrigins.includes(origin)) {
@@ -539,6 +565,9 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const code = error.code ?? ''
     if (code === 'FST_REQ_FILE_TOO_LARGE') {
       return fail(reply, 413, 'payload-too-large', '檔案超過大小限制。')
+    }
+    if (code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      return fail(reply, 413, 'payload-too-large', '請求內容超過大小限制。')
     }
     if (code.startsWith('FST_ERR_CTP')) {
       return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
