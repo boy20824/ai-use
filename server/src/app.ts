@@ -87,16 +87,30 @@ const fieldSchema = z
     id: stepIdSchema,
     categoryId: categoryIdSchema.optional(),
     name: z.string().trim().min(1).max(80).optional(),
-    key: z
-      .string()
-      .trim()
-      .min(1)
-      .max(80)
-      .regex(/^[\p{L}\p{N}_]+$/u)
-      .refine((key) => !['__proto__', 'prototype', 'constructor'].includes(key)),
+    key: z.string().optional(),
     type: z.enum(['text', 'number']),
   })
   .strict()
+  .transform((field) => ({
+    ...field,
+    key: (field.key ?? field.name ?? '')
+      .trim()
+      .replace(/^\{\{(.*)\}\}$/u, '$1')
+      .trim(),
+  }))
+  .superRefine((field, ctx) => {
+    if (
+      !field.key ||
+      field.key.length > 80 ||
+      !/^[\p{L}\p{N}_]+$/u.test(field.key) ||
+      ['__proto__', 'prototype', 'constructor'].includes(field.key)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['key'],
+        message: '細項欄位鍵須為 1–80 個中文字、字母、數字或底線，且不可使用保留名稱。',
+      })
+  })
 const stepSchema = z
   .object({
     categoryId: categoryIdSchema.optional(),
@@ -119,7 +133,14 @@ const categoryBodySchema = z
     group: z.enum(['criminal', 'admin', 'internal']).optional(),
     summary: z.string().trim().max(400).optional(),
     variants: z.array(variantSchema).max(30).optional(),
-    fields: z.array(fieldSchema).max(50).optional(),
+    fields: z
+      .array(fieldSchema)
+      .max(50)
+      .refine(
+        (fields) => new Set(fields.map((field) => field.key)).size === fields.length,
+        '同一流程的細項欄位鍵不可重複。',
+      )
+      .optional(),
     steps: z.array(stepSchema).max(30).optional(),
   })
   .strict()
@@ -292,7 +313,14 @@ function fail(reply: FastifyReply, status: number, error: string, message: strin
   return reply.code(status).send({ error, message })
 }
 
-function categoryInputMessage(error: { issues: { path: PropertyKey[] }[] }): string {
+function categoryInputMessage(error: {
+  issues: { path: PropertyKey[]; code?: string; message: string }[]
+}): string {
+  const fieldIssue = error.issues.find((issue) => issue.path[0] === 'fields')
+  if (fieldIssue) {
+    if (fieldIssue.code === 'custom') return fieldIssue.message
+    return '細項欄位格式不正確：請提供名稱、有效的欄位鍵及文字或數字型別。'
+  }
   if (error.issues.some((issue) => issue.path[0] === 'name')) return '請填寫類別名稱。'
   return '輸入格式不正確。'
 }
@@ -877,6 +905,8 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
         return fail(reply, 404, 'not-found', '找不到項目。')
       const incoming = request.body && typeof request.body === 'object' ? request.body : {}
       const body = { ...current.find((v) => v.id === childId), ...incoming }
+      if (resource === 'fields' && 'name' in incoming && !('key' in incoming))
+        delete (body as { key?: string }).key
       const value =
         resource === 'steps'
           ? { ...body, id: childId }
@@ -901,7 +931,8 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
           variantIds: (step.variantIds ?? []).filter((id) => id !== childId),
         }))
       const parsed = categoryBodySchema.safeParse(draft)
-      if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+      if (!parsed.success)
+        return fail(reply, 400, 'invalid-input', categoryInputMessage(parsed.error))
       const steps = normalizeSteps(queries, category.id, parsed.data.steps ?? [])
       const extras = categoryExtras(queries, category.id, parsed.data)
       if (!extrasValid(queries, category.id, extras, steps) || templateListError(queries, steps))

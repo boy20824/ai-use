@@ -12,6 +12,45 @@ import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const fieldKeyHint = '{{欄位鍵}}'
+const copiedPlaceholder = ref('')
+const copyError = ref('')
+function fieldKey(field: FieldDef) {
+  return (field.name ?? field.key).trim()
+}
+function fieldPlaceholder(field: FieldDef) {
+  return `{{${fieldKey(field)}}}`
+}
+async function copyPlaceholder(field: FieldDef) {
+  const text = fieldPlaceholder(field)
+  copiedPlaceholder.value = ''
+  copyError.value = ''
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const previousFocus = document.activeElement
+    const area = document.createElement('textarea')
+    area.value = text
+    area.setAttribute('aria-label', '複製欄位寫法')
+    area.style.position = 'fixed'
+    area.style.opacity = '0'
+    document.body.append(area)
+    area.select()
+    let copied = false
+    try {
+      copied = document.execCommand('copy')
+    } catch {
+      copied = false
+    } finally {
+      area.remove()
+      if (previousFocus instanceof HTMLElement) previousFocus.focus()
+    }
+    if (!copied) {
+      copyError.value = '無法自動複製，請選取欄位寫法後手動複製。'
+      return
+    }
+  }
+  copiedPlaceholder.value = text
+}
 
 interface DraftStep {
   key: string
@@ -70,7 +109,7 @@ function fillFrom(category: CaseCategory) {
   name.value = category.name
   group.value = category.group ?? 'criminal'
   variants.value = (category.variants ?? []).map((v) => ({ ...v }))
-  fields.value = (category.fields ?? []).map((f) => ({ ...f }))
+  fields.value = (category.fields ?? []).map((f) => ({ ...f, name: f.name ?? f.key }))
   summary.value = category.summary
   steps.value = category.steps.map((step) => ({
     key: step.id,
@@ -281,7 +320,11 @@ async function submit() {
     name: name.value.trim(),
     group: group.value,
     variants: variants.value,
-    fields: fields.value,
+    fields: fields.value.map((field) => ({
+      ...field,
+      name: field.name?.trim(),
+      key: fieldKey(field),
+    })),
     summary: summary.value.trim(),
     steps: prepared,
   }
@@ -405,7 +448,8 @@ async function submit() {
       </div>
     </section>
     <section v-show="wizard === 2" aria-label="樣態設定">
-      <h2 class="font-semibold">建立樣態</h2>
+      <h2 class="font-semibold">建立樣態（選填）</h2>
+      <p class="mt-2 text-sm text-stone-500">不需要區分樣態時，可直接跳過。</p>
       <div v-for="variant in variants" :key="variant.id" class="mt-3 flex gap-3">
         <input
           v-model="variant.name"
@@ -489,7 +533,9 @@ async function submit() {
                 class="mt-2 w-full rounded-xl border border-stone-300 p-3"
               />
             </label>
-            <p class="mt-3 text-xs text-stone-500">未勾選樣態即為共同步驟。</p>
+            <p class="mt-3 text-xs text-stone-500">
+              需同時符合的樣態：未勾選即為共同步驟；勾選多個時須全部符合。
+            </p>
             <div class="mt-2 flex flex-wrap gap-3">
               <label v-for="v in variants" :key="v.id" class="text-sm"
                 ><input v-model="step.variantIds" type="checkbox" :value="v.id" />
@@ -628,13 +674,18 @@ async function submit() {
             maxlength="80"
             class="rounded-xl border border-stone-300 p-2"
           />
-          <input
-            v-model="field.key"
-            aria-label="欄位鍵"
-            placeholder="欄位鍵"
-            maxlength="80"
-            class="rounded-xl border border-stone-300 p-2"
-          />
+          <div class="flex items-center gap-2">
+            <code class="break-all">{{ fieldPlaceholder(field) }}</code>
+            <button
+              type="button"
+              class="shrink-0 text-sm text-orange-800 disabled:text-stone-400"
+              :disabled="!fieldKey(field)"
+              :aria-label="'複製 ' + fieldPlaceholder(field)"
+              @click="copyPlaceholder(field)"
+            >
+              {{ copiedPlaceholder === fieldPlaceholder(field) ? '已複製' : '複製' }}
+            </button>
+          </div>
           <select
             v-model="field.type"
             aria-label="欄位型別"
@@ -655,6 +706,10 @@ async function submit() {
         >
           新增欄位
         </button>
+        <p class="sr-only" role="status">
+          {{ copiedPlaceholder ? '已複製 ' + copiedPlaceholder : '' }}
+        </p>
+        <p v-if="copyError" class="mt-2 text-sm text-rose-800" role="alert">{{ copyError }}</p>
         <p class="mt-2 text-xs text-stone-500">
           範本欄位寫法：{{ fieldKeyHint }}。只儲存欄位定義。
         </p>
@@ -683,7 +738,15 @@ async function submit() {
         class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
         :disabled="saving"
       >
-        {{ wizard < 3 ? '下一步' : isEdit ? '儲存變更' : '建立流程' }}
+        {{
+          wizard === 2 && !variants.length
+            ? '跳過樣態'
+            : wizard < 3
+              ? '下一步'
+              : isEdit
+                ? '儲存變更'
+                : '建立流程'
+        }}
       </button>
       <RouterLink
         :to="isEdit ? `/categories/${editingId}` : '/categories'"
