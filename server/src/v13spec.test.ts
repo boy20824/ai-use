@@ -280,7 +280,7 @@ describe('v1.3 workflow spec', () => {
       (await request(app, auth, 'POST', `${base}/fields`, { key: 'bad', type: 'date' })).statusCode,
     ).toBe(400)
     expect(
-      (await request(app, auth, 'POST', `${base}/fields`, { key: '酒測值', type: 'number' }))
+      (await request(app, auth, 'POST', `${base}/fields`, { key: '酒測結果', type: 'number' }))
         .statusCode,
     ).toBe(400)
     const other = await category(app, auth, '其他流程')
@@ -303,6 +303,80 @@ describe('v1.3 workflow spec', () => {
     }
     expect(JSON.stringify(db.prepare('SELECT * FROM category_fields').all())).not.toContain('0.35')
     expect(db.pragma('foreign_key_check')).toEqual([])
+  })
+
+  it('derives field keys, strips braces, validates keys and rejects duplicates without mutating the workflow', async () => {
+    const { app } = await setup()
+    const auth = await login(app)
+    const c = await category(app, auth)
+    const base = `/api/categories/${c.id}`
+    const created = await request(app, auth, 'POST', `${base}/fields`, {
+      name: '  酒測值  ',
+      type: 'text',
+    })
+    expect(created.statusCode).toBe(201)
+    expect(created.json().field).toMatchObject({ name: '酒測值', key: '酒測值' })
+    const braces = await request(app, auth, 'POST', `${base}/fields`, {
+      name: '車牌',
+      key: ' {{車牌}} ',
+      type: 'text',
+    })
+    expect(braces.statusCode).toBe(201)
+    expect(braces.json().field.key).toBe('車牌')
+    for (const field of [
+      { name: '酒測值', type: 'text' },
+      { name: '其他名稱', key: '{{酒測值}}', type: 'number' },
+    ]) {
+      const duplicate = await request(app, auth, 'POST', `${base}/fields`, field)
+      expect(duplicate.statusCode).toBe(400)
+      expect(duplicate.json().message).toBe('同一流程的細項欄位鍵不可重複。')
+    }
+    for (const key of [
+      'bad key',
+      '<script>',
+      '{{未關閉}',
+      'constructor',
+      '__proto__',
+      '',
+      'a'.repeat(81),
+    ]) {
+      const invalid = await request(app, auth, 'POST', `${base}/fields`, { key, type: 'text' })
+      expect(invalid.statusCode).toBe(400)
+      expect(invalid.json().message).toContain('細項欄位鍵須為')
+    }
+    const patched = await request(app, auth, 'PATCH', base, {
+      name: '公共危險',
+      variants: [],
+      fields: [{ id: 'derived-field', name: ' 酒測值 ', type: 'number' }],
+      steps: [{ title: '共同步驟', variantIds: [] }],
+    })
+    expect(patched.statusCode).toBe(200)
+    expect(patched.json().category).toMatchObject({
+      variants: [],
+      fields: [{ key: '酒測值' }],
+      steps: [{ variantIds: [] }],
+    })
+    const duplicatePatch = await request(app, auth, 'PATCH', base, {
+      name: '公共危險',
+      fields: [
+        { id: 'first', name: '酒測值', type: 'text' },
+        { id: 'second', key: '{{酒測值}}', type: 'text' },
+      ],
+    })
+    expect(duplicatePatch.statusCode).toBe(400)
+    expect(duplicatePatch.json().message).toBe('同一流程的細項欄位鍵不可重複。')
+    expect((await request(app, auth, 'GET', `${base}/fields`)).json().fields).toHaveLength(1)
+    const variants = [
+      { id: 'stop', name: '攔查' },
+      { id: 'crash', name: '肇事' },
+    ]
+    const combined = await request(app, auth, 'PATCH', base, {
+      name: '公共危險',
+      variants,
+      steps: [{ title: '需同時符合', variantIds: ['stop', 'crash'] }],
+    })
+    expect(combined.statusCode).toBe(200)
+    expect(combined.json().category.steps[0].variantIds).toEqual(['stop', 'crash'])
   })
 
   it('updates groups, ignores legacy user codes, and rolls back an invalid aggregate update', async () => {

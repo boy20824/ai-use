@@ -60,7 +60,7 @@ const visibleSteps = computed(() =>
     .filter(
       (step) =>
         !step.variantIds?.length ||
-        step.variantIds.some((id) => selectedVariants.value.includes(id)),
+        step.variantIds.every((id) => selectedVariants.value.includes(id)),
     )
     .sort(
       (a, b) =>
@@ -486,7 +486,7 @@ onUnmounted(clearDraft)
       </div>
     </div>
 
-    <div class="mb-5 flex flex-wrap gap-2" aria-label="樣態選擇">
+    <div v-if="category.variants?.length" class="mb-5 flex flex-wrap gap-2" aria-label="樣態選擇">
       <label
         v-for="variant in category.variants"
         :key="variant.id"
