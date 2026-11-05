@@ -118,6 +118,48 @@ describe('workflow acceptance UI', () => {
     expect(host.textContent).toContain('主動攔查')
   })
 
+  it('requires all step variants and updates when either selection is removed', async () => {
+    const combined = {
+      ...mocks.category.steps[0]!,
+      id: 'combined',
+      title: '同時符合步驟',
+      variantIds: ['stop', 'crash'],
+    }
+    mocks.category.steps.push(combined)
+    try {
+      await mount()
+      expect(host.textContent).not.toContain('同時符合步驟')
+      await check(input('攔查'), true)
+      expect(host.textContent).not.toContain('同時符合步驟')
+      await check(input('肇事'), true)
+      expect(host.textContent).toContain('同時符合步驟')
+      expect(host.textContent).toContain('攔查專屬')
+      expect(host.textContent).toContain('肇事專屬')
+      await check(input('攔查'), false)
+      expect(host.textContent).not.toContain('同時符合步驟')
+      await check(input('攔查'), true)
+      await check(input('肇事'), false)
+      expect(host.textContent).not.toContain('同時符合步驟')
+    } finally {
+      mocks.category.steps.pop()
+    }
+  })
+
+  it('shows every step without chips when the workflow has no variants', async () => {
+    const variants = mocks.category.variants
+    const steps = mocks.category.steps
+    mocks.category.variants = []
+    mocks.category.steps = steps.map((step) => ({ ...step, variantIds: [] }))
+    try {
+      await mount()
+      expect(host.querySelector('[aria-label="樣態選擇"]')).toBeNull()
+      for (const step of steps) expect(host.textContent).toContain(step.title)
+    } finally {
+      mocks.category.variants = variants
+      mocks.category.steps = steps
+    }
+  })
+
   it('updates the green completed card and progress and clears input/completion on navigation', async () => {
     const router = await mount()
     await check(input('本步驟已完成'), true)
