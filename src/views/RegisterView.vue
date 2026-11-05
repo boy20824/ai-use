@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PoliceBadge from '@/components/PoliceBadge.vue'
 import { appName, appTagline } from '@/config/app'
 import { useSessionStore } from '@/stores/session'
 import { ref } from 'vue'
@@ -47,7 +48,7 @@ async function submit() {
         <span
           class="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-700 text-sm font-semibold"
         >
-          用
+          <PoliceBadge />
         </span>
         <span>
           <span class="block text-base font-semibold">{{ appName }}</span>
@@ -57,7 +58,7 @@ async function submit() {
       <div class="max-w-md">
         <p class="text-3xl font-semibold tracking-tight">註冊後即可產生文件</p>
         <p class="mt-6 text-sm leading-7 text-stone-400">
-          新帳號是一般使用者，可以登入並在工作台產生文件。維護案件類別與會員管理要由系統管理員另外授權。
+          新帳號是一般使用者，可以登入並在工作台產生文件。維護勤務流程與會員管理要由系統管理員另外授權。
         </p>
       </div>
     </section>

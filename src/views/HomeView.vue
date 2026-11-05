@@ -16,7 +16,7 @@ const session = useSessionStore()
 
 const stats = computed(() => [
   {
-    label: '案件類別',
+    label: '勤務流程',
     value: categories.ready ? String(categories.total) : '…',
     hint: categories.ready && categories.total === 0 ? '尚未建立' : '可進入的工作台',
     to: '/categories',
@@ -24,13 +24,13 @@ const stats = computed(() => [
   {
     label: '填寫步驟',
     value: categories.ready ? String(categories.stepCount) : '…',
-    hint: categories.ready && categories.stepCount === 0 ? '類別建立後可新增' : '各類別的準備順序',
+    hint: categories.ready && categories.stepCount === 0 ? '流程建立後可新增' : '各流程的準備順序',
     to: '/categories',
   },
   {
     label: '範本庫',
     value: templates.ready ? String(templates.total) : '…',
-    hint: '全站共用，不屬於單一類別',
+    hint: '全站共用，不屬於單一流程',
     to: '/templates',
   },
   {
@@ -60,21 +60,21 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
   <PageIntro
     eyebrow="工作台"
     title="總覽"
-    description="先建立案件類別，寫下填寫步驟，再從範本庫選取或上傳 Word 範本。產生文件時填入的欄位只留在這個畫面，不會寫進服務。"
+    description="先建立勤務流程，寫下填寫步驟，再從範本庫選取或上傳 Word 範本。產生文件時填入的欄位只留在這個畫面，不會寫進服務。"
   >
     <RouterLink
       v-if="session.canEditCategory && categories.ready && categories.total === 0"
       to="/categories/new"
       class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
     >
-      新增案件類別
+      新增勤務流程
     </RouterLink>
     <RouterLink
       v-else
       to="/categories"
       class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
     >
-      瀏覽案件類別
+      瀏覽勤務流程
     </RouterLink>
   </PageIntro>
 
@@ -102,27 +102,27 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
       class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm lg:col-span-3"
     >
       <div class="flex items-center justify-between gap-3 border-b border-stone-200 px-5 py-4">
-        <h2 class="text-base font-semibold">案件類別</h2>
+        <h2 class="text-base font-semibold">勤務流程</h2>
         <RouterLink to="/categories" class="text-sm text-orange-800 hover:underline"
           >查看全部</RouterLink
         >
       </div>
       <EmptyState
         v-if="categories.ready && categories.total === 0"
-        title="還沒有案件類別"
-        description="新增一個類別後，總覽會列出工作台。範本庫的文件可以稍後再連結過來。"
+        title="還沒有勤務流程"
+        description="新增一個流程後，總覽會列出工作台。範本庫的文件可以稍後再連結過來。"
       >
         <RouterLink
           v-if="session.canEditCategory"
           to="/categories/new"
           class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
         >
-          新增案件類別
+          新增勤務流程
         </RouterLink>
         <p v-else class="text-sm text-stone-600">請由系統管理員或被授權的使用者新增。</p>
       </EmptyState>
       <p v-else-if="!categories.ready" class="px-5 py-8 text-sm text-stone-500">
-        正在讀取案件類別。
+        正在讀取勤務流程。
       </p>
       <ul v-else class="divide-y divide-stone-200">
         <li v-for="item in categories.recent" :key="item.id">
@@ -133,8 +133,7 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
             <span class="min-w-0">
               <span class="block text-sm font-medium text-stone-900">{{ item.name }}</span>
               <span class="mt-1 block text-xs text-stone-500">
-                {{ item.code || '未設代號' }} · {{ item.steps.length }} 個步驟 ·
-                {{ item.templateCount }} 份範本
+                {{ item.steps.length }} 個步驟 · {{ item.templateCount }} 份範本
               </span>
             </span>
             <time class="shrink-0 text-xs text-stone-500" :datetime="item.updatedAt">{{

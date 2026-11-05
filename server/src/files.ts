@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { randomBytes } from 'node:crypto'
 
 const templateIdPattern = /^[a-zA-Z0-9-]{1,64}$/
 
@@ -21,7 +22,14 @@ export function templateFilePath(uploadDir: string, id: string): string {
 
 export function writeTemplateFile(uploadDir: string, id: string, data: Buffer) {
   ensureUploadDir(uploadDir)
-  writeFileSync(templateFilePath(uploadDir, id), data)
+  const target = templateFilePath(uploadDir, id)
+  const temporary = `${target}.${randomBytes(8).toString('hex')}.tmp`
+  try {
+    writeFileSync(temporary, data, { flag: 'wx' })
+    renameSync(temporary, target)
+  } finally {
+    rmSync(temporary, { force: true })
+  }
 }
 
 export function removeTemplateFile(uploadDir: string, id: string) {

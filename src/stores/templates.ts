@@ -1,3 +1,4 @@
+import { apiErrorMessage, apiRequest } from '@/services/api'
 import { docxZipLimits, normalizeDocx, splitFormatNotice } from '../../server/src/docxXml'
 import {
   hasZipHeader,
@@ -189,6 +190,26 @@ export const useTemplateStore = defineStore('templates', () => {
     }
   }
 
+  async function replace(id: string, file: File) {
+    if (!safeFileName(file.name).toLowerCase().endsWith('.docx') || file.size > maxTemplateBytes)
+      throw new Error('請選擇 8 MB 以內的 .docx。')
+    const form = new FormData()
+    form.append('file', file)
+    const response = await apiRequest(`/api/templates/${encodeURIComponent(id)}/file`, {
+      method: 'PUT',
+      body: form,
+    })
+    if (!response.ok) throw new Error(await apiErrorMessage(response, '無法替換範本。'))
+    const result = (await response.json()) as {
+      linkedCategoryCount: number
+      formatNotices: string[]
+    }
+    // Drop all cached file bytes so every linked workflow gets the replacement.
+    bytes.value = new Map()
+    await reload()
+    return result
+  }
+
   async function remove(id: string) {
     await load()
     await repository.delete(id)
@@ -219,6 +240,7 @@ export const useTemplateStore = defineStore('templates', () => {
     byId,
     addFiles,
     remove,
+    replace,
     bytesFor,
   }
 })

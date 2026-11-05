@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import PoliceBadge from '@/components/PoliceBadge.vue'
 import { appName, appTagline } from '@/config/app'
 import { useSessionStore } from '@/stores/session'
 import { safeRedirect } from '@/utils/redirect'
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { apiRequest } from '@/services/api'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const session = useSessionStore()
@@ -12,17 +14,29 @@ const username = ref('')
 const password = ref('')
 const failed = ref(false)
 const offline = ref(false)
+const releaseNotes = ref<string[]>([])
+const notesError = ref(false)
+onMounted(async () => {
+  try {
+    const response = await apiRequest('/api/release-notes')
+    if (!response.ok) throw new Error('unavailable')
+    const body = (await response.json()) as { items: string[] }
+    releaseNotes.value = body.items
+  } catch {
+    notesError.value = true
+  }
+})
 
 const points = [
   {
     mark: '1',
-    title: '建立案件類別',
+    title: '建立勤務流程',
     detail: '由系統管理員或被授權的使用者新增，例如竊盜案、毀損案，並寫下填寫步驟。',
   },
   {
     mark: '2',
     title: '從範本庫選取',
-    detail: 'Word 範本只保存一份。多個類別可以連結同一份範本。',
+    detail: 'Word 範本只保存一份。多個流程可以連結同一份範本。',
   },
   {
     mark: '3',
@@ -55,15 +69,23 @@ async function submit() {
         <span
           class="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-700 text-sm font-semibold"
         >
-          用
+          <PoliceBadge />
         </span>
         <span>
           <span class="block text-base font-semibold">{{ appName }}</span>
           <span class="block text-sm text-stone-400">{{ appTagline }}</span>
         </span>
       </div>
+      <div class="desk-scene" role="img" aria-label="警察背影坐於辦公桌受理報案的示意圖">
+        <div class="office-light"></div>
+        <div class="desk-lamp"></div>
+        <div class="officer"><div class="officer-cap"></div></div>
+        <div class="office-screen"></div>
+        <div class="office-paper"></div>
+        <div class="office-desk"></div>
+      </div>
       <div class="max-w-md">
-        <p class="text-3xl font-semibold tracking-tight">先選類別，再套範本</p>
+        <p class="text-3xl font-semibold tracking-tight">先選流程，再套範本</p>
         <ol class="mt-8 space-y-5">
           <li v-for="point in points" :key="point.mark" class="flex gap-3">
             <span
@@ -127,6 +149,16 @@ async function submit() {
           </button>
         </form>
 
+        <aside
+          class="mt-6 rounded-2xl border border-stone-200 bg-stone-50 p-4"
+          aria-labelledby="updates-title"
+        >
+          <h2 id="updates-title" class="text-sm font-semibold text-stone-900">本次更新</h2>
+          <p v-if="notesError" class="mt-2 text-xs text-stone-500">暫時無法讀取更新公告。</p>
+          <ul v-else class="mt-2 list-disc space-y-2 pl-4 text-xs leading-5 text-stone-600">
+            <li v-for="item in releaseNotes" :key="item">{{ item }}</li>
+          </ul>
+        </aside>
         <p class="mt-4 text-center text-sm text-stone-600">
           還沒有帳號？
           <RouterLink to="/register" class="font-medium text-orange-800 hover:underline">
@@ -137,3 +169,110 @@ async function submit() {
     </section>
   </div>
 </template>
+
+<style scoped>
+.desk-scene {
+  position: relative;
+  height: 220px;
+  max-width: 520px;
+  overflow: hidden;
+  border-radius: 24px;
+  background: linear-gradient(130deg, #292524, #44403c);
+}
+.office-desk {
+  position: absolute;
+  bottom: 30px;
+  left: 8%;
+  right: 8%;
+  height: 16px;
+  background: #a8a29e;
+  box-shadow: 0 20px 0 -4px #57534e;
+}
+.officer {
+  position: absolute;
+  bottom: 46px;
+  left: 32%;
+  width: 100px;
+  height: 90px;
+  border-radius: 44px 44px 8px 8px;
+  background: #1c1917;
+  border: 2px solid #78716c;
+  animation: office-shift 8s ease-in-out infinite alternate;
+}
+.officer::before {
+  content: '';
+  position: absolute;
+  width: 42px;
+  height: 48px;
+  border-radius: 50%;
+  background: #a8a29e;
+  top: -36px;
+  left: 27px;
+}
+.officer-cap {
+  position: absolute;
+  width: 54px;
+  height: 18px;
+  background: #0c0a09;
+  border-bottom: 4px solid #fdba74;
+  top: -39px;
+  left: 21px;
+  border-radius: 16px 16px 0 0;
+  z-index: 1;
+}
+.office-screen {
+  position: absolute;
+  bottom: 58px;
+  right: 18%;
+  width: 70px;
+  height: 52px;
+  border: 5px solid #1c1917;
+  border-radius: 5px;
+  background: #fed7aa;
+  box-shadow: 0 0 25px #fed7aa33;
+}
+.office-paper {
+  position: absolute;
+  bottom: 47px;
+  left: 16%;
+  width: 50px;
+  height: 5px;
+  background: #f5f5f4;
+  transform: rotate(-8deg);
+}
+.desk-lamp {
+  position: absolute;
+  top: 35px;
+  left: 20%;
+  width: 55px;
+  height: 20px;
+  border-radius: 30px 30px 2px 2px;
+  background: #ea580c;
+}
+.office-light {
+  position: absolute;
+  top: -10%;
+  left: 0;
+  width: 80%;
+  height: 150%;
+  background: radial-gradient(ellipse at 25% 20%, #fdba7433, transparent 65%);
+  animation: office-light 10s ease-in-out infinite alternate;
+}
+@keyframes office-shift {
+  to {
+    transform: translateX(4px) rotate(2deg);
+  }
+}
+@keyframes office-light {
+  to {
+    transform: translateX(12px);
+    opacity: 0.55;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .officer,
+  .office-light {
+    animation: none;
+  }
+}
+</style>

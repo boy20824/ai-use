@@ -23,8 +23,10 @@ import {
   overviewDownloadName,
   valuesForFields,
 } from '@/workbench/overview'
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
+
+const fieldKeyHint = '{{欄位鍵}}'
 
 const route = useRoute()
 const router = useRouter()
@@ -52,6 +54,34 @@ const categoryId = computed(() => {
   return (Array.isArray(raw) ? raw[0] : raw) ?? ''
 })
 const category = computed(() => categories.byId(categoryId.value))
+const selectedVariants = ref<string[]>([])
+const visibleSteps = computed(() =>
+  (category.value?.steps ?? [])
+    .filter(
+      (step) =>
+        !step.variantIds?.length ||
+        step.variantIds.some((id) => selectedVariants.value.includes(id)),
+    )
+    .sort(
+      (a, b) =>
+        Number(Boolean(a.variantIds?.length)) - Number(Boolean(b.variantIds?.length)) ||
+        (a.order ?? 0) - (b.order ?? 0),
+    ),
+)
+const completed = computed(() => visibleSteps.value.filter((step) => done.value[step.id]).length)
+const printStep = ref<CategoryStep | null>(null)
+async function printSop(step: CategoryStep) {
+  printStep.value = step
+  await nextTick()
+  window.print()
+  printStep.value = null
+}
+function fieldType(key: string) {
+  return category.value?.fields?.find((f) => f.key === key)?.type ?? 'text'
+}
+function fieldLabel(key: string) {
+  return category.value?.fields?.find((f) => f.key === key)?.name ?? key
+}
 
 const linkedTemplates = computed(() => {
   const ids = category.value?.steps.flatMap((step) => step.templateIds) ?? []
@@ -74,7 +104,7 @@ function fieldPlaceholder(name: string) {
 const fieldNames = computed(() =>
   manualFieldsFromPlaceholders(
     linkedTemplates.value.flatMap((template) => template.placeholders),
-    ['姓名', '日期'],
+    ['姓名', '日期', ...(category.value?.fields?.map((f) => f.key) ?? [])],
   ),
 )
 
@@ -114,7 +144,7 @@ const dateValue = computed({
 watch(
   category,
   (value) => {
-    document.title = value ? `${value.name} · ${appName}` : `找不到類別 · ${appName}`
+    document.title = value ? `${value.name} · ${appName}` : `找不到流程 · ${appName}`
   },
   { immediate: true },
 )
@@ -132,6 +162,8 @@ watch(
 )
 
 function clearDraft() {
+  selectedVariants.value = []
+  printStep.value = null
   values.value = initialDraftValues()
   done.value = {}
   message.value = ''
@@ -218,10 +250,7 @@ async function produceStep(stepId: string, templateIds: string[], index: number)
       message.value = '沒有可以下載的文件。請確認日期有效，且範本欄位寫成雙大括號。'
       return
     }
-    const base = (category.value.code || category.value.name || '範本').replace(
-      /[\\/:*?"<>|]/g,
-      '_',
-    )
+    const base = (category.value.name || '範本').replace(/[\\/:*?"<>|]/g, '_')
     const zip = await zipGeneratedFiles(rendered)
     downloadBlob(zip, `${base}-步驟${index + 2}.zip`)
     messageTone.value = failed.length > 0 ? 'warn' : 'ok'
@@ -335,10 +364,7 @@ async function produceChecked() {
       overviewMessage.value = '沒有可以下載的文件。請確認日期有效，且範本欄位寫成雙大括號。'
       return
     }
-    const base = (category.value.code || category.value.name || '範本').replace(
-      /[\\/:*?"<>|]/g,
-      '_',
-    )
+    const base = (category.value.name || '範本').replace(/[\\/:*?"<>|]/g, '_')
     const zip = await zipGeneratedFiles(rendered)
     downloadBlob(zip, `${base}-勾選文件.zip`)
     overviewTone.value = failed.length > 0 ? 'warn' : 'ok'
@@ -361,7 +387,7 @@ async function removeCategory() {
     await router.push('/categories')
   } catch (cause) {
     messageTone.value = 'warn'
-    message.value = cause instanceof Error ? cause.message : '無法刪除案件類別。'
+    message.value = cause instanceof Error ? cause.message : '無法刪除勤務流程。'
     deleting.value = false
   }
 }
@@ -374,12 +400,21 @@ onUnmounted(clearDraft)
 </script>
 
 <template>
+  <Teleport to="body">
+    <article v-if="printStep" id="sop-print" class="hidden">
+      <h1>{{ printStep.title ?? printStep.body }}</h1>
+      <ul>
+        <li v-for="(item, i) in printStep.items" :key="i">{{ item }}</li>
+      </ul>
+      <p v-if="printStep.note">{{ printStep.note }}</p>
+    </article>
+  </Teleport>
   <div v-if="category">
     <RouterLink
       to="/categories"
       class="mb-4 inline-flex text-sm text-stone-600 hover:text-stone-900"
     >
-      回到全部類別
+      回到全部流程
     </RouterLink>
 
     <PageIntro
@@ -390,9 +425,9 @@ onUnmounted(clearDraft)
       "
     />
 
-    <ul class="mb-4 flex flex-wrap gap-2" aria-label="類別資訊">
+    <ul class="mb-4 flex flex-wrap gap-2" aria-label="流程資訊">
       <li class="rounded-full bg-white px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
-        {{ category.code || '未設代號' }}
+        勤務流程
       </li>
       <li class="rounded-full bg-white px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
         {{ category.steps.length }} 個填寫步驟
@@ -407,7 +442,7 @@ onUnmounted(clearDraft)
         :to="`/categories/${category.id}/edit`"
         class="inline-flex rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
       >
-        編輯類別
+        編輯流程
       </RouterLink>
       <button
         v-if="session.canDeleteCategory"
@@ -415,7 +450,7 @@ onUnmounted(clearDraft)
         class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
         @click="confirmDelete = !confirmDelete"
       >
-        刪除類別
+        刪除流程
       </button>
     </div>
 
@@ -430,7 +465,7 @@ onUnmounted(clearDraft)
         刪除「{{ category.name }}」
       </h2>
       <p class="mt-2 text-sm leading-6 text-stone-600">
-        只會刪除這個類別、它的步驟，以及步驟和範本的連結。範本檔仍留在範本庫。
+        只會刪除這個流程、它的步驟，以及步驟和範本的連結。範本檔仍留在範本庫。
       </p>
       <div class="mt-4 flex flex-wrap gap-3">
         <button
@@ -451,359 +486,458 @@ onUnmounted(clearDraft)
       </div>
     </div>
 
-    <div class="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="工作台檢視">
-      <button
-        id="tab-steps"
-        type="button"
-        role="tab"
-        aria-controls="panel-steps"
-        :aria-selected="tab === 'steps'"
-        class="rounded-xl px-4 py-2.5 text-sm font-medium"
+    <div class="mb-5 flex flex-wrap gap-2" aria-label="樣態選擇">
+      <label
+        v-for="variant in category.variants"
+        :key="variant.id"
+        class="cursor-pointer rounded-full border border-stone-300 px-4 py-2 text-sm"
         :class="
-          tab === 'steps'
-            ? 'bg-stone-900 text-white'
-            : 'bg-white text-stone-700 ring-1 ring-stone-200'
+          selectedVariants.includes(variant.id) ? 'bg-orange-100 text-orange-950' : 'bg-white'
         "
-        @click="tab = 'steps'"
       >
-        填寫步驟
-      </button>
-      <button
-        id="tab-overview"
-        type="button"
-        role="tab"
-        aria-controls="panel-overview"
-        :aria-selected="tab === 'overview'"
-        class="rounded-xl px-4 py-2.5 text-sm font-medium"
-        :class="
-          tab === 'overview'
-            ? 'bg-stone-900 text-white'
-            : 'bg-white text-stone-700 ring-1 ring-stone-200'
-        "
-        @click="tab = 'overview'"
-      >
-        全部文件總覽
-      </button>
+        <input v-model="selectedVariants" type="checkbox" :value="variant.id" /> {{ variant.name }}
+      </label>
     </div>
-
-    <section
-      v-if="tab === 'steps'"
-      id="panel-steps"
-      role="tabpanel"
-      aria-labelledby="tab-steps"
-      class="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
-    >
-      <h2 class="text-base font-semibold text-stone-950">填寫步驟</h2>
-      <p class="mt-1 text-sm leading-6 text-stone-600">
-        基本資料的欄位只留在這個畫面。離開這個類別或登出後會清除，也不會送到服務。
-      </p>
-      <ol class="mt-6">
-        <li class="flex gap-4">
-          <div class="flex w-8 flex-col items-center">
-            <span
-              class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white"
-            >
-              1
-            </span>
-            <span class="my-2 w-px flex-1 bg-stone-200" aria-hidden="true"></span>
-          </div>
-          <div class="min-w-0 flex-1 pb-8">
-            <h3 class="text-sm font-semibold text-stone-900">基本資料</h3>
-            <p class="mt-1 text-sm leading-6 text-stone-600">
-              姓名與日期會套進這個類別各步驟的範本。日期預設為台北今天。
-            </p>
-            <div class="mt-4 max-w-3xl">
-              <PlaceholderGuide />
-            </div>
-            <div class="mt-4 grid max-w-xl gap-4">
-              <div v-for="(name, index) in fieldNames" :key="name">
-                <label class="block text-sm font-medium text-stone-800" :for="`draft-${index}`">
-                  {{ name }}
-                </label>
-                <RocDateField v-if="name === '日期'" v-model="dateValue" />
-                <input
-                  v-else
-                  :id="`draft-${index}`"
-                  :value="fieldValue(name)"
-                  type="text"
-                  autocomplete="off"
-                  :placeholder="fieldPlaceholder(name)"
-                  class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
-                  @input="onFieldInput(name, $event)"
-                />
-              </div>
-            </div>
-          </div>
-        </li>
-
-        <li v-if="category.steps.length === 0" class="flex gap-4">
-          <div class="flex w-8 flex-col items-center">
-            <span
-              class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-200 text-xs font-semibold text-stone-700"
-            >
-              2
-            </span>
-          </div>
-          <p class="pb-2 text-sm leading-6 text-stone-500">尚未設定後續步驟。</p>
-        </li>
-
-        <li v-for="(step, index) in category.steps" :key="step.id" class="flex gap-4">
-          <div class="flex w-8 flex-col items-center">
-            <span
-              class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white"
-            >
-              {{ index + 2 }}
-            </span>
-            <span
-              v-if="index < category.steps.length - 1"
-              class="my-2 w-px flex-1 bg-stone-200"
-              aria-hidden="true"
-            ></span>
-          </div>
-          <div class="min-w-0 flex-1 pb-8">
-            <h3 class="text-sm font-semibold text-stone-900 whitespace-pre-wrap">
-              {{ step.body }}
-            </h3>
-            <label class="mt-3 inline-flex items-center gap-2 text-sm text-stone-700">
-              <input
-                type="checkbox"
-                :checked="done[step.id] === true"
-                @change="toggleDone(step.id, $event)"
-              />
-              本步驟已完成
-            </label>
-            <p v-if="templatesFor(step).length === 0" class="mt-3 text-sm text-stone-500">
-              這個步驟還沒有範本。
-            </p>
-            <div v-else class="mt-4">
-              <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <p v-if="!canGenerate" class="text-sm text-amber-900">{{ generateHint }}</p>
-                <button
-                  v-if="templatesFor(step).length > 1"
-                  type="button"
-                  class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
-                  :disabled="!canGenerate"
-                  @click="produceStep(step.id, step.templateIds, index)"
-                >
-                  產生本步驟全部
-                </button>
-              </div>
-              <ul class="divide-y divide-stone-200 rounded-2xl border border-stone-200">
-                <li
-                  v-for="item in templatesFor(step)"
-                  :key="item.id"
-                  class="flex items-center justify-between gap-3 px-4 py-3"
-                >
-                  <span class="min-w-0">
-                    <span class="block break-all text-sm font-medium text-stone-900">{{
-                      displayFileName(item.fileName)
-                    }}</span>
-                    <span class="mt-1 block text-xs text-stone-500">
-                      {{
-                        item.placeholders.length > 0
-                          ? item.placeholders.join('、')
-                          : '沒有偵測到欄位'
-                      }}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    class="shrink-0 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 hover:bg-stone-50 disabled:cursor-not-allowed disabled:text-stone-400"
-                    :disabled="!canGenerate"
-                    @click="produceOne(step.id, item.id)"
-                  >
-                    產生
-                  </button>
-                </li>
-              </ul>
-            </div>
-            <p
-              v-if="message && messageStepId === step.id"
-              class="mt-3 rounded-xl px-3 py-2 text-sm leading-6"
-              :class="
-                messageTone === 'ok'
-                  ? 'bg-emerald-50 text-emerald-950'
-                  : 'bg-amber-50 text-amber-950'
-              "
-              role="status"
-            >
-              {{ message }}
-            </p>
-          </div>
-        </li>
-      </ol>
-    </section>
-
-    <section
-      v-else
-      id="panel-overview"
-      role="tabpanel"
-      aria-labelledby="tab-overview"
-      class="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
-    >
-      <h2 class="text-base font-semibold text-stone-950">全部文件總覽</h2>
-      <p class="mt-1 text-sm leading-6 text-stone-600">
-        列出這個類別各步驟的範本，同一份只出現一次，預設全部勾選。取消勾選，或從範本庫暫時加入其他範本，只影響這次產生，不會改動類別設定。欄位與填寫步驟的基本資料共用，離開這個類別或登出後清除，也不會送到服務。
-      </p>
-
-      <div class="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <div>
-          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <h3 class="text-sm font-semibold text-stone-900">文件</h3>
+    <p class="mb-2 text-sm" role="status">
+      已完成 {{ completed }} / {{ visibleSteps.length }} 步驟
+    </p>
+    <progress
+      class="mb-6 w-full accent-emerald-600"
+      :value="completed"
+      :max="visibleSteps.length || 1"
+      aria-label="流程完成進度"
+    />
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_15rem]">
+      <aside class="self-start rounded-2xl border border-stone-200 bg-white p-4 lg:order-2">
+        <h2 class="font-semibold">全部範本</h2>
+        <p class="mt-2 text-xs text-stone-500">{{ fieldKeyHint }}：{{ fieldNames.join('、') }}</p>
+        <ul class="mt-3 space-y-3">
+          <li v-for="item in linkedTemplates" :key="item.id">
             <button
-              type="button"
-              class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
-              :aria-expanded="pickerOpen"
-              @click="pickerOpen = !pickerOpen"
+              class="text-left text-sm text-orange-800 hover:underline disabled:text-stone-400"
+              :disabled="!canGenerate"
+              @click="produceOne('', item.id)"
             >
-              從範本庫選取
+              {{ displayFileName(item.fileName) }}
             </button>
-          </div>
-          <p v-if="overviewList.length === 0" class="text-sm text-stone-500">
-            這個類別還沒有範本。可從範本庫暫時加入。
-          </p>
-          <ul v-else class="divide-y divide-stone-200 rounded-2xl border border-stone-200">
-            <li v-for="item in overviewList" :key="item.id" class="px-4 py-3">
-              <label class="flex items-start gap-3 text-sm text-stone-800">
-                <input
-                  type="checkbox"
-                  class="mt-1"
-                  :checked="unchecked[item.id] !== true"
-                  @change="toggleOverview(item.id, $event)"
-                />
-                <span class="min-w-0">
-                  <span class="block break-all font-medium text-stone-900">
-                    {{ displayFileName(item.fileName) }}
-                    <span
-                      v-if="isTemporary(item.id)"
-                      class="ml-2 text-xs font-normal text-orange-800"
-                    >
-                      本次暫加
-                    </span>
-                  </span>
-                  <span class="mt-1 block text-xs text-stone-500">
-                    {{
-                      item.placeholders.length > 0 ? item.placeholders.join('、') : '沒有偵測到欄位'
-                    }}
-                  </span>
-                </span>
-              </label>
-            </li>
-          </ul>
+          </li>
+        </ul>
+      </aside>
+      <div class="min-w-0 lg:order-1">
+        <div class="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="工作台檢視">
+          <button
+            id="tab-steps"
+            type="button"
+            role="tab"
+            aria-controls="panel-steps"
+            :aria-selected="tab === 'steps'"
+            class="rounded-xl px-4 py-2.5 text-sm font-medium"
+            :class="
+              tab === 'steps'
+                ? 'bg-stone-900 text-white'
+                : 'bg-white text-stone-700 ring-1 ring-stone-200'
+            "
+            @click="tab = 'steps'"
+          >
+            填寫步驟
+          </button>
+          <button
+            id="tab-overview"
+            type="button"
+            role="tab"
+            aria-controls="panel-overview"
+            :aria-selected="tab === 'overview'"
+            class="rounded-xl px-4 py-2.5 text-sm font-medium"
+            :class="
+              tab === 'overview'
+                ? 'bg-stone-900 text-white'
+                : 'bg-white text-stone-700 ring-1 ring-stone-200'
+            "
+            @click="tab = 'overview'"
+          >
+            全部文件總覽
+          </button>
+        </div>
 
-          <div v-if="pickerOpen" class="mt-3 rounded-2xl border border-stone-200 bg-stone-50 p-4">
-            <label class="block text-xs font-medium text-stone-600" for="overview-picker">
-              搜尋範本
-            </label>
-            <input
-              id="overview-picker"
-              :value="pickerQuery"
-              type="search"
-              placeholder="請輸入檔名"
-              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
-              @input="onPickerQuery"
-            />
-            <p class="mt-2 text-xs leading-5 text-stone-500">
-              這裡勾選的範本只加進這次清單，不會寫進類別或步驟。
-            </p>
-            <p v-if="templates.items.length === 0" class="mt-3 text-sm text-stone-500">
-              範本庫還沒有文件。
-            </p>
-            <p v-else-if="additionChoices.length === 0" class="mt-3 text-sm text-stone-500">
-              沒有其他可加入的範本。
-            </p>
-            <ul v-else class="mt-3 max-h-48 space-y-2 overflow-auto">
-              <li v-for="item in additionChoices" :key="item.id">
-                <label class="flex items-start gap-2 text-sm text-stone-800">
+        <section
+          v-if="tab === 'steps'"
+          id="panel-steps"
+          role="tabpanel"
+          aria-labelledby="tab-steps"
+          class="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
+        >
+          <h2 class="text-base font-semibold text-stone-950">填寫步驟</h2>
+          <p class="mt-1 text-sm leading-6 text-stone-600">
+            基本資料的欄位只留在這個畫面。離開這個流程或登出後會清除，也不會送到服務。
+          </p>
+          <ol class="mt-6 grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] gap-4">
+            <li class="col-span-full flex gap-4">
+              <div class="flex w-8 flex-col items-center">
+                <span
+                  class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white"
+                >
+                  1
+                </span>
+                <span class="my-2 w-px flex-1 bg-stone-200" aria-hidden="true"></span>
+              </div>
+              <div class="min-w-0 flex-1 pb-8">
+                <h3 class="text-sm font-semibold text-stone-900">基本資料</h3>
+                <p class="mt-1 text-sm leading-6 text-stone-600">
+                  姓名與日期會套進這個流程各步驟的範本。日期預設為台北今天。
+                </p>
+                <div class="mt-4 max-w-3xl">
+                  <PlaceholderGuide />
+                </div>
+                <div class="mt-4 grid max-w-xl gap-4">
+                  <div v-for="(name, index) in fieldNames" :key="name">
+                    <label class="block text-sm font-medium text-stone-800" :for="`draft-${index}`">
+                      {{ fieldLabel(name) }}
+                    </label>
+                    <RocDateField v-if="name === '日期'" v-model="dateValue" />
+                    <input
+                      v-else
+                      :id="`draft-${index}`"
+                      :value="fieldValue(name)"
+                      :type="fieldType(name)"
+                      step="any"
+                      autocomplete="off"
+                      :placeholder="fieldPlaceholder(name)"
+                      class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+                      @input="onFieldInput(name, $event)"
+                    />
+                  </div>
+                </div>
+              </div>
+            </li>
+
+            <li v-if="category.steps.length === 0" class="flex gap-4">
+              <div class="flex w-8 flex-col items-center">
+                <span
+                  class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-200 text-xs font-semibold text-stone-700"
+                >
+                  2
+                </span>
+              </div>
+              <p class="pb-2 text-sm leading-6 text-stone-500">尚未設定後續步驟。</p>
+            </li>
+
+            <li
+              v-for="(step, index) in visibleSteps"
+              :key="step.id"
+              class="flex gap-4 rounded-2xl border border-stone-200 p-4"
+              :class="done[step.id] ? 'bg-emerald-50' : 'bg-stone-50'"
+            >
+              <div class="flex w-8 flex-col items-center">
+                <span
+                  class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white"
+                >
+                  {{ index + 2 }}
+                </span>
+                <span
+                  v-if="index < category.steps.length - 1"
+                  class="my-2 w-px flex-1 bg-stone-200"
+                  aria-hidden="true"
+                ></span>
+              </div>
+              <div class="min-w-0 flex-1 pb-8">
+                <h3 class="text-sm font-semibold text-stone-900 whitespace-pre-wrap">
+                  {{ done[step.id] ? '✓ ' : '' }}{{ step.title ?? step.body }}
+                </h3>
+                <ul v-if="step.items?.length" class="mt-3 list-disc pl-5 text-sm">
+                  <li v-for="(item, itemIndex) in step.items" :key="itemIndex">{{ item }}</li>
+                </ul>
+                <p
+                  v-if="step.note"
+                  class="mt-3 rounded-xl bg-amber-100 p-3 text-sm font-medium text-amber-950"
+                >
+                  {{ step.note }}
+                </p>
+                <button
+                  type="button"
+                  class="mt-3 block text-sm text-orange-800 hover:underline"
+                  @click="printSop(step)"
+                >
+                  列印 SOP
+                </button>
+                <label class="mt-3 inline-flex items-center gap-2 text-sm text-stone-700">
                   <input
                     type="checkbox"
-                    class="mt-1"
-                    :checked="temporaryIds.includes(item.id)"
-                    @change="toggleTemporary(item.id, $event)"
+                    :checked="done[step.id] === true"
+                    @change="toggleDone(step.id, $event)"
                   />
-                  <span class="break-all">{{ displayFileName(item.fileName) }}</span>
+                  本步驟已完成
                 </label>
-              </li>
-            </ul>
-          </div>
-        </div>
+                <p v-if="templatesFor(step).length === 0" class="mt-3 text-sm text-stone-500">
+                  這個步驟還沒有範本。
+                </p>
+                <div v-else class="mt-4">
+                  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <p v-if="!canGenerate" class="text-sm text-amber-900">{{ generateHint }}</p>
+                    <button
+                      v-if="templatesFor(step).length > 1"
+                      type="button"
+                      class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                      :disabled="!canGenerate"
+                      @click="produceStep(step.id, step.templateIds, index)"
+                    >
+                      產生本步驟全部
+                    </button>
+                  </div>
+                  <ul class="divide-y divide-stone-200 rounded-2xl border border-stone-200">
+                    <li
+                      v-for="item in templatesFor(step)"
+                      :key="item.id"
+                      class="flex items-center justify-between gap-3 px-4 py-3"
+                    >
+                      <span class="min-w-0">
+                        <span class="block break-all text-sm font-medium text-stone-900">{{
+                          displayFileName(item.fileName)
+                        }}</span>
+                        <span class="mt-1 block text-xs text-stone-500">
+                          {{
+                            item.placeholders.length > 0
+                              ? item.placeholders.join('、')
+                              : '沒有偵測到欄位'
+                          }}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        class="shrink-0 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 hover:bg-stone-50 disabled:cursor-not-allowed disabled:text-stone-400"
+                        :disabled="!canGenerate"
+                        @click="produceOne(step.id, item.id)"
+                      >
+                        產生
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+                <p
+                  v-if="message && messageStepId === step.id"
+                  class="mt-3 rounded-xl px-3 py-2 text-sm leading-6"
+                  :class="
+                    messageTone === 'ok'
+                      ? 'bg-emerald-50 text-emerald-950'
+                      : 'bg-amber-50 text-amber-950'
+                  "
+                  role="status"
+                >
+                  {{ message }}
+                </p>
+              </div>
+            </li>
+          </ol>
+        </section>
 
-        <div>
-          <h3 class="text-sm font-semibold text-stone-900">基本資料</h3>
+        <section
+          v-else
+          id="panel-overview"
+          role="tabpanel"
+          aria-labelledby="tab-overview"
+          class="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
+        >
+          <h2 class="text-base font-semibold text-stone-950">全部文件總覽</h2>
           <p class="mt-1 text-sm leading-6 text-stone-600">
-            已勾選範本裡的每個欄位只出現一次。日期與填寫步驟共用，預設為台北今天。{{
-              yearToken
-            }}、{{ monthToken }}、{{ dayToken }}、{{ dateToken }}、{{ dateSlashToken }}
-            都跟這個日期走，不會另外出現輸入欄。
+            列出這個流程各步驟的範本，同一份只出現一次，預設全部勾選。取消勾選，或從範本庫暫時加入其他範本，只影響這次產生，不會改動流程設定。欄位與填寫步驟的基本資料共用，離開這個流程或登出後清除，也不會送到服務。
           </p>
-          <p v-if="overviewFields.length === 0" class="mt-4 text-sm text-stone-500">
-            勾選文件後，這裡會列出要填的欄位。
-          </p>
-          <div v-else class="mt-4 grid gap-4">
-            <div v-for="(name, index) in overviewFields" :key="name">
-              <label class="block text-sm font-medium text-stone-800" :for="`overview-${index}`">
-                {{ name }}
-              </label>
-              <RocDateField v-if="name === '日期'" v-model="dateValue" />
-              <input
-                v-else
-                :id="`overview-${index}`"
-                :value="fieldValue(name)"
-                type="text"
-                autocomplete="off"
-                :placeholder="fieldPlaceholder(name)"
-                class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
-                @input="onFieldInput(name, $event)"
-              />
+
+          <div class="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+            <div>
+              <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <h3 class="text-sm font-semibold text-stone-900">文件</h3>
+                <button
+                  type="button"
+                  class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
+                  :aria-expanded="pickerOpen"
+                  @click="pickerOpen = !pickerOpen"
+                >
+                  從範本庫選取
+                </button>
+              </div>
+              <p v-if="overviewList.length === 0" class="text-sm text-stone-500">
+                這個流程還沒有範本。可從範本庫暫時加入。
+              </p>
+              <ul v-else class="divide-y divide-stone-200 rounded-2xl border border-stone-200">
+                <li v-for="item in overviewList" :key="item.id" class="px-4 py-3">
+                  <label class="flex items-start gap-3 text-sm text-stone-800">
+                    <input
+                      type="checkbox"
+                      class="mt-1"
+                      :checked="unchecked[item.id] !== true"
+                      @change="toggleOverview(item.id, $event)"
+                    />
+                    <span class="min-w-0">
+                      <span class="block break-all font-medium text-stone-900">
+                        {{ displayFileName(item.fileName) }}
+                        <span
+                          v-if="isTemporary(item.id)"
+                          class="ml-2 text-xs font-normal text-orange-800"
+                        >
+                          本次暫加
+                        </span>
+                      </span>
+                      <span class="mt-1 block text-xs text-stone-500">
+                        {{
+                          item.placeholders.length > 0
+                            ? item.placeholders.join('、')
+                            : '沒有偵測到欄位'
+                        }}
+                      </span>
+                    </span>
+                  </label>
+                </li>
+              </ul>
+
+              <div
+                v-if="pickerOpen"
+                class="mt-3 rounded-2xl border border-stone-200 bg-stone-50 p-4"
+              >
+                <label class="block text-xs font-medium text-stone-600" for="overview-picker">
+                  搜尋範本
+                </label>
+                <input
+                  id="overview-picker"
+                  :value="pickerQuery"
+                  type="search"
+                  placeholder="請輸入檔名"
+                  class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+                  @input="onPickerQuery"
+                />
+                <p class="mt-2 text-xs leading-5 text-stone-500">
+                  這裡勾選的範本只加進這次清單，不會寫進流程或步驟。
+                </p>
+                <p v-if="templates.items.length === 0" class="mt-3 text-sm text-stone-500">
+                  範本庫還沒有文件。
+                </p>
+                <p v-else-if="additionChoices.length === 0" class="mt-3 text-sm text-stone-500">
+                  沒有其他可加入的範本。
+                </p>
+                <ul v-else class="mt-3 max-h-48 space-y-2 overflow-auto">
+                  <li v-for="item in additionChoices" :key="item.id">
+                    <label class="flex items-start gap-2 text-sm text-stone-800">
+                      <input
+                        type="checkbox"
+                        class="mt-1"
+                        :checked="temporaryIds.includes(item.id)"
+                        @change="toggleTemporary(item.id, $event)"
+                      />
+                      <span class="break-all">{{ displayFileName(item.fileName) }}</span>
+                    </label>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+            <div>
+              <h3 class="text-sm font-semibold text-stone-900">基本資料</h3>
+              <p class="mt-1 text-sm leading-6 text-stone-600">
+                已勾選範本裡的每個欄位只出現一次。日期與填寫步驟共用，預設為台北今天。{{
+                  yearToken
+                }}、{{ monthToken }}、{{ dayToken }}、{{ dateToken }}、{{ dateSlashToken }}
+                都跟這個日期走，不會另外出現輸入欄。
+              </p>
+              <p v-if="overviewFields.length === 0" class="mt-4 text-sm text-stone-500">
+                勾選文件後，這裡會列出要填的欄位。
+              </p>
+              <div v-else class="mt-4 grid gap-4">
+                <div v-for="(name, index) in overviewFields" :key="name">
+                  <label
+                    class="block text-sm font-medium text-stone-800"
+                    :for="`overview-${index}`"
+                  >
+                    {{ fieldLabel(name) }}
+                  </label>
+                  <RocDateField v-if="name === '日期'" v-model="dateValue" />
+                  <input
+                    v-else
+                    :id="`overview-${index}`"
+                    :value="fieldValue(name)"
+                    :type="fieldType(name)"
+                    step="any"
+                    autocomplete="off"
+                    :placeholder="fieldPlaceholder(name)"
+                    class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+                    @input="onFieldInput(name, $event)"
+                  />
+                </div>
+              </div>
+              <div class="mt-4 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                  :disabled="!canGenerateOverview"
+                  @click="produceChecked"
+                >
+                  產生勾選文件
+                </button>
+                <p v-if="!canGenerateOverview && overviewHint" class="text-sm text-amber-900">
+                  {{ overviewHint }}
+                </p>
+              </div>
+              <p
+                v-if="overviewMessage"
+                class="mt-3 rounded-xl px-3 py-2 text-sm leading-6"
+                :class="
+                  overviewTone === 'ok'
+                    ? 'bg-emerald-50 text-emerald-950'
+                    : 'bg-amber-50 text-amber-950'
+                "
+                role="status"
+              >
+                {{ overviewMessage }}
+              </p>
             </div>
           </div>
-          <div class="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
-              :disabled="!canGenerateOverview"
-              @click="produceChecked"
-            >
-              產生勾選文件
-            </button>
-            <p v-if="!canGenerateOverview && overviewHint" class="text-sm text-amber-900">
-              {{ overviewHint }}
-            </p>
-          </div>
-          <p
-            v-if="overviewMessage"
-            class="mt-3 rounded-xl px-3 py-2 text-sm leading-6"
-            :class="
-              overviewTone === 'ok'
-                ? 'bg-emerald-50 text-emerald-950'
-                : 'bg-amber-50 text-amber-950'
-            "
-            role="status"
-          >
-            {{ overviewMessage }}
-          </p>
-        </div>
+        </section>
       </div>
-    </section>
+    </div>
   </div>
 
   <div v-else-if="!categories.ready">
-    <p class="text-sm text-stone-500">正在讀取案件類別。</p>
+    <p class="text-sm text-stone-500">正在讀取勤務流程。</p>
   </div>
 
   <div v-else>
     <PageIntro
       eyebrow="各類案件流程"
-      title="找不到這個類別"
-      description="這個類別不存在，或已經刪除。請回到列表重新選擇。"
+      title="找不到這個流程"
+      description="這個流程不存在，或已經刪除。請回到列表重新選擇。"
     />
-    <EmptyState title="沒有對應的工作台" description="類別可能已刪除，或連結不完整。">
+    <EmptyState title="沒有對應的工作台" description="流程可能已刪除，或連結不完整。">
       <RouterLink
         to="/categories"
         class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
       >
-        回到案件類別
+        回到勤務流程
       </RouterLink>
     </EmptyState>
   </div>
 </template>
+
+<style>
+@media print {
+  body:has(#sop-print) > :not(#sop-print) {
+    display: none !important;
+  }
+  #sop-print,
+  #sop-print * {
+    visibility: visible !important;
+  }
+  #sop-print {
+    display: block !important;
+    position: absolute;
+    inset: 0;
+    padding: 2cm;
+    color: black;
+    background: white;
+  }
+  #sop-print h1 {
+    font-size: 24pt;
+    margin-bottom: 1cm;
+  }
+  #sop-print p {
+    margin-top: 1cm;
+    white-space: pre-wrap;
+  }
+}
+</style>

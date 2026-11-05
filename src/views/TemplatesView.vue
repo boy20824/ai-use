@@ -13,6 +13,8 @@ import { formatStoredDate } from '@/utils/rocDate'
 import { computed, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
+const fieldKeyHint = '{{欄位鍵}}'
+
 const route = useRoute()
 const router = useRouter()
 const categories = useCategoryStore()
@@ -22,8 +24,10 @@ const feedback = ref('')
 const feedbackTone = ref<'ok' | 'warn'>('ok')
 const pendingDelete = ref<TemplateSummary | null>(null)
 const deleting = ref(false)
+const replacing = ref('')
+const replacementBusy = ref(false)
 
-const disabledReason = '需要可維護類別的權限才能上傳範本。刪除範本只有系統管理員可以操作。'
+const disabledReason = '需要可維護流程的權限才能上傳範本。刪除範本只有系統管理員可以操作。'
 
 const requestedCategory = computed(() => {
   const raw = route.query.category
@@ -86,6 +90,26 @@ async function confirmRemove() {
   }
 }
 
+async function replaceFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || !replacing.value || replacementBusy.value) return
+  replacementBusy.value = true
+  try {
+    const result = await templates.replace(replacing.value, file)
+    feedbackTone.value = 'ok'
+    feedback.value = `已替換範本，${result.linkedCategoryCount} 個關聯流程同步使用新版。`
+    await categories.reload()
+    replacing.value = ''
+  } catch (cause) {
+    feedbackTone.value = 'warn'
+    feedback.value = cause instanceof Error ? cause.message : '無法替換範本。'
+  } finally {
+    replacementBusy.value = false
+    input.value = ''
+  }
+}
+
 async function onFiles(files: File[]) {
   if (!session.canUpload) return
   const result = await templates.addFiles(files)
@@ -101,7 +125,7 @@ async function onFiles(files: File[]) {
   }
   feedbackTone.value =
     result.rejected.length > 0 || result.skipped > 0 || result.formatNotice ? 'warn' : 'ok'
-  const notes = [`已上傳 ${result.added} 份到範本庫。可在案件類別工作台選取。`]
+  const notes = [`已上傳 ${result.added} 份到範本庫。可在勤務流程工作台選取。`]
   if (result.skipped > 0) notes.push(`另有 ${result.skipped} 份因筆數上限未加入。`)
   if (result.rejected.length > 0) notes.push(`${result.rejected.join('。')}。`)
   if (result.formatNotice) notes.push(result.formatNotice)
@@ -113,11 +137,22 @@ async function onFiles(files: File[]) {
   <PageIntro
     eyebrow="工作台"
     title="範本庫"
-    description="每一份 Word 範本只保存一次，不屬於單一案件類別。類別透過連結使用這些範本。上傳與連結需要可維護類別的權限，刪除只有系統管理員可以操作。"
+    description="每一份 Word 範本只保存一次，不屬於單一勤務流程。流程透過連結使用這些範本。上傳與連結需要可維護流程的權限，刪除只有系統管理員可以操作。"
   />
 
   <div class="mb-6">
     <PlaceholderGuide />
+    <p class="mt-2 text-xs text-stone-600">
+      範本欄位寫法：{{ fieldKeyHint
+      }}<span v-if="requestedCategory"
+        >；可用欄位：{{
+          categories
+            .byId(requestedCategory)
+            ?.fields?.map((f) => f.key)
+            .join('、') || '未設定'
+        }}</span
+      >
+    </p>
   </div>
 
   <div v-if="session.canUpload" class="mb-6">
@@ -147,7 +182,7 @@ async function onFiles(files: File[]) {
   <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
     <div class="w-full max-w-xs">
       <label for="template-category" class="block text-sm font-medium text-stone-800">
-        使用於類別
+        使用於流程
       </label>
       <select
         id="template-category"
@@ -157,7 +192,7 @@ async function onFiles(files: File[]) {
       >
         <option value="">全部範本</option>
         <option v-for="item in categories.items" :key="item.id" :value="item.id">
-          {{ item.code ? `${item.code} ` : '' }}{{ item.name }}
+          {{ item.name }}
         </option>
       </select>
     </div>
@@ -167,20 +202,20 @@ async function onFiles(files: File[]) {
   <EmptyState
     v-if="templates.ready && visible.length === 0 && templates.total === 0"
     title="範本庫還沒有文件"
-    description="具有維護權限的使用者上傳 .docx 後，可在案件類別的工作台按「從範本庫選取」連結過來。"
+    description="具有維護權限的使用者上傳 .docx 後，可在勤務流程的工作台按「從範本庫選取」連結過來。"
   >
     <RouterLink
       to="/categories"
       class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
     >
-      前往案件類別
+      前往勤務流程
     </RouterLink>
   </EmptyState>
 
   <EmptyState
     v-else-if="templates.ready && visible.length === 0"
-    title="這個類別還沒有連結範本"
-    description="可以改看全部範本，或回到該類別的工作台選取。"
+    title="這個流程還沒有連結範本"
+    description="可以改看全部範本，或回到該流程的工作台選取。"
   >
     <button
       type="button"
@@ -225,7 +260,27 @@ async function onFiles(files: File[]) {
             </template>
           </p>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
+          <span class="text-xs text-stone-500"
+            >關聯 {{ new Set(item.usages.map((u) => u.categoryId)).size }} 個流程</span
+          >
+          <button
+            v-if="session.canUpload"
+            type="button"
+            :disabled="replacementBusy"
+            class="text-sm text-orange-800 hover:underline"
+            @click="replacing = replacing === item.id ? '' : item.id"
+          >
+            替換
+          </button>
+          <label v-if="replacing === item.id" class="text-xs text-stone-600"
+            >選擇新版 .docx<input
+              type="file"
+              accept=".docx"
+              :disabled="replacementBusy"
+              class="block max-w-52"
+              @change="replaceFile"
+          /></label>
           <button
             v-if="session.canDelete"
             type="button"
@@ -256,7 +311,7 @@ async function onFiles(files: File[]) {
         <template v-if="usageLinks(pendingDelete).length > 0">
           「{{
             displayFileName(pendingDelete.fileName)
-          }}」目前用在下列案件類別的步驟。確定後會解除這些連結，並從範本庫刪除檔案。類別與步驟會保留。
+          }}」目前用在下列勤務流程的步驟。確定後會解除這些連結，並從範本庫刪除檔案。流程與步驟會保留。
         </template>
         <template v-else>
           「{{

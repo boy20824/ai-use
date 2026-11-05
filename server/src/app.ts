@@ -1,3 +1,4 @@
+import { releaseNotes } from './releaseNotes.ts'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
 import helmet from '@fastify/helmet'
@@ -74,23 +75,52 @@ const categoryQuerySchema = z
 
 const stepIdSchema = z.string().regex(/^[a-z0-9-]{1,64}$/)
 
+const variantSchema = z
+  .object({
+    id: stepIdSchema,
+    categoryId: categoryIdSchema.optional(),
+    name: z.string().trim().min(1).max(80),
+  })
+  .strict()
+const fieldSchema = z
+  .object({
+    id: stepIdSchema,
+    categoryId: categoryIdSchema.optional(),
+    name: z.string().trim().min(1).max(80).optional(),
+    key: z
+      .string()
+      .trim()
+      .min(1)
+      .max(80)
+      .regex(/^[\p{L}\p{N}_]+$/u)
+      .refine((key) => !['__proto__', 'prototype', 'constructor'].includes(key)),
+    type: z.enum(['text', 'number']),
+  })
+  .strict()
+const stepSchema = z
+  .object({
+    categoryId: categoryIdSchema.optional(),
+    id: stepIdSchema.optional(),
+    body: z.string().trim().min(1).max(500).optional(),
+    title: z.string().trim().min(1).max(500).optional(),
+    order: z.number().int().min(0).max(10000).optional(),
+    items: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
+    note: z.string().trim().max(2000).optional(),
+    variantIds: z.array(stepIdSchema).max(30).optional(),
+    templateIds: z.array(templateIdSchema).max(30).optional(),
+  })
+  .strict()
+  .refine((v) => Boolean(v.title || v.body))
 const categoryBodySchema = z
   .object({
     name: z.string().trim().min(1).max(80),
+    // Accept legacy clients, but never use their code; existing DB codes remain intact.
     code: z.string().trim().max(32).optional(),
+    group: z.enum(['criminal', 'admin', 'internal']).optional(),
     summary: z.string().trim().max(400).optional(),
-    steps: z
-      .array(
-        z
-          .object({
-            id: stepIdSchema.optional(),
-            body: z.string().trim().min(1).max(500),
-            templateIds: z.array(templateIdSchema).max(30).optional(),
-          })
-          .strict(),
-      )
-      .max(30)
-      .optional(),
+    variants: z.array(variantSchema).max(30).optional(),
+    fields: z.array(fieldSchema).max(50).optional(),
+    steps: z.array(stepSchema).max(30).optional(),
   })
   .strict()
 
@@ -232,7 +262,9 @@ function publicFeedback(post: FeedbackRecord) {
 function publicCategory(category: CategoryRecord) {
   return {
     id: category.id,
-    code: category.code,
+    group: category.group,
+    variants: category.variants,
+    fields: category.fields,
     name: category.name,
     summary: category.summary,
     updatedAt: category.updatedAt,
@@ -248,6 +280,8 @@ function publicTemplate(template: TemplateRecord) {
     mimeType: template.mimeType,
     sizeBytes: template.sizeBytes,
     addedAt: template.addedAt,
+    updatedAt: template.addedAt,
+    linkedCategoryCount: new Set(template.usages.map((u) => u.categoryId)).size,
     placeholders: template.placeholders,
     origin: template.origin,
     usages: template.usages,
@@ -290,7 +324,7 @@ function stamp(date = new Date()): string {
 function normalizeSteps(
   queries: AppQueries,
   categoryId: string,
-  steps: { id?: string; body: string; templateIds?: string[] }[],
+  steps: (Partial<StepInput> & { id?: string })[],
 ): StepInput[] {
   const owned = new Set(queries.stepIdsFor(categoryId))
   const used = new Set<string>()
@@ -298,7 +332,7 @@ function normalizeSteps(
     const reusable = step.id && owned.has(step.id) && !used.has(step.id) ? step.id : ''
     const id = reusable || randomBytes(16).toString('hex')
     used.add(id)
-    return { id, body: step.body, templateIds: step.templateIds ?? [] }
+    return { ...step, id, body: step.title ?? step.body ?? '', templateIds: step.templateIds ?? [] }
   })
 }
 
@@ -310,6 +344,39 @@ function templateListError(queries: AppQueries, steps: StepInput[]): string | nu
     }
   }
   return null
+}
+
+function categoryExtras(queries: AppQueries, id: string, data: z.infer<typeof categoryBodySchema>) {
+  const existing = queries.getCategory(id)
+  const variants = (data.variants ?? existing?.variants ?? []).map((v) => ({
+    ...v,
+    categoryId: id,
+  }))
+  const fields = (data.fields ?? existing?.fields ?? []).map((f) => ({
+    ...f,
+    name: f.name ?? f.key,
+    categoryId: id,
+  }))
+  return { group: data.group ?? existing?.group ?? 'criminal', variants, fields } as const
+}
+function extrasValid(
+  queries: AppQueries,
+  id: string,
+  extras: ReturnType<typeof categoryExtras>,
+  steps: StepInput[],
+) {
+  const all = queries.listCategories().filter((c) => c.id !== id)
+  const ids = [...extras.variants, ...extras.fields].map((v) => v.id)
+  if (new Set(ids).size !== ids.length) return false
+  if (all.some((c) => [...c.variants, ...c.fields].some((v) => ids.includes(v.id)))) return false
+  if (
+    new Set(extras.variants.map((v) => v.name)).size !== extras.variants.length ||
+    new Set(extras.fields.map((f) => f.key)).size !== extras.fields.length
+  )
+    return false
+  return steps.every((step) =>
+    (step.variantIds ?? []).every((v) => extras.variants.some((x) => x.id === v)),
+  )
 }
 
 function tokensMatch(left: string, right: string) {
@@ -683,7 +750,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const parsed = categoryIdSchema.safeParse(requestId(request))
     if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
     const category = queries.getCategory(parsed.data)
-    if (!category) return fail(reply, 404, 'not-found', '找不到這個案件類別。')
+    if (!category) return fail(reply, 404, 'not-found', '找不到這個勤務流程。')
     return { category: publicCategory(category) }
   })
 
@@ -699,16 +766,20 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     }
     const id = randomBytes(16).toString('hex')
     const steps = normalizeSteps(queries, id, parsed.data.steps ?? [])
+    const extras = categoryExtras(queries, id, parsed.data)
+    if (!extrasValid(queries, id, extras, steps))
+      return fail(reply, 400, 'invalid-input', '樣態或欄位設定不正確。')
     const templateError = templateListError(queries, steps)
     if (templateError) return fail(reply, 400, 'invalid-input', templateError)
     const saved = queries.createCategory(
       {
         id,
-        code: parsed.data.code ?? '',
+        code: id,
         name,
         summary: parsed.data.summary ?? '',
         updatedAt: stamp(),
         steps,
+        ...extras,
       },
       user.username,
     )
@@ -718,43 +789,51 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     return reply.code(201).send({ category: publicCategory(category) })
   })
 
-  app.patch('/api/categories/:id', async (request, reply) => {
-    const user = requireCategoryManager(request, reply, 'category_update', {
-      categoryId: scopedId(categoryIdSchema, requestId(request)),
-    })
-    if (!user) return
-    const id = categoryIdSchema.safeParse(requestId(request))
-    if (!id.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
-    const parsed = categoryBodySchema.safeParse(request.body)
-    if (!parsed.success)
-      return fail(reply, 400, 'invalid-input', categoryInputMessage(parsed.error))
-    const existing = queries.getCategory(id.data)
-    if (!existing) return fail(reply, 404, 'not-found', '找不到這個案件類別。')
-    if (queries.nameTaken(parsed.data.name, id.data)) {
-      return fail(reply, 409, 'conflict', '這個類別名稱已經存在。')
-    }
-    const steps = normalizeSteps(queries, id.data, parsed.data.steps ?? [])
-    const templateError = templateListError(queries, steps)
-    if (templateError) return fail(reply, 400, 'invalid-input', templateError)
-    const saved = queries.updateCategory(
-      {
-        id: id.data,
-        code: parsed.data.code ?? '',
-        name: parsed.data.name,
-        summary: parsed.data.summary ?? '',
-        updatedAt: stamp(),
-        steps,
-      },
-      user.username,
-    )
-    if (!saved) {
-      if (!queries.getCategory(id.data))
-        return fail(reply, 404, 'not-found', '找不到這個案件類別。')
-      return fail(reply, 409, 'conflict', '這個類別名稱已經存在。')
-    }
-    const category = queries.getCategory(id.data)
-    if (!category) return fail(reply, 404, 'not-found', '找不到這個案件類別。')
-    return { category: publicCategory(category) }
+  app.route({
+    method: ['PATCH', 'PUT'],
+    url: '/api/categories/:id',
+    handler: async (request, reply) => {
+      const user = requireCategoryManager(request, reply, 'category_update', {
+        categoryId: scopedId(categoryIdSchema, requestId(request)),
+      })
+      if (!user) return
+      const id = categoryIdSchema.safeParse(requestId(request))
+      if (!id.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+      const parsed = categoryBodySchema.safeParse(request.body)
+      if (!parsed.success)
+        return fail(reply, 400, 'invalid-input', categoryInputMessage(parsed.error))
+      const existing = queries.getCategory(id.data)
+      if (!existing) return fail(reply, 404, 'not-found', '找不到這個勤務流程。')
+      if (queries.nameTaken(parsed.data.name, id.data)) {
+        return fail(reply, 409, 'conflict', '這個類別名稱已經存在。')
+      }
+      const steps = normalizeSteps(queries, id.data, parsed.data.steps ?? existing.steps)
+      const extras = categoryExtras(queries, id.data, parsed.data)
+      if (!extrasValid(queries, id.data, extras, steps))
+        return fail(reply, 400, 'invalid-input', '樣態或欄位設定不正確。')
+      const templateError = templateListError(queries, steps)
+      if (templateError) return fail(reply, 400, 'invalid-input', templateError)
+      const saved = queries.updateCategory(
+        {
+          id: id.data,
+          code: existing.code,
+          name: parsed.data.name,
+          summary: parsed.data.summary ?? existing.summary,
+          updatedAt: stamp(),
+          steps,
+          ...extras,
+        },
+        user.username,
+      )
+      if (!saved) {
+        if (!queries.getCategory(id.data))
+          return fail(reply, 404, 'not-found', '找不到這個勤務流程。')
+        return fail(reply, 409, 'conflict', '這個類別名稱已經存在。')
+      }
+      const category = queries.getCategory(id.data)
+      if (!category) return fail(reply, 404, 'not-found', '找不到這個勤務流程。')
+      return { category: publicCategory(category) }
+    },
   })
 
   app.delete('/api/categories/:id', async (request, reply) => {
@@ -765,8 +844,92 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const id = categoryIdSchema.safeParse(requestId(request))
     if (!id.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
     const existing = queries.getCategory(id.data)
-    if (!existing) return fail(reply, 404, 'not-found', '找不到這個案件類別。')
+    if (!existing) return fail(reply, 404, 'not-found', '找不到這個勤務流程。')
     queries.deleteCategory(id.data, user.username, existing.name)
+    return reply.code(204).send()
+  })
+
+  for (const resource of ['variants', 'fields', 'steps'] as const) {
+    const base = `/api/categories/:id/${resource}`
+    app.get(base, async (request, reply) => {
+      if (!requireUser(request, reply)) return
+      const category = queries.getCategory(String(requestId(request)))
+      if (!category) return fail(reply, 404, 'not-found', '找不到勤務流程。')
+      return { [resource]: category[resource] }
+    })
+    app.route({
+      method: ['PUT', 'PATCH', 'DELETE'],
+      url: `${base}/:childId`,
+      handler: mutateChild,
+    })
+    app.post(base, mutateChild)
+    async function mutateChild(request: FastifyRequest, reply: FastifyReply) {
+      const actor = requireCategoryManager(request, reply, 'category_update', {})
+      if (!actor) return
+      const params = request.params as { id: string; childId?: string }
+      const category = queries.getCategory(params.id)
+      if (!category) return fail(reply, 404, 'not-found', '找不到勤務流程。')
+      const childId = params.childId ?? randomBytes(16).toString('hex')
+      if (!stepIdSchema.safeParse(childId).success)
+        return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+      const current = category[resource] as { id: string }[]
+      if (request.method !== 'POST' && !current.some((v) => v.id === childId))
+        return fail(reply, 404, 'not-found', '找不到項目。')
+      const incoming = request.body && typeof request.body === 'object' ? request.body : {}
+      const body = { ...current.find((v) => v.id === childId), ...incoming }
+      const value =
+        resource === 'steps'
+          ? { ...body, id: childId }
+          : { ...body, id: childId, categoryId: category.id }
+      const next = current.filter((v) => v.id !== childId)
+      if (request.method !== 'DELETE') {
+        const index = current.findIndex((v) => v.id === childId)
+        next.splice(index < 0 ? next.length : index, 0, value)
+      }
+      const draft = {
+        name: category.name,
+        group: category.group,
+        summary: category.summary,
+        variants: category.variants,
+        fields: category.fields,
+        steps: category.steps,
+        [resource]: next,
+      }
+      if (resource === 'variants' && request.method === 'DELETE')
+        draft.steps = category.steps.map((step) => ({
+          ...step,
+          variantIds: (step.variantIds ?? []).filter((id) => id !== childId),
+        }))
+      const parsed = categoryBodySchema.safeParse(draft)
+      if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+      const steps = normalizeSteps(queries, category.id, parsed.data.steps ?? [])
+      const extras = categoryExtras(queries, category.id, parsed.data)
+      if (!extrasValid(queries, category.id, extras, steps) || templateListError(queries, steps))
+        return fail(reply, 400, 'invalid-input', '關聯設定不正確。')
+      // POST step ids must be generated by the server, normalizeSteps allocates them.
+      queries.updateCategory({ ...category, ...extras, steps, updatedAt: stamp() }, actor.username)
+      if (request.method === 'DELETE') return reply.code(204).send()
+      const saved = queries.getCategory(category.id)!
+      const result =
+        resource === 'steps' && request.method === 'POST'
+          ? saved.steps.find((s) => !category.steps.some((old) => old.id === s.id))
+          : saved[resource].find((v) => v.id === childId)
+      return reply.code(request.method === 'POST' ? 201 : 200).send({
+        [resource === 'variants' ? 'variant' : resource === 'fields' ? 'field' : 'step']: result,
+      })
+    }
+  }
+
+  app.get('/api/release-notes', async () => ({ items: releaseNotes }))
+
+  app.delete('/api/members/:id', async (request, reply) => {
+    const actor = requireSysadmin(request, reply, 'member_update', '只有系統管理員可以管理會員。')
+    if (!actor) return
+    const parsed = memberIdSchema.safeParse(requestId(request))
+    if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+    if (actor.id === parsed.data) return fail(reply, 400, 'invalid-input', '不能刪除自己的帳號。')
+    if (!queries.findUserById(parsed.data)) return fail(reply, 404, 'not-found', '找不到會員。')
+    queries.deleteMember(parsed.data)
     return reply.code(204).send()
   })
 
@@ -776,7 +939,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const parsed = categoryQuerySchema.safeParse(request.query)
     if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
     if (parsed.data.categoryId && !queries.getCategory(parsed.data.categoryId)) {
-      return fail(reply, 400, 'invalid-input', '找不到這個案件類別。')
+      return fail(reply, 400, 'invalid-input', '找不到這個勤務流程。')
     }
     return {
       templates: queries.listTemplates(parsed.data.categoryId).map(publicTemplate),
@@ -799,10 +962,17 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       .send(data)
   })
 
-  app.post('/api/templates', async (request, reply) => {
+  const uploadTemplate = async (request: FastifyRequest, reply: FastifyReply) => {
+    const replacing = request.method === 'PUT'
+    const replaceId = replacing ? String(requestId(request)) : ''
     const user = requireCategoryManager(request, reply, 'upload', {})
     if (!user) return
 
+    if (
+      replacing &&
+      (!templateIdSchema.safeParse(replaceId).success || !queries.getTemplateFile(replaceId))
+    )
+      return fail(reply, 404, 'not-found', '找不到範本。')
     const file = await request.file()
     if (!file) return fail(reply, 400, 'invalid-input', '請選擇 .docx 檔案。')
     const stepField = file.fields.stepId
@@ -841,28 +1011,40 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     }
 
     const record = {
-      id: randomBytes(16).toString('hex'),
+      id: replacing ? replaceId : randomBytes(16).toString('hex'),
       fileName,
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       sizeBytes: storedBytes.byteLength,
-      addedAt: stamp(),
+      addedAt: replacing ? new Date().toISOString() : stamp(),
       placeholders,
       origin: 'upload' as const,
       usages: [],
       data: storedBytes,
     }
+    const previous = replacing ? queries.getTemplateFile(record.id) : null
+    const previousBytes = previous
+      ? readTemplateBytes(config.uploadDir, record.id, previous.data)
+      : undefined
     writeTemplateFile(config.uploadDir, record.id, storedBytes)
     try {
-      queries.insertTemplate(record, linkedStepId ?? undefined)
+      if (replacing) queries.replaceTemplate(record)
+      else queries.insertTemplate(record, linkedStepId ?? undefined)
     } catch (error) {
-      removeTemplateFile(config.uploadDir, record.id)
+      if (previousBytes) writeTemplateFile(config.uploadDir, record.id, previousBytes)
+      else removeTemplateFile(config.uploadDir, record.id)
       throw error
     }
     queries.insertAudit(user.username, 'upload', record.id, record.fileName, linkedCategoryId)
     const stored = queries.getTemplateFile(record.id)
     if (!stored) return fail(reply, 500, 'internal', '伺服器暫時無法完成這項操作。')
-    return reply.code(201).send({ template: publicTemplate(stored), formatNotices })
-  })
+    return reply.code(replacing ? 200 : 201).send({
+      template: publicTemplate(stored),
+      formatNotices,
+      linkedCategoryCount: new Set(stored.usages.map((u) => u.categoryId)).size,
+    })
+  }
+  app.post('/api/templates', uploadTemplate)
+  app.put('/api/templates/:id/file', uploadTemplate)
 
   app.delete('/api/templates/:id', async (request, reply) => {
     const user = requireSysadmin(request, reply, 'delete', '只有系統管理員可以刪除。', {

@@ -225,7 +225,6 @@ describe('category library', () => {
     const createdSteps = created.json().category.steps as { id: string; body: string }[]
     expect(created.json().category).toMatchObject({
       name: injectedName,
-      code: '',
       summary: '財物遭竊',
       templateCount: 0,
     })
@@ -258,7 +257,7 @@ describe('category library', () => {
     const theftSteps = renamed.json().category.steps as { id: string; body: string }[]
     expect(theftSteps.map((step) => step.body)).toEqual(['通知事主', '製作筆錄'])
     expect(theftSteps.map((step) => step.id)).toEqual(createdSteps.map((step) => step.id))
-    expect(renamed.json().category.code).toBe('A-01')
+    expect(renamed.json().category).not.toHaveProperty('code')
 
     const viewerPatch = await app.inject({
       method: 'PATCH',
