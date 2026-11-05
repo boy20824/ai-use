@@ -1242,10 +1242,6 @@ export function createQueries(db: AppDatabase) {
         db.prepare('DELETE FROM feedback_posts WHERE author_id = ?').run(id)
         deleteUserSessions.run(id)
         db.prepare('DELETE FROM login_events WHERE username = ? COLLATE NOCASE').run(user.username)
-        db.prepare('DELETE FROM audit_log WHERE actor_username = ? OR target_username = ?').run(
-          user.username,
-          user.username,
-        )
         db.prepare('DELETE FROM users WHERE id = ?').run(id)
       })()
     },

@@ -450,10 +450,24 @@ describe('v1.3 workflow spec', () => {
     const admin = await login(app)
     const viewer = await login(app, 'viewer')
     await request(app, viewer, 'POST', '/api/feedback', { title: '模擬留言', content: '模擬內容' })
+    expect(
+      (
+        await request(app, admin, 'PATCH', '/api/members/user-viewer', {
+          canManageCategories: true,
+        })
+      ).statusCode,
+    ).toBe(200)
+    const victimAudit = db.prepare(
+      'SELECT * FROM audit_log WHERE actor_username = ? OR target_username = ? ORDER BY id',
+    )
+    const auditBefore = victimAudit.all('viewer', 'viewer')
+    expect(auditBefore.length).toBeGreaterThan(0)
     expect((await request(app, admin, 'DELETE', '/api/members/user-admin')).statusCode).toBe(400)
     expect((await request(app, admin, 'DELETE', '/api/members/user-viewer')).statusCode).toBe(204)
+    expect(victimAudit.all('viewer', 'viewer')).toEqual(auditBefore)
     expect(db.prepare('SELECT * FROM users WHERE id = ?').get('user-viewer')).toBeUndefined()
     expect(db.prepare('SELECT * FROM sessions WHERE user_id = ?').all('user-viewer')).toEqual([])
+    expect(db.prepare('SELECT * FROM login_events WHERE username = ?').all('viewer')).toEqual([])
     expect(
       db.prepare('SELECT * FROM feedback_posts WHERE author_id = ?').all('user-viewer'),
     ).toEqual([])
