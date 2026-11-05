@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PoliceBadge from '@/components/PoliceBadge.vue'
 import SideNav from '@/components/SideNav.vue'
 import { appName, appTagline } from '@/config/app'
 import { useSessionStore } from '@/stores/session'
@@ -82,6 +83,7 @@ onUnmounted(() => {
             </svg>
             <span class="sr-only">{{ menuOpen ? '關閉選單' : '開啟選單' }}</span>
           </button>
+          <PoliceBadge class="md:hidden" />
           <p class="truncate text-sm font-semibold md:hidden">{{ appName }}</p>
           <p class="hidden truncate text-sm text-stone-500 md:block">{{ appTagline }}</p>
         </div>

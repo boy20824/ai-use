@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PoliceBadge from '@/components/PoliceBadge.vue'
 import { appName, appTagline } from '@/config/app'
 import { mainNav } from '@/navigation'
 import { useSessionStore } from '@/stores/session'
@@ -41,7 +42,7 @@ function onNavigate(
         <span
           class="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-700 text-sm font-semibold text-white"
         >
-          用
+          <PoliceBadge />
         </span>
         <span class="min-w-0">
           <span class="block truncate text-sm font-semibold">{{ appName }}</span>

@@ -92,7 +92,28 @@ export interface FeedbackPatch {
   adminReply?: string
 }
 
-export interface CategoryStepRecord {
+export type CategoryGroup = 'criminal' | 'admin' | 'internal'
+export interface VariantRecord {
+  id: string
+  categoryId: string
+  name: string
+}
+export interface FieldDefRecord {
+  id: string
+  categoryId: string
+  name: string
+  key: string
+  type: 'text' | 'number'
+}
+export interface StepDetails {
+  categoryId?: string
+  order?: number
+  title?: string
+  items?: string[]
+  note?: string
+  variantIds?: string[]
+}
+export interface CategoryStepRecord extends StepDetails {
   id: string
   body: string
   templateIds: string[]
@@ -107,6 +128,9 @@ export interface TemplateUsage {
 }
 
 export interface CategoryRecord {
+  group: CategoryGroup
+  variants: VariantRecord[]
+  fields: FieldDefRecord[]
   id: string
   code: string
   name: string
@@ -128,13 +152,16 @@ export interface TemplateRecord {
   data?: Buffer
 }
 
-export interface StepInput {
+export interface StepInput extends StepDetails {
   id: string
   body: string
   templateIds: string[]
 }
 
 export interface CategoryInput {
+  group?: CategoryGroup
+  variants?: VariantRecord[]
+  fields?: FieldDefRecord[]
   id: string
   code: string
   name: string
@@ -249,6 +276,9 @@ const userSelect = `id, username, password_hash, display_name, nickname, role, c
 
 function mapCategory(row: CategoryRow, steps: CategoryStepRecord[]): CategoryRecord {
   return {
+    group: 'criminal',
+    variants: [],
+    fields: [],
     id: row.id,
     code: row.code,
     name: row.name,
@@ -819,6 +849,21 @@ export function migrate(db: AppDatabase) {
   ensureAuditSchema(db)
   upgradeAccounts(db)
   db.exec(feedbackTable + registerEventsTable)
+  db.transaction(() => {
+    if (!columnNames(db, 'categories').includes('group_name'))
+      db.exec(
+        "ALTER TABLE categories ADD COLUMN group_name TEXT NOT NULL DEFAULT 'criminal' CHECK(group_name IN ('criminal','admin','internal'))",
+      )
+    if (!columnNames(db, 'category_steps').includes('details'))
+      db.exec("ALTER TABLE category_steps ADD COLUMN details TEXT NOT NULL DEFAULT '{}'")
+    db.exec(`CREATE TABLE IF NOT EXISTS category_variants (
+      id TEXT PRIMARY KEY, category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, UNIQUE(category_id, name));
+      CREATE TABLE IF NOT EXISTS category_fields (
+      id TEXT PRIMARY KEY, category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+      name TEXT NOT NULL, key TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('text','number')),
+      UNIQUE(category_id, key));`)
+  })()
 }
 
 export function isUniqueConstraint(error: unknown): boolean {
@@ -1119,7 +1164,101 @@ export function createQueries(db: AppDatabase) {
     )
   }
 
+  function hydrateCategory(row: CategoryRow, steps: CategoryStepRecord[]): CategoryRecord {
+    const category = mapCategory(row, steps)
+    category.group = (
+      db.prepare('SELECT group_name FROM categories WHERE id = ?').get(row.id) as {
+        group_name: CategoryGroup
+      }
+    ).group_name
+    category.variants = db
+      .prepare(
+        'SELECT id, category_id AS categoryId, name FROM category_variants WHERE category_id = ? ORDER BY rowid',
+      )
+      .all(row.id) as VariantRecord[]
+    category.fields = db
+      .prepare(
+        'SELECT id, category_id AS categoryId, name, key, type FROM category_fields WHERE category_id = ? ORDER BY rowid',
+      )
+      .all(row.id) as FieldDefRecord[]
+    category.steps = steps
+      .map((step, index) => {
+        const details = db
+          .prepare('SELECT details FROM category_steps WHERE id = ?')
+          .get(step.id) as { details: string }
+        return {
+          ...step,
+          categoryId: row.id,
+          order: index,
+          title: step.body,
+          items: [],
+          note: '',
+          variantIds: [],
+          ...JSON.parse(details.details),
+        }
+      })
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    return category
+  }
+  function writeDetails(input: CategoryInput) {
+    db.prepare('UPDATE categories SET group_name = ? WHERE id = ?').run(
+      input.group ?? 'criminal',
+      input.id,
+    )
+    if (input.variants) {
+      db.prepare('DELETE FROM category_variants WHERE category_id = ?').run(input.id)
+      for (const v of input.variants)
+        db.prepare('INSERT INTO category_variants(id, category_id, name) VALUES (?, ?, ?)').run(
+          v.id,
+          input.id,
+          v.name,
+        )
+    }
+    if (input.fields) {
+      db.prepare('DELETE FROM category_fields WHERE category_id = ?').run(input.id)
+      for (const f of input.fields)
+        db.prepare(
+          'INSERT INTO category_fields(id, category_id, name, key, type) VALUES (?, ?, ?, ?, ?)',
+        ).run(f.id, input.id, f.name, f.key, f.type)
+    }
+    input.steps.forEach((step, index) =>
+      db.prepare('UPDATE category_steps SET details = ? WHERE id = ?').run(
+        JSON.stringify({
+          order: step.order ?? index,
+          title: step.title ?? step.body,
+          items: step.items ?? [],
+          note: step.note ?? '',
+          variantIds: step.variantIds ?? [],
+        }),
+        step.id,
+      ),
+    )
+  }
   return {
+    deleteMember(id: string) {
+      db.transaction(() => {
+        const user = findUserById.get(id) as UserRow | undefined
+        if (!user) return
+        db.prepare('DELETE FROM feedback_posts WHERE author_id = ?').run(id)
+        deleteUserSessions.run(id)
+        db.prepare('DELETE FROM login_events WHERE username = ? COLLATE NOCASE').run(user.username)
+        db.prepare('DELETE FROM users WHERE id = ?').run(id)
+      })()
+    },
+    replaceTemplate(record: TemplateRecord & { data: Buffer }) {
+      db.prepare(
+        'UPDATE templates SET file_name = ?, mime_type = ?, size_bytes = ?, added_at = ?, placeholders = ?, origin = ?, data = ? WHERE id = ?',
+      ).run(
+        record.fileName,
+        record.mimeType,
+        record.sizeBytes,
+        record.addedAt,
+        JSON.stringify(record.placeholders),
+        record.origin,
+        record.data,
+        record.id,
+      )
+    },
     countUsers() {
       const row = countUsers.get() as { count: number }
       return row.count
@@ -1228,13 +1367,13 @@ export function createQueries(db: AppDatabase) {
       const steps = stepsByCategory()
       const rows = listCategoryRows.all() as CategoryRow[]
       return rows
-        .map((row) => mapCategory(row, steps.get(row.id) ?? []))
+        .map((row) => hydrateCategory(row, steps.get(row.id) ?? []))
         .sort((left, right) => left.name.localeCompare(right.name, 'zh-Hant'))
     },
     getCategory(id: string) {
       const row = getCategoryRow.get(id) as CategoryRow | undefined
       if (!row) return null
-      return mapCategory(row, stepsFor(id))
+      return hydrateCategory(row, stepsFor(id))
     },
     stepIdsFor(categoryId: string) {
       return (listStepIds.all(categoryId) as { id: string }[]).map((row) => row.id)
@@ -1250,6 +1389,7 @@ export function createQueries(db: AppDatabase) {
       const apply = db.transaction(() => {
         insertCategory.run(input.id, input.code, input.name, input.summary, input.updatedAt)
         writeSteps(input.id, input.steps)
+        writeDetails(input)
         writeAudit(actorUsername, 'category_create', '', '', input.id, input.name)
       })
       try {
@@ -1271,6 +1411,7 @@ export function createQueries(db: AppDatabase) {
         )
         if (result.changes === 0) return false
         writeSteps(input.id, input.steps)
+        writeDetails(input)
         writeAudit(actorUsername, 'category_update', '', '', input.id, input.name)
         return true
       })

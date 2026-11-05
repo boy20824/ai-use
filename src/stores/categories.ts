@@ -28,12 +28,12 @@ export const useCategoryStore = defineStore('categories', () => {
   async function reload() {
     try {
       const response = await apiRequest('/api/categories')
-      if (!response.ok) throw new Error(await apiErrorMessage(response, '無法讀取案件類別。'))
+      if (!response.ok) throw new Error(await apiErrorMessage(response, '無法讀取勤務流程。'))
       const body = (await response.json()) as { categories?: CaseCategory[] }
       items.value = body.categories ?? []
       error.value = ''
     } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : '無法讀取案件類別。'
+      error.value = cause instanceof Error ? cause.message : '無法讀取勤務流程。'
     } finally {
       ready.value = true
     }
@@ -49,10 +49,10 @@ export const useCategoryStore = defineStore('categories', () => {
       method: 'POST',
       body: JSON.stringify(input),
     })
-    if (!response.ok) throw new Error(await apiErrorMessage(response, '無法建立案件類別。'))
+    if (!response.ok) throw new Error(await apiErrorMessage(response, '無法建立勤務流程。'))
     const body = (await response.json()) as { category?: CaseCategory }
     await reload()
-    if (!body.category) throw new Error('無法建立案件類別。')
+    if (!body.category) throw new Error('無法建立勤務流程。')
     return body.category
   }
 
@@ -61,7 +61,7 @@ export const useCategoryStore = defineStore('categories', () => {
       method: 'PATCH',
       body: JSON.stringify(input),
     })
-    if (!response.ok) throw new Error(await apiErrorMessage(response, '無法更新案件類別。'))
+    if (!response.ok) throw new Error(await apiErrorMessage(response, '無法更新勤務流程。'))
     await reload()
   }
 
@@ -69,7 +69,7 @@ export const useCategoryStore = defineStore('categories', () => {
     const response = await apiRequest(`/api/categories/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     })
-    if (!response.ok) throw new Error(await apiErrorMessage(response, '無法刪除案件類別。'))
+    if (!response.ok) throw new Error(await apiErrorMessage(response, '無法刪除勤務流程。'))
     await reload()
   }
 

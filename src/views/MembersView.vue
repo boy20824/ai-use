@@ -79,6 +79,27 @@ async function patch(member: MemberAccount, payload: Record<string, unknown>, ok
   }
 }
 
+async function deleteMember(member: MemberAccount) {
+  if (pendingId.value || isSelf(member)) return
+  if (!window.confirm(`確定完全刪除「${member.username}」？`)) return
+  if (!window.confirm('再次確認：帳號、登入階段與該會員留言將永久刪除，無法復原。')) return
+  pendingId.value = member.id
+  try {
+    const response = await apiRequest(`/api/members/${encodeURIComponent(member.id)}`, {
+      method: 'DELETE',
+    })
+    if (!response.ok) throw new Error(await apiErrorMessage(response, '無法刪除會員。'))
+    await load()
+    tone.value = 'ok'
+    message.value = '已完全刪除會員。'
+  } catch (cause) {
+    tone.value = 'warn'
+    message.value = cause instanceof Error ? cause.message : '無法刪除會員。'
+  } finally {
+    pendingId.value = ''
+  }
+}
+
 async function createMember() {
   if (pendingId.value) return
   message.value = ''
@@ -125,7 +146,7 @@ onMounted(() => {
   <PageIntro
     eyebrow="管理"
     title="會員管理"
-    description="系統管理員可以新增會員、啟用或停用帳號，並決定誰可以維護案件類別。停用後，該帳號的登入階段會立即失效。"
+    description="系統管理員可以新增會員、啟用或停用帳號，並決定誰可以維護勤務流程。停用後，該帳號的登入階段會立即失效。"
   >
     <button
       type="button"
@@ -220,7 +241,7 @@ onMounted(() => {
             <th scope="col" class="px-4 py-3 font-medium">帳號</th>
             <th scope="col" class="px-4 py-3 font-medium">角色</th>
             <th scope="col" class="px-4 py-3 font-medium">狀態</th>
-            <th scope="col" class="px-4 py-3 font-medium">可維護類別</th>
+            <th scope="col" class="px-4 py-3 font-medium">可維護流程</th>
             <th scope="col" class="px-4 py-3 font-medium">註冊時間</th>
             <th scope="col" class="px-4 py-3 font-medium">操作</th>
           </tr>
@@ -243,6 +264,15 @@ onMounted(() => {
             </td>
             <td class="px-4 py-3">
               <div class="flex flex-wrap gap-2">
+                <button
+                  v-if="!isSelf(member)"
+                  type="button"
+                  :disabled="Boolean(pendingId)"
+                  class="rounded-lg border border-rose-200 px-2.5 py-1 text-xs text-rose-800"
+                  @click="deleteMember(member)"
+                >
+                  完全刪除
+                </button>
                 <button
                   v-if="canEnable(member)"
                   type="button"
@@ -269,11 +299,11 @@ onMounted(() => {
                     patch(
                       member,
                       { canManageCategories: !member.canManageCategories },
-                      member.canManageCategories ? '已取消維護類別。' : '已開放維護類別。',
+                      member.canManageCategories ? '已取消維護流程。' : '已開放維護流程。',
                     )
                   "
                 >
-                  {{ member.canManageCategories ? '取消維護類別' : '可維護類別' }}
+                  {{ member.canManageCategories ? '取消維護流程' : '可維護流程' }}
                 </button>
                 <button
                   v-if="member.role === 'sysadmin'"
