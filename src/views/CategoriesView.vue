@@ -38,7 +38,7 @@ const visible = computed(() => {
     <RouterLink
       v-if="session.canEditCategory && categories.total > 0"
       to="/categories/new"
-      class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
+      class="btn-primary"
     >
       新增勤務流程
     </RouterLink>
@@ -50,28 +50,24 @@ const visible = computed(() => {
       :key="key"
       role="tab"
       :aria-selected="group === key"
-      class="rounded-xl px-4 py-2"
-      :class="group === key ? 'bg-stone-900 text-white' : 'bg-white text-stone-700'"
+      class="focus-control rounded-control px-4 py-2"
+      :class="group === key ? 'bg-ink text-white' : 'bg-surface text-stone-700'"
       @click="group = key"
     >
       {{ label }}
     </button>
   </div>
-  <p v-if="categories.error" class="mb-4 text-sm text-rose-800" role="alert">
+  <p v-if="categories.error" class="mb-4 text-sm text-tone-danger-ink" role="alert">
     {{ categories.error }}
   </p>
-  <p v-if="!categories.ready" class="text-sm text-stone-500">正在讀取勤務流程。</p>
+  <p v-if="!categories.ready" class="text-sm text-ink-muted">正在讀取勤務流程。</p>
 
   <EmptyState
     v-else-if="categories.total === 0"
     title="還沒有勤務流程"
     description="建立第一個流程後，就可以寫下填寫步驟，並從範本庫選取 Word 範本。範本會集中保存，刪除流程不會刪除檔案。"
   >
-    <RouterLink
-      v-if="session.canEditCategory"
-      to="/categories/new"
-      class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-    >
+    <RouterLink v-if="session.canEditCategory" to="/categories/new" class="btn-primary">
       新增勤務流程
     </RouterLink>
     <p v-else class="text-sm text-stone-600">請由系統管理員或被授權的使用者新增。</p>
@@ -86,7 +82,7 @@ const visible = computed(() => {
         type="search"
         name="category-search"
         placeholder="流程名稱或簡述"
-        class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+        class="field mt-2 w-full"
       />
     </div>
 
@@ -101,22 +97,22 @@ const visible = computed(() => {
         v-for="item in visible"
         :key="item.id"
         :to="`/categories/${item.id}`"
-        class="flex h-full flex-col rounded-2xl border border-stone-200 bg-white p-5 shadow-sm transition hover:border-stone-300 hover:-translate-y-1 hover:shadow-lg active:translate-y-0 active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700"
+        class="flex h-full flex-col rounded-2xl border border-edge bg-surface p-5 shadow-card transition hover:border-edge hover:-translate-y-1 hover:shadow-lg active:translate-y-0 active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <span class="flex items-center justify-between gap-3">
-          <time class="text-xs text-stone-500" :datetime="item.updatedAt">{{
+          <time class="text-xs text-ink-muted" :datetime="item.updatedAt">{{
             formatStoredDate(item.updatedAt)
           }}</time>
         </span>
-        <h2 class="mt-3 text-lg font-semibold tracking-tight text-stone-950">{{ item.name }}</h2>
+        <h2 class="mt-3 text-lg font-semibold tracking-tight text-ink-strong">{{ item.name }}</h2>
         <p class="mt-2 flex-1 text-sm leading-6 text-stone-600">
           {{ item.summary || '尚未填寫簡述' }}
         </p>
-        <span class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-stone-500">
+        <span class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
           <span>{{ item.steps.length }} 個步驟</span>
           <span>{{ item.templateCount }} 份範本</span>
         </span>
-        <span class="mt-4 text-sm font-medium text-stone-900">進入工作台</span>
+        <span class="mt-4 text-sm font-medium text-ink">進入工作台</span>
       </RouterLink>
     </section>
   </template>

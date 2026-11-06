@@ -1,15 +1,97 @@
 @import 'tailwindcss';
 
+@theme {
+  --color-canvas: #f6f4f1;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f5f5f4;
+  --color-ink: #1c1917;
+  --color-ink-strong: #0c0a09;
+  --color-ink-muted: #78716c;
+  --color-ink-subtle: #a8a29e;
+  --color-edge: #d6d3d1;
+  --color-edge-strong: #a8a29e;
+  --color-nav: #0c0a09;
+  --color-nav-hover: rgb(255 255 255 / 0.05);
+  --color-nav-active: rgb(255 255 255 / 0.1);
+  --color-accent: #c2410c;
+  --color-accent-ink: #9a3412;
+  --color-accent-soft: #ffedd5;
+  --color-accent-glow: #fdba74;
+  --color-tone-ok: #ecfdf5;
+  --color-tone-ok-ink: #022c22;
+  --color-tone-warn: #fffbeb;
+  --color-tone-warn-ink: #451a03;
+  --color-tone-danger: #fff1f2;
+  --color-tone-danger-ink: #9f1239;
+  --color-tone-neutral: #e7e5e4;
+  --color-badge-ok: #d1fae5;
+  --color-badge-warn: #fef3c7;
+  --color-badge-danger: #ffe4e6;
+  --color-badge-danger-ink: #4c0519;
+  --color-tone-neutral-ink: #44403c;
+
+  --radius-control: 0.75rem;
+  --radius-card: 1rem;
+  --radius-panel: 1.5rem;
+  --radius-pill: 9999px;
+
+  --shadow-card: 0 1px 2px rgb(28 25 23 / 0.06);
+  --shadow-float: 0 8px 24px rgb(28 25 23 / 0.08);
+
+  --font-sans: 'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', 'Segoe UI', sans-serif;
+  --text-page-title: 1.875rem;
+  --text-section: 1rem;
+  --text-body: 0.875rem;
+  --text-caption: 0.75rem;
+  --leading-body: 1.625;
+
+  --spacing-page-x: 2rem;
+  --spacing-page-y: 2.5rem;
+  --spacing-section: 2rem;
+  --spacing-stack: 1rem;
+}
+
+@utility focus-control {
+  @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent;
+}
+
+@utility button-focus {
+  @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent;
+  @apply focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-canvas;
+  @apply disabled:cursor-not-allowed;
+}
+
+@utility btn-primary {
+  @apply button-focus inline-flex items-center justify-center rounded-control px-4 py-2.5 text-body font-medium transition-colors;
+  @apply bg-ink text-surface hover:bg-ink/90 disabled:bg-edge disabled:text-surface;
+}
+
+@utility btn-secondary {
+  @apply button-focus inline-flex items-center justify-center rounded-control px-4 py-2.5 text-body font-medium transition-colors;
+  @apply border border-edge bg-surface text-ink hover:bg-surface-muted disabled:opacity-50;
+}
+
+@utility btn-ghost {
+  @apply button-focus rounded-control text-body transition-colors hover:bg-surface-muted hover:text-ink disabled:text-edge;
+}
+
+@utility field {
+  @apply rounded-control border border-edge bg-surface px-3 py-2.5 text-body;
+  @apply hover:border-edge-strong focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent;
+  @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent;
+  @apply disabled:cursor-not-allowed disabled:border-edge disabled:bg-surface-muted disabled:text-ink-muted;
+}
+
 @layer base {
   html {
-    font-family: 'PingFang TC', 'Noto Sans TC', 'Microsoft JhengHei', 'Segoe UI', sans-serif;
+    font-family: var(--font-sans);
   }
 
   body {
     margin: 0;
     min-height: 100vh;
-    background: #f6f4f1;
-    color: #1c1917;
+    background: var(--color-canvas);
+    color: var(--color-ink);
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
   }
@@ -22,9 +104,16 @@
     font: inherit;
   }
 
+  input[type='checkbox'],
+  input[type='radio'],
+  input[type='file'] {
+    @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent;
+    accent-color: var(--color-accent);
+  }
+
   ::selection {
-    background: #ffedd5;
-    color: #1c1917;
+    background: var(--color-accent-soft);
+    color: var(--color-ink);
   }
 }
 

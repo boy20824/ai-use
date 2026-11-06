@@ -8,10 +8,10 @@ const props = defineProps<{
 }>()
 
 const toneClasses: Record<StatusTone, string> = {
-  warn: 'bg-amber-100 text-amber-950',
-  ok: 'bg-emerald-100 text-emerald-950',
-  danger: 'bg-rose-100 text-rose-950',
-  neutral: 'bg-stone-200 text-stone-700',
+  warn: 'bg-badge-warn text-tone-warn-ink',
+  ok: 'bg-badge-ok text-tone-ok-ink',
+  danger: 'bg-badge-danger text-badge-danger-ink',
+  neutral: 'bg-tone-neutral text-tone-neutral-ink',
 }
 
 const toneClass = computed(() => toneClasses[props.tone])

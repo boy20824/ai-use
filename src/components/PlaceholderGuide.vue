@@ -11,32 +11,32 @@ const slashExample = '115/10/29'
 
 <template>
   <div
-    class="rounded-2xl border border-stone-200 bg-stone-50 px-4 py-4 text-sm leading-6 text-stone-700"
+    class="rounded-2xl border border-edge bg-surface-muted px-4 py-4 text-sm leading-6 text-stone-700"
   >
-    <p class="font-medium text-stone-900">欄位寫法</p>
+    <p class="font-medium text-ink">欄位寫法</p>
     <p class="mt-2">
       在 Word 範本中用雙大括號標示要帶入的欄位，例如
-      <code class="rounded bg-white px-1.5 py-0.5 text-stone-900 ring-1 ring-stone-200">{{
+      <code class="rounded bg-surface px-1.5 py-0.5 text-ink ring-1 ring-stone-200">{{
         nameField
       }}</code>
       。日期用民國年，預設為台北今天，可再修改。月、日不補零：
-      <code class="rounded bg-white px-1.5 py-0.5 text-stone-900 ring-1 ring-stone-200">{{
+      <code class="rounded bg-surface px-1.5 py-0.5 text-ink ring-1 ring-stone-200">{{
         dateField
       }}</code>
       會寫成 {{ longExample }}，
-      <code class="rounded bg-white px-1.5 py-0.5 text-stone-900 ring-1 ring-stone-200">{{
+      <code class="rounded bg-surface px-1.5 py-0.5 text-ink ring-1 ring-stone-200">{{
         dateSlashField
       }}</code>
       會寫成 {{ slashExample }}，
-      <code class="rounded bg-white px-1.5 py-0.5 text-stone-900 ring-1 ring-stone-200">{{
+      <code class="rounded bg-surface px-1.5 py-0.5 text-ink ring-1 ring-stone-200">{{
         yearField
       }}</code>
       、
-      <code class="rounded bg-white px-1.5 py-0.5 text-stone-900 ring-1 ring-stone-200">{{
+      <code class="rounded bg-surface px-1.5 py-0.5 text-ink ring-1 ring-stone-200">{{
         monthField
       }}</code>
       、
-      <code class="rounded bg-white px-1.5 py-0.5 text-stone-900 ring-1 ring-stone-200">{{
+      <code class="rounded bg-surface px-1.5 py-0.5 text-ink ring-1 ring-stone-200">{{
         dayField
       }}</code>
       會分別寫成 115、10、29。這幾個日期欄位由系統帶入，不會另外出現輸入欄。

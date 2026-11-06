@@ -358,51 +358,41 @@ async function submit() {
   >
     <RouterLink
       :to="isEdit ? `/categories/${editingId}` : '/categories'"
-      class="inline-flex text-sm text-stone-600 hover:text-stone-900"
+      class="focus-control inline-flex text-sm text-stone-600 hover:text-ink"
     >
       {{ isEdit ? '回到工作台' : '回到全部流程' }}
     </RouterLink>
   </PageIntro>
 
-  <p v-if="categories.error" class="mb-4 text-sm text-rose-800" role="alert">
+  <p v-if="categories.error" class="mb-4 text-sm text-tone-danger-ink" role="alert">
     {{ categories.error }}
   </p>
-  <p v-if="!categories.ready" class="text-sm text-stone-500">正在讀取勤務流程。</p>
+  <p v-if="!categories.ready" class="text-sm text-ink-muted">正在讀取勤務流程。</p>
   <EmptyState
     v-else-if="!session.canEditCategory"
     title="此身分不能建立或編輯流程"
     description="只有系統管理員，或被授權可維護流程的使用者，可以建立或編輯流程、步驟與範本連結。其他已登入的使用者仍可在工作台產生文件。"
   >
-    <RouterLink
-      to="/categories"
-      class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-    >
-      回到勤務流程
-    </RouterLink>
+    <RouterLink to="/categories" class="btn-primary"> 回到勤務流程 </RouterLink>
   </EmptyState>
   <EmptyState
     v-else-if="isEdit && !existing"
     title="找不到這個流程"
     description="流程可能已刪除，或連結不完整。"
   >
-    <RouterLink
-      to="/categories"
-      class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-    >
-      回到勤務流程
-    </RouterLink>
+    <RouterLink to="/categories" class="btn-primary"> 回到勤務流程 </RouterLink>
   </EmptyState>
 
   <form
     v-else-if="!isEdit || populated"
-    class="max-w-3xl rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6"
+    class="max-w-3xl rounded-2xl border border-edge bg-surface p-5 shadow-card sm:p-6"
     @submit.prevent="submit"
   >
     <ol class="mb-6 flex gap-3 text-sm" aria-label="編輯進度">
       <li
         v-for="(label, i) in ['命名與分類', '建立樣態', '步驟與範本']"
         :key="label"
-        :class="wizard === i + 1 ? 'font-semibold text-orange-800' : 'text-stone-500'"
+        :class="wizard === i + 1 ? 'font-semibold text-accent-ink' : 'text-ink-muted'"
       >
         {{ i + 1 }}. {{ label }}
       </li>
@@ -410,7 +400,7 @@ async function submit() {
     <section v-show="wizard === 1">
       <div>
         <label for="category-name" class="block text-sm font-medium text-stone-800">
-          名稱 <span class="font-normal text-stone-500">必填</span>
+          名稱 <span class="font-normal text-ink-muted">必填</span>
         </label>
         <input
           id="category-name"
@@ -421,20 +411,16 @@ async function submit() {
           maxlength="80"
           autocomplete="off"
           placeholder="請輸入流程名稱"
-          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+          class="field mt-2 w-full"
         />
       </div>
       <label class="mt-4 block text-sm font-medium" for="category-group">大類</label>
-      <select
-        id="category-group"
-        v-model="group"
-        class="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2.5"
-      >
+      <select id="category-group" v-model="group" class="field mt-2 w-full">
         <option v-for="(label, key) in categoryGroups" :key="key" :value="key">{{ label }}</option>
       </select>
       <div class="mt-4">
         <label for="category-summary" class="block text-sm font-medium text-stone-800">
-          簡述 <span class="font-normal text-stone-500">選填</span>
+          簡述 <span class="font-normal text-ink-muted">選填</span>
         </label>
         <textarea
           id="category-summary"
@@ -443,23 +429,23 @@ async function submit() {
           rows="3"
           maxlength="400"
           placeholder="請輸入簡述"
-          class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+          class="field mt-2 w-full"
         ></textarea>
       </div>
     </section>
     <section v-show="wizard === 2" aria-label="樣態設定">
       <h2 class="font-semibold">建立樣態（選填）</h2>
-      <p class="mt-2 text-sm text-stone-500">不需要區分樣態時，可直接跳過。</p>
+      <p class="mt-2 text-sm text-ink-muted">不需要區分樣態時，可直接跳過。</p>
       <div v-for="variant in variants" :key="variant.id" class="mt-3 flex gap-3">
         <input
           v-model="variant.name"
           :aria-label="'樣態名稱'"
           maxlength="80"
-          class="w-full rounded-xl border border-stone-300 px-3 py-2"
+          class="field w-full"
         />
         <button
           type="button"
-          class="shrink-0 text-sm text-rose-800"
+          class="btn-ghost shrink-0 text-sm text-tone-danger-ink"
           @click="removeVariant(variant.id)"
         >
           移除樣態
@@ -467,7 +453,7 @@ async function submit() {
       </div>
       <button
         type="button"
-        class="mt-4 rounded-xl border border-stone-300 px-4 py-2"
+        class="btn-secondary mt-4 py-2"
         :disabled="variants.length >= 30"
         @click="variants.push({ id: newId(), name: '' })"
       >
@@ -476,23 +462,15 @@ async function submit() {
     </section>
     <section v-show="wizard === 3">
       <div v-if="variants.length > 1" class="mt-4 flex flex-wrap gap-3">
-        <select
-          v-model="copySource"
-          aria-label="複製來源樣態"
-          class="rounded-xl border border-stone-300 p-2"
-        >
+        <select v-model="copySource" aria-label="複製來源樣態" class="field">
           <option value="">來源樣態</option>
           <option v-for="v in variants" :key="v.id" :value="v.id">{{ v.name }}</option>
         </select>
-        <select
-          v-model="copyTarget"
-          aria-label="複製目標樣態"
-          class="rounded-xl border border-stone-300 p-2"
-        >
+        <select v-model="copyTarget" aria-label="複製目標樣態" class="field">
           <option value="">目標樣態</option>
           <option v-for="v in variants" :key="v.id" :value="v.id">{{ v.name }}</option>
         </select>
-        <button type="button" class="text-sm text-orange-800" @click="copyVariant">
+        <button type="button" class="btn-ghost text-sm text-accent-ink" @click="copyVariant">
           複製步驟與範本
         </button>
       </div>
@@ -505,9 +483,9 @@ async function submit() {
           <li
             v-for="(step, index) in steps"
             :key="step.key"
-            class="rounded-2xl border border-stone-200 bg-stone-50 p-4"
+            class="rounded-2xl border border-edge bg-surface-muted p-4"
           >
-            <label class="block text-xs text-stone-500" :for="`category-step-${index}`">
+            <label class="block text-xs text-ink-muted" :for="`category-step-${index}`">
               步驟 {{ index + 1 }}
             </label>
             <textarea
@@ -515,25 +493,21 @@ async function submit() {
               :value="step.body"
               rows="2"
               maxlength="500"
-              class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+              class="field mt-2 w-full"
               @input="onStep(index, $event)"
             ></textarea>
             <label class="mt-3 block text-sm"
-              >細項（每行一項）<textarea
-                v-model="step.items"
-                rows="3"
-                class="mt-2 w-full rounded-xl border border-stone-300 p-3"
-              />
+              >細項（每行一項）<textarea v-model="step.items" rows="3" class="field mt-2 w-full" />
             </label>
             <label class="mt-3 block text-sm"
               >特別註記<textarea
                 v-model="step.note"
                 rows="2"
                 maxlength="2000"
-                class="mt-2 w-full rounded-xl border border-stone-300 p-3"
+                class="field mt-2 w-full"
               />
             </label>
-            <p class="mt-3 text-xs text-stone-500">
+            <p class="mt-3 text-xs text-ink-muted">
               需同時符合的樣態：未勾選即為共同步驟；勾選多個時須全部符合。
             </p>
             <div class="mt-2 flex flex-wrap gap-3">
@@ -545,7 +519,7 @@ async function submit() {
             <div class="mt-2 flex flex-wrap gap-3">
               <button
                 type="button"
-                class="text-sm text-stone-600 hover:text-stone-900 disabled:text-stone-300"
+                class="btn-ghost text-sm text-stone-600 hover:text-ink"
                 :disabled="index === 0"
                 @click="moveStep(index, -1)"
               >
@@ -553,7 +527,7 @@ async function submit() {
               </button>
               <button
                 type="button"
-                class="text-sm text-stone-600 hover:text-stone-900 disabled:text-stone-300"
+                class="btn-ghost text-sm text-stone-600 hover:text-ink"
                 :disabled="index === steps.length - 1"
                 @click="moveStep(index, 1)"
               >
@@ -561,21 +535,21 @@ async function submit() {
               </button>
               <button
                 type="button"
-                class="text-sm text-stone-600 hover:text-rose-800"
+                class="btn-ghost text-sm text-stone-600 hover:text-tone-danger-ink"
                 @click="removeStep(index)"
               >
                 移除
               </button>
             </div>
 
-            <p v-if="step.templateIds.length === 0" class="mt-3 text-sm text-stone-500">
+            <p v-if="step.templateIds.length === 0" class="mt-3 text-sm text-ink-muted">
               尚未連結範本。
             </p>
             <ol v-else class="mt-3 space-y-2">
               <li
                 v-for="(templateId, templateIndex) in step.templateIds"
                 :key="templateId"
-                class="flex items-center justify-between gap-2 rounded-xl bg-white px-3 py-2"
+                class="flex items-center justify-between gap-2 rounded-control bg-surface px-3 py-2"
               >
                 <span class="min-w-0 break-all text-sm text-stone-800">
                   {{ templateIndex + 1 }}. {{ templateName(templateId) }}
@@ -583,7 +557,7 @@ async function submit() {
                 <span class="flex shrink-0 gap-2">
                   <button
                     type="button"
-                    class="text-sm text-stone-600 hover:text-stone-900 disabled:text-stone-300"
+                    class="btn-ghost text-sm text-stone-600 hover:text-ink"
                     :disabled="templateIndex === 0"
                     @click="moveTemplate(index, templateIndex, -1)"
                   >
@@ -591,7 +565,7 @@ async function submit() {
                   </button>
                   <button
                     type="button"
-                    class="text-sm text-stone-600 hover:text-stone-900 disabled:text-stone-300"
+                    class="btn-ghost text-sm text-stone-600 hover:text-ink"
                     :disabled="templateIndex === step.templateIds.length - 1"
                     @click="moveTemplate(index, templateIndex, 1)"
                   >
@@ -603,16 +577,13 @@ async function submit() {
 
             <button
               type="button"
-              class="mt-3 rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
+              class="btn-secondary mt-3"
               :aria-expanded="step.pickerOpen"
               @click="togglePicker(index)"
             >
               從範本庫選取
             </button>
-            <div
-              v-if="step.pickerOpen"
-              class="mt-3 rounded-2xl border border-stone-200 bg-white p-4"
-            >
+            <div v-if="step.pickerOpen" class="mt-3 rounded-2xl border border-edge bg-surface p-4">
               <label class="block text-xs font-medium text-stone-600" :for="`picker-${step.key}`">
                 搜尋範本
               </label>
@@ -621,13 +592,13 @@ async function submit() {
                 :value="step.query"
                 type="search"
                 placeholder="請輸入檔名"
-                class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+                class="field mt-2 w-full"
                 @input="setQuery(index, $event)"
               />
-              <p v-if="templates.items.length === 0" class="mt-3 text-sm text-stone-500">
+              <p v-if="templates.items.length === 0" class="mt-3 text-sm text-ink-muted">
                 範本庫還沒有文件。可先在下方上傳。
               </p>
-              <p v-else-if="pickerMatches(step).length === 0" class="mt-3 text-sm text-stone-500">
+              <p v-else-if="pickerMatches(step).length === 0" class="mt-3 text-sm text-ink-muted">
                 沒有符合的範本。
               </p>
               <ul v-else class="mt-3 max-h-48 space-y-2 overflow-auto">
@@ -656,11 +627,7 @@ async function submit() {
             </div>
           </li>
         </ol>
-        <button
-          type="button"
-          class="mt-4 rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
-          @click="steps = [...steps, blankStep()]"
-        >
+        <button type="button" class="btn-secondary mt-4" @click="steps = [...steps, blankStep()]">
           新增步驟
         </button>
       </fieldset>
@@ -672,13 +639,13 @@ async function submit() {
             aria-label="欄位名稱"
             placeholder="名稱"
             maxlength="80"
-            class="rounded-xl border border-stone-300 p-2"
+            class="field"
           />
           <div class="flex items-center gap-2">
             <code class="break-all">{{ fieldPlaceholder(field) }}</code>
             <button
               type="button"
-              class="shrink-0 text-sm text-orange-800 disabled:text-stone-400"
+              class="btn-ghost shrink-0 text-sm text-accent-ink"
               :disabled="!fieldKey(field)"
               :aria-label="'複製 ' + fieldPlaceholder(field)"
               @click="copyPlaceholder(field)"
@@ -686,21 +653,21 @@ async function submit() {
               {{ copiedPlaceholder === fieldPlaceholder(field) ? '已複製' : '複製' }}
             </button>
           </div>
-          <select
-            v-model="field.type"
-            aria-label="欄位型別"
-            class="rounded-xl border border-stone-300 p-2"
-          >
+          <select v-model="field.type" aria-label="欄位型別" class="field">
             <option value="text">文字</option>
             <option value="number">數字</option>
           </select>
-          <button type="button" class="text-sm text-rose-800" @click="fields.splice(i, 1)">
+          <button
+            type="button"
+            class="btn-ghost text-sm text-tone-danger-ink"
+            @click="fields.splice(i, 1)"
+          >
             移除欄位
           </button>
         </div>
         <button
           type="button"
-          class="mt-3 rounded-xl border border-stone-300 px-4 py-2"
+          class="btn-secondary mt-3 py-2"
           :disabled="fields.length >= 50"
           @click="fields.push({ id: newId(), name: '', key: '', type: 'text' })"
         >
@@ -709,8 +676,10 @@ async function submit() {
         <p class="sr-only" role="status">
           {{ copiedPlaceholder ? '已複製 ' + copiedPlaceholder : '' }}
         </p>
-        <p v-if="copyError" class="mt-2 text-sm text-rose-800" role="alert">{{ copyError }}</p>
-        <p class="mt-2 text-xs text-stone-500">
+        <p v-if="copyError" class="mt-2 text-sm text-tone-danger-ink" role="alert">
+          {{ copyError }}
+        </p>
+        <p class="mt-2 text-xs text-ink-muted">
           範本欄位寫法：{{ fieldKeyHint }}。只儲存欄位定義。
         </p>
       </fieldset>
@@ -718,26 +687,17 @@ async function submit() {
 
     <p
       v-if="formNotice"
-      class="mt-4 rounded-xl bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-950"
+      class="mt-4 rounded-control bg-amber-50 px-3 py-2 text-sm leading-6 text-amber-950"
       role="status"
     >
       {{ formNotice }}
     </p>
-    <p v-if="formError" class="mt-4 text-sm text-rose-800" role="alert">{{ formError }}</p>
+    <p v-if="formError" class="mt-4 text-sm text-tone-danger-ink" role="alert">{{ formError }}</p>
     <div class="mt-6 flex flex-wrap gap-3">
-      <button
-        v-if="wizard > 1"
-        type="button"
-        class="rounded-xl border border-stone-300 px-4 py-2"
-        @click="wizard--"
-      >
+      <button v-if="wizard > 1" type="button" class="btn-secondary py-2" @click="wizard--">
         上一步
       </button>
-      <button
-        type="submit"
-        class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
-        :disabled="saving"
-      >
+      <button type="submit" class="btn-primary" :disabled="saving">
         {{
           wizard === 2 && !variants.length
             ? '跳過樣態'
@@ -748,10 +708,7 @@ async function submit() {
                 : '建立流程'
         }}
       </button>
-      <RouterLink
-        :to="isEdit ? `/categories/${editingId}` : '/categories'"
-        class="inline-flex rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
-      >
+      <RouterLink :to="isEdit ? `/categories/${editingId}` : '/categories'" class="btn-secondary">
         取消
       </RouterLink>
     </div>

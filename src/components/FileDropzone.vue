@@ -47,16 +47,16 @@ function onChange(event: Event) {
 <template>
   <div
     v-if="!enabled"
-    class="rounded-2xl border border-dashed border-stone-300 bg-stone-50 px-5 py-8 text-center"
+    class="rounded-2xl border border-dashed border-edge bg-surface-muted px-5 py-8 text-center"
   >
     <p class="text-sm font-medium text-stone-800">此身分不能上傳</p>
     <p class="mt-2 text-sm leading-6 text-stone-600">{{ disabledReason }}</p>
   </div>
   <label
     v-else
-    class="block cursor-pointer rounded-2xl border border-dashed px-5 py-8 text-center transition"
+    class="focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-canvas block cursor-pointer rounded-2xl border border-dashed px-5 py-8 text-center transition"
     :class="
-      dragging ? 'border-stone-900 bg-stone-50' : 'border-stone-300 bg-white hover:border-stone-400'
+      dragging ? 'border-ink bg-surface-muted' : 'border-edge bg-surface hover:border-edge-strong'
     "
     @dragenter.prevent="onDragOver"
     @dragover.prevent="onDragOver"
@@ -64,7 +64,7 @@ function onChange(event: Event) {
     @drop.prevent="onDrop"
   >
     <input type="file" class="sr-only" multiple :accept="accept" @change="onChange" />
-    <p class="text-sm font-medium text-stone-900">{{ title }}</p>
+    <p class="text-sm font-medium text-ink">{{ title }}</p>
     <p class="mx-auto mt-2 max-w-sm text-sm leading-6 text-stone-600">{{ hint }}</p>
   </label>
 </template>

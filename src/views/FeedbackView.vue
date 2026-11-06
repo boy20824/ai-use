@@ -180,11 +180,11 @@ onMounted(() => {
       v-for="item in filters"
       :key="item.label"
       type="button"
-      class="rounded-full px-3 py-1.5 text-sm"
+      class="focus-control rounded-full px-3 py-1.5 text-sm"
       :class="
         filter === item.value
-          ? 'bg-stone-900 text-white'
-          : 'bg-white text-stone-700 ring-1 ring-stone-200 hover:bg-stone-50'
+          ? 'bg-ink text-white'
+          : 'bg-surface text-stone-700 ring-1 ring-stone-200 hover:bg-surface-muted'
       "
       :aria-pressed="filter === item.value"
       @click="chooseFilter(item.value)"
@@ -195,7 +195,7 @@ onMounted(() => {
 
   <p
     v-if="message"
-    class="mb-6 rounded-xl px-3 py-2 text-sm leading-6"
+    class="mb-6 rounded-control px-3 py-2 text-sm leading-6"
     :class="tone === 'ok' ? 'bg-emerald-50 text-emerald-950' : 'bg-amber-50 text-amber-950'"
     role="status"
   >
@@ -203,10 +203,10 @@ onMounted(() => {
   </p>
 
   <form
-    class="mb-8 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"
+    class="mb-8 rounded-2xl border border-edge bg-surface p-5 shadow-card"
     @submit.prevent="createPost"
   >
-    <h2 class="text-base font-semibold text-stone-950">提出建議</h2>
+    <h2 class="text-base font-semibold text-ink-strong">提出建議</h2>
     <div class="mt-4">
       <label for="feedback-title" class="block text-sm font-medium text-stone-800">標題</label>
       <input
@@ -214,7 +214,7 @@ onMounted(() => {
         v-model="title"
         required
         maxlength="80"
-        class="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+        class="field mt-2 w-full"
       />
     </div>
     <div class="mt-4">
@@ -225,30 +225,24 @@ onMounted(() => {
         required
         maxlength="2000"
         rows="5"
-        class="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+        class="field mt-2 w-full"
       ></textarea>
-      <p class="mt-2 text-xs text-stone-500">還可輸入 {{ remaining }} 個字。</p>
+      <p class="mt-2 text-xs text-ink-muted">還可輸入 {{ remaining }} 個字。</p>
     </div>
-    <button
-      type="submit"
-      class="mt-4 rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:bg-stone-300"
-      :disabled="pendingId === 'new'"
-    >
-      送出
-    </button>
+    <button type="submit" class="btn-primary mt-4" :disabled="pendingId === 'new'">送出</button>
   </form>
 
-  <p v-if="!ready" class="text-sm text-stone-500">正在讀取留言。</p>
-  <p v-else-if="posts.length === 0" class="text-sm text-stone-500">這個狀態目前沒有留言。</p>
+  <p v-if="!ready" class="text-sm text-ink-muted">正在讀取留言。</p>
+  <p v-else-if="posts.length === 0" class="text-sm text-ink-muted">這個狀態目前沒有留言。</p>
 
   <section v-else class="space-y-4" aria-label="建議列表">
     <article
       v-for="post in posts"
       :key="post.id"
-      class="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"
+      class="rounded-2xl border border-edge bg-surface p-5 shadow-card"
     >
       <div class="flex flex-wrap items-start justify-between gap-3">
-        <h2 class="text-base font-semibold text-stone-950">
+        <h2 class="text-base font-semibold text-ink-strong">
           <FeedbackText :text="post.title" />
         </h2>
         <StatusBadge
@@ -256,7 +250,7 @@ onMounted(() => {
           :tone="feedbackStatusTone(post.status)"
         />
       </div>
-      <p class="mt-2 text-xs leading-5 text-stone-500">
+      <p class="mt-2 text-xs leading-5 text-ink-muted">
         {{ post.authorNickname }} · {{ formatStoredDate(post.createdAt) }}
         <span v-if="post.updatedAt !== post.createdAt">
           · 更新 {{ formatStoredDate(post.updatedAt) }}
@@ -264,33 +258,18 @@ onMounted(() => {
       </p>
 
       <form v-if="editingId === post.id" class="mt-4 space-y-3" @submit.prevent="saveEdit(post)">
-        <input
-          v-model="editTitle"
-          required
-          maxlength="80"
-          aria-label="標題"
-          class="w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
-        />
+        <input v-model="editTitle" required maxlength="80" aria-label="標題" class="field w-full" />
         <textarea
           v-model="editContent"
           required
           maxlength="2000"
           rows="5"
           aria-label="內容"
-          class="w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+          class="field w-full"
         ></textarea>
         <div class="flex gap-2">
-          <button
-            type="submit"
-            class="rounded-xl bg-stone-900 px-3 py-2 text-sm text-white hover:bg-stone-800"
-          >
-            儲存
-          </button>
-          <button
-            type="button"
-            class="rounded-xl border border-stone-300 px-3 py-2 text-sm text-stone-800"
-            @click="editingId = ''"
-          >
+          <button type="submit" class="btn-primary px-3 py-2">儲存</button>
+          <button type="button" class="btn-secondary px-3 py-2" @click="editingId = ''">
             取消
           </button>
         </div>
@@ -299,8 +278,8 @@ onMounted(() => {
         <FeedbackText :text="post.content" />
       </div>
 
-      <div v-if="post.adminReply" class="mt-4 rounded-xl bg-stone-50 px-4 py-3">
-        <p class="text-xs font-medium text-stone-500">管理員回覆</p>
+      <div v-if="post.adminReply" class="mt-4 rounded-control bg-surface-muted px-4 py-3">
+        <p class="text-xs font-medium text-ink-muted">管理員回覆</p>
         <div class="mt-2 text-sm leading-7 text-stone-800">
           <FeedbackText :text="post.adminReply" />
         </div>
@@ -309,14 +288,14 @@ onMounted(() => {
       <div v-if="owns(post) && editingId !== post.id" class="mt-4 flex gap-3">
         <button
           type="button"
-          class="text-sm text-orange-800 hover:underline"
+          class="btn-ghost text-sm text-accent-ink hover:underline"
           @click="startEdit(post)"
         >
           編輯
         </button>
         <button
           type="button"
-          class="text-sm text-stone-600 hover:text-rose-800"
+          class="btn-ghost text-sm text-stone-600 hover:text-tone-danger-ink"
           :disabled="pendingId === post.id"
           @click="remove(post)"
         >
@@ -326,17 +305,17 @@ onMounted(() => {
 
       <form
         v-if="session.isSysadmin"
-        class="mt-4 space-y-3 border-t border-stone-200 pt-4"
+        class="mt-4 space-y-3 border-t border-edge pt-4"
         @submit.prevent="moderate(post, post.status)"
       >
         <div class="flex flex-wrap items-end gap-3">
           <div>
-            <label :for="`status-${post.id}`" class="block text-xs font-medium text-stone-500">
+            <label :for="`status-${post.id}`" class="block text-xs font-medium text-ink-muted">
               處理狀態
             </label>
             <select
               :id="`status-${post.id}`"
-              class="mt-2 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm outline-none focus:border-orange-700"
+              class="field mt-2"
               :value="post.status"
               @change="onStatus(post, $event)"
             >
@@ -347,7 +326,7 @@ onMounted(() => {
           </div>
         </div>
         <div>
-          <label :for="`reply-${post.id}`" class="block text-xs font-medium text-stone-500">
+          <label :for="`reply-${post.id}`" class="block text-xs font-medium text-ink-muted">
             管理員回覆
           </label>
           <textarea
@@ -355,20 +334,15 @@ onMounted(() => {
             v-model="replyDrafts[post.id]"
             maxlength="2000"
             rows="3"
-            class="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+            class="field mt-2 w-full"
           ></textarea>
         </div>
         <div class="flex flex-wrap gap-3">
-          <button
-            type="submit"
-            class="rounded-xl bg-stone-900 px-3 py-2 text-sm text-white hover:bg-stone-800"
-          >
-            儲存回覆
-          </button>
+          <button type="submit" class="btn-primary px-3 py-2">儲存回覆</button>
           <button
             v-if="!owns(post)"
             type="button"
-            class="text-sm text-stone-600 hover:text-rose-800"
+            class="btn-ghost text-sm text-stone-600 hover:text-tone-danger-ink"
             @click="remove(post)"
           >
             刪除

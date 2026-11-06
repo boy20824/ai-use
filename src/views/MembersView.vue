@@ -148,18 +148,12 @@ onMounted(() => {
     title="會員管理"
     description="系統管理員可以新增會員、啟用或停用帳號，並決定誰可以維護勤務流程。停用後，該帳號的登入階段會立即失效。"
   >
-    <button
-      type="button"
-      class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-      @click="showForm = !showForm"
-    >
-      新增會員
-    </button>
+    <button type="button" class="btn-primary" @click="showForm = !showForm">新增會員</button>
   </PageIntro>
 
   <p
     v-if="message"
-    class="mb-6 rounded-xl px-3 py-2 text-sm leading-6"
+    class="mb-6 rounded-control px-3 py-2 text-sm leading-6"
     :class="tone === 'ok' ? 'bg-emerald-50 text-emerald-950' : 'bg-amber-50 text-amber-950'"
     role="status"
   >
@@ -168,18 +162,12 @@ onMounted(() => {
 
   <form
     v-if="showForm"
-    class="mb-6 grid gap-4 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:grid-cols-2"
+    class="mb-6 grid gap-4 rounded-2xl border border-edge bg-surface p-5 shadow-card sm:grid-cols-2"
     @submit.prevent="createMember"
   >
     <div>
       <label for="member-name" class="block text-sm font-medium text-stone-800">名稱</label>
-      <input
-        id="member-name"
-        v-model="name"
-        required
-        maxlength="40"
-        class="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
-      />
+      <input id="member-name" v-model="name" required maxlength="40" class="field mt-2 w-full" />
     </div>
     <div>
       <label for="member-nickname" class="block text-sm font-medium text-stone-800">暱稱</label>
@@ -188,7 +176,7 @@ onMounted(() => {
         v-model="nickname"
         required
         maxlength="40"
-        class="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+        class="field mt-2 w-full"
       />
     </div>
     <div>
@@ -200,7 +188,7 @@ onMounted(() => {
         minlength="3"
         maxlength="32"
         pattern="[A-Za-z0-9][A-Za-z0-9._-]{2,31}"
-        class="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+        class="field mt-2 w-full"
       />
     </div>
     <div>
@@ -212,29 +200,23 @@ onMounted(() => {
         required
         minlength="8"
         autocomplete="new-password"
-        class="mt-2 w-full rounded-xl border border-stone-300 px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+        class="field mt-2 w-full"
       />
     </div>
     <div class="sm:col-span-2">
-      <button
-        type="submit"
-        class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:bg-stone-300"
-        :disabled="pendingId === 'new'"
-      >
-        建立帳號
-      </button>
+      <button type="submit" class="btn-primary" :disabled="pendingId === 'new'">建立帳號</button>
     </div>
   </form>
 
-  <p v-if="!ready" class="text-sm text-stone-500">正在讀取會員。</p>
+  <p v-if="!ready" class="text-sm text-ink-muted">正在讀取會員。</p>
 
-  <section v-else class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+  <section v-else class="overflow-hidden rounded-2xl border border-edge bg-surface shadow-card">
     <div class="overflow-x-auto">
       <table class="min-w-full text-left text-sm">
         <caption class="sr-only">
           會員名單
         </caption>
-        <thead class="bg-stone-50 text-xs text-stone-500">
+        <thead class="bg-surface-muted text-xs text-ink-muted">
           <tr>
             <th scope="col" class="px-4 py-3 font-medium">名稱</th>
             <th scope="col" class="px-4 py-3 font-medium">暱稱</th>
@@ -248,7 +230,7 @@ onMounted(() => {
         </thead>
         <tbody class="divide-y divide-stone-200">
           <tr v-for="member in members" :key="member.id">
-            <td class="px-4 py-3 font-medium text-stone-900">{{ member.displayName }}</td>
+            <td class="px-4 py-3 font-medium text-ink">{{ member.displayName }}</td>
             <td class="px-4 py-3 text-stone-700">{{ member.nickname }}</td>
             <td class="px-4 py-3 text-stone-700">{{ member.username }}</td>
             <td class="px-4 py-3 text-stone-700">{{ roleLabels[member.role] }}</td>
@@ -268,7 +250,7 @@ onMounted(() => {
                   v-if="!isSelf(member)"
                   type="button"
                   :disabled="Boolean(pendingId)"
-                  class="rounded-lg border border-rose-200 px-2.5 py-1 text-xs text-rose-800"
+                  class="focus-control rounded-lg border border-rose-200 px-2.5 py-1 text-xs text-tone-danger-ink"
                   @click="deleteMember(member)"
                 >
                   完全刪除
@@ -276,7 +258,7 @@ onMounted(() => {
                 <button
                   v-if="canEnable(member)"
                   type="button"
-                  class="rounded-lg border border-stone-300 px-2.5 py-1 text-xs text-stone-800 hover:bg-stone-50 disabled:text-stone-400"
+                  class="focus-control rounded-lg border border-edge px-2.5 py-1 text-xs text-stone-800 hover:bg-surface-muted disabled:text-ink-subtle"
                   :disabled="pendingId === member.id"
                   @click="patch(member, { active: true }, '已啟用帳號。')"
                 >
@@ -285,7 +267,7 @@ onMounted(() => {
                 <button
                   v-else
                   type="button"
-                  class="rounded-lg border border-stone-300 px-2.5 py-1 text-xs text-stone-800 hover:bg-stone-50 disabled:text-stone-400"
+                  class="focus-control rounded-lg border border-edge px-2.5 py-1 text-xs text-stone-800 hover:bg-surface-muted disabled:text-ink-subtle"
                   :disabled="!canDisable(member) || pendingId === member.id"
                   @click="patch(member, { active: false }, '已停用帳號。')"
                 >
@@ -293,7 +275,7 @@ onMounted(() => {
                 </button>
                 <button
                   type="button"
-                  class="rounded-lg border border-stone-300 px-2.5 py-1 text-xs text-stone-800 hover:bg-stone-50 disabled:text-stone-400"
+                  class="focus-control rounded-lg border border-edge px-2.5 py-1 text-xs text-stone-800 hover:bg-surface-muted disabled:text-ink-subtle"
                   :disabled="pendingId === member.id"
                   @click="
                     patch(
@@ -308,7 +290,7 @@ onMounted(() => {
                 <button
                   v-if="member.role === 'sysadmin'"
                   type="button"
-                  class="rounded-lg border border-stone-300 px-2.5 py-1 text-xs text-stone-800 hover:bg-stone-50 disabled:text-stone-400"
+                  class="focus-control rounded-lg border border-edge px-2.5 py-1 text-xs text-stone-800 hover:bg-surface-muted disabled:text-ink-subtle"
                   :disabled="!canDemote(member) || pendingId === member.id"
                   @click="patch(member, { role: 'user' }, '已取消系統管理員。')"
                 >
@@ -317,7 +299,7 @@ onMounted(() => {
                 <button
                   v-else
                   type="button"
-                  class="rounded-lg border border-stone-300 px-2.5 py-1 text-xs text-stone-800 hover:bg-stone-50 disabled:text-stone-400"
+                  class="focus-control rounded-lg border border-edge px-2.5 py-1 text-xs text-stone-800 hover:bg-surface-muted disabled:text-ink-subtle"
                   :disabled="pendingId === member.id"
                   @click="patch(member, { role: 'sysadmin' }, '已設為系統管理員。')"
                 >

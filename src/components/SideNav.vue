@@ -36,17 +36,17 @@ function onNavigate(
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-1 flex-col bg-stone-950 text-stone-100">
+  <div class="flex h-full min-h-0 flex-1 flex-col bg-nav text-stone-100">
     <div class="border-b border-white/10 px-5 py-5">
       <div class="flex items-center gap-3">
         <span
-          class="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-700 text-sm font-semibold text-white"
+          class="flex h-10 w-10 items-center justify-center rounded-control bg-accent text-sm font-semibold text-white"
         >
           <PoliceBadge />
         </span>
         <span class="min-w-0">
           <span class="block truncate text-sm font-semibold">{{ appName }}</span>
-          <span class="block truncate text-xs text-stone-400">{{ appTagline }}</span>
+          <span class="block truncate text-xs text-ink-subtle">{{ appTagline }}</span>
         </span>
       </div>
     </div>
@@ -61,11 +61,11 @@ function onNavigate(
       >
         <a
           :href="href"
-          class="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-400"
+          class="flex items-center gap-3 rounded-control px-3 py-2.5 text-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-glow"
           :class="
             isItemActive(item.to)
-              ? 'bg-white/10 text-white'
-              : 'text-stone-300 hover:bg-white/5 hover:text-white'
+              ? 'bg-nav-active text-white'
+              : 'text-stone-300 hover:bg-nav-hover hover:text-white'
           "
           :aria-current="isItemActive(item.to) ? 'page' : undefined"
           @click="onNavigate(navigate, $event)"
@@ -73,7 +73,7 @@ function onNavigate(
           <span
             class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-medium"
             :class="
-              isItemActive(item.to) ? 'bg-orange-700 text-white' : 'bg-white/10 text-orange-100'
+              isItemActive(item.to) ? 'bg-accent text-white' : 'bg-nav-active text-accent-soft'
             "
           >
             {{ item.mark }}
@@ -83,7 +83,7 @@ function onNavigate(
       </RouterLink>
     </nav>
 
-    <p class="border-t border-white/10 px-5 py-4 text-xs leading-5 text-stone-500">
+    <p class="border-t border-white/10 px-5 py-4 text-xs leading-5 text-ink-subtle">
       範本集中在範本庫。產生文件的欄位不會被保存。
     </p>
   </div>
