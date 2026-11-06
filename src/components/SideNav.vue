@@ -36,7 +36,9 @@ function onNavigate(
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-1 flex-col bg-nav text-stone-100">
+  <div
+    class="flex h-full min-h-0 flex-1 flex-col bg-linear-to-b from-nav to-nav-end text-stone-100"
+  >
     <div class="border-b border-white/10 px-5 py-5">
       <div class="flex items-center gap-3">
         <span
@@ -83,6 +85,14 @@ function onNavigate(
       </RouterLink>
     </nav>
 
+    <RouterLink
+      to="/change-password"
+      class="focus-control mx-4 mb-4 rounded-control border border-white/15 px-4 py-2.5 text-sm text-stone-200 hover:bg-nav-hover"
+      :aria-current="route.path === '/change-password' ? 'page' : undefined"
+      @click="emit('navigate')"
+    >
+      變更密碼
+    </RouterLink>
     <p class="border-t border-white/10 px-5 py-4 text-xs leading-5 text-ink-subtle">
       範本集中在範本庫。產生文件的欄位不會被保存。
     </p>

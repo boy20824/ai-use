@@ -72,12 +72,12 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
     <RouterLink v-else to="/categories" class="btn-primary"> 瀏覽勤務流程 </RouterLink>
   </PageIntro>
 
-  <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="摘要">
+  <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="摘要">
     <RouterLink
       v-for="stat in stats"
       :key="stat.label"
       :to="stat.to"
-      class="rounded-2xl border border-edge bg-surface px-5 py-5 shadow-card transition hover:border-edge focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      class="rounded-card border border-edge bg-surface px-4 py-4 shadow-card transition hover:border-edge-strong hover:shadow-float focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >
       <p class="text-sm text-ink-muted">{{ stat.label }}</p>
       <p class="mt-3 text-3xl font-semibold tracking-tight text-ink-strong tabular-nums">
@@ -95,11 +95,11 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
     {{ categories.error || templates.error }}
   </p>
 
-  <div class="mt-8 grid gap-6 lg:grid-cols-5">
+  <div class="mt-4 grid gap-4 lg:grid-cols-5">
     <section
       class="overflow-hidden rounded-2xl border border-edge bg-surface shadow-card lg:col-span-3"
     >
-      <div class="flex items-center justify-between gap-3 border-b border-edge px-5 py-4">
+      <div class="flex items-center justify-between gap-3 border-b border-edge px-4 py-3">
         <h2 class="text-base font-semibold">勤務流程</h2>
         <RouterLink to="/categories" class="focus-control text-sm text-accent-ink hover:underline"
           >查看全部</RouterLink
@@ -122,7 +122,7 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
         <li v-for="item in categories.recent" :key="item.id">
           <RouterLink
             :to="`/categories/${item.id}`"
-            class="focus-control flex items-center justify-between gap-4 px-5 py-4 hover:bg-surface-muted"
+            class="focus-control flex items-center justify-between gap-4 px-4 py-3 hover:bg-surface-muted"
           >
             <span class="min-w-0">
               <span class="block text-sm font-medium text-ink">{{ item.name }}</span>
@@ -141,14 +141,14 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
     <section
       class="overflow-hidden rounded-2xl border border-edge bg-surface shadow-card lg:col-span-2"
     >
-      <div class="flex items-center justify-between gap-3 border-b border-edge px-5 py-4">
+      <div class="flex items-center justify-between gap-3 border-b border-edge px-4 py-3">
         <h2 class="text-base font-semibold">最近範本</h2>
         <RouterLink to="/templates" class="focus-control text-sm text-accent-ink hover:underline"
           >查看全部</RouterLink
         >
       </div>
       <ul v-if="latestTemplates.length > 0" class="divide-y divide-stone-200">
-        <li v-for="item in latestTemplates" :key="item.id" class="px-5 py-4">
+        <li v-for="item in latestTemplates" :key="item.id" class="px-4 py-3">
           <RouterLink
             to="/templates"
             class="focus-control break-all text-sm font-medium text-ink hover:underline"

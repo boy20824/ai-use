@@ -44,14 +44,18 @@ const visible = computed(() => {
     </RouterLink>
   </PageIntro>
 
-  <div class="mb-5 flex flex-wrap gap-2" role="tablist" aria-label="勤務分類">
+  <div
+    class="mb-4 inline-flex flex-wrap gap-1.5 rounded-card bg-tone-neutral p-1"
+    role="tablist"
+    aria-label="勤務分類"
+  >
     <button
       v-for="(label, key) in categoryGroups"
       :key="key"
       role="tab"
       :aria-selected="group === key"
-      class="focus-control rounded-control px-4 py-2"
-      :class="group === key ? 'bg-ink text-white' : 'bg-surface text-stone-700'"
+      class="focus-control rounded-control px-3 py-2 text-sm font-medium"
+      :class="group === key ? 'bg-ink text-white' : 'text-ink-muted hover:bg-surface-muted'"
       @click="group = key"
     >
       {{ label }}
@@ -97,7 +101,7 @@ const visible = computed(() => {
         v-for="item in visible"
         :key="item.id"
         :to="`/categories/${item.id}`"
-        class="flex h-full flex-col rounded-2xl border border-edge bg-surface p-5 shadow-card transition hover:border-edge hover:-translate-y-1 hover:shadow-lg active:translate-y-0 active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        class="flex h-full flex-col rounded-card border border-edge bg-surface p-5 shadow-card transition-colors hover:border-edge-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <span class="flex items-center justify-between gap-3">
           <time class="text-xs text-ink-muted" :datetime="item.updatedAt">{{

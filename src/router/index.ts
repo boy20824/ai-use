@@ -83,6 +83,12 @@ export const router = createRouter({
           meta: { title: '網頁改善建議' },
         },
         {
+          path: 'change-password',
+          name: 'change-password',
+          component: () => import('@/views/ChangePasswordView.vue'),
+          meta: { title: '變更密碼' },
+        },
+        {
           path: 'members',
           name: 'members',
           component: () => import('@/views/MembersView.vue'),
