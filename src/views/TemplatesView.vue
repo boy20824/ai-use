@@ -168,14 +168,14 @@ async function onFiles(files: File[]) {
 
   <p
     v-if="feedback"
-    class="mb-6 rounded-xl px-3 py-2 text-sm leading-6"
+    class="mb-6 rounded-control px-3 py-2 text-sm leading-6"
     :class="feedbackTone === 'ok' ? 'bg-emerald-50 text-emerald-950' : 'bg-amber-50 text-amber-950'"
     role="status"
   >
     {{ feedback }}
   </p>
 
-  <p v-if="templates.error" class="mb-6 text-sm text-rose-800" role="alert">
+  <p v-if="templates.error" class="mb-6 text-sm text-tone-danger-ink" role="alert">
     {{ templates.error }}
   </p>
 
@@ -186,7 +186,7 @@ async function onFiles(files: File[]) {
       </label>
       <select
         id="template-category"
-        class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+        class="field mt-2 w-full"
         :value="requestedCategory"
         @change="onFilter"
       >
@@ -196,7 +196,7 @@ async function onFiles(files: File[]) {
         </option>
       </select>
     </div>
-    <p class="text-sm text-stone-500">顯示 {{ visible.length }} 筆</p>
+    <p class="text-sm text-ink-muted">顯示 {{ visible.length }} 筆</p>
   </div>
 
   <EmptyState
@@ -204,12 +204,7 @@ async function onFiles(files: File[]) {
     title="範本庫還沒有文件"
     description="具有維護權限的使用者上傳 .docx 後，可在勤務流程的工作台按「從範本庫選取」連結過來。"
   >
-    <RouterLink
-      to="/categories"
-      class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-    >
-      前往勤務流程
-    </RouterLink>
+    <RouterLink to="/categories" class="btn-primary"> 前往勤務流程 </RouterLink>
   </EmptyState>
 
   <EmptyState
@@ -217,18 +212,12 @@ async function onFiles(files: File[]) {
     title="這個流程還沒有連結範本"
     description="可以改看全部範本，或回到該流程的工作台選取。"
   >
-    <button
-      type="button"
-      class="inline-flex rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
-      @click="showAll"
-    >
-      看全部範本
-    </button>
+    <button type="button" class="btn-secondary" @click="showAll">看全部範本</button>
   </EmptyState>
 
-  <p v-else-if="!templates.ready" class="text-sm text-stone-500">正在讀取範本庫。</p>
+  <p v-else-if="!templates.ready" class="text-sm text-ink-muted">正在讀取範本庫。</p>
 
-  <section v-else class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm">
+  <section v-else class="overflow-hidden rounded-2xl border border-edge bg-surface shadow-card">
     <ul class="divide-y divide-stone-200">
       <li
         v-for="item in visible"
@@ -236,13 +225,13 @@ async function onFiles(files: File[]) {
         class="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
       >
         <div class="min-w-0">
-          <p class="break-all text-sm font-medium text-stone-900">
+          <p class="break-all text-sm font-medium text-ink">
             {{ displayFileName(item.fileName) }}
           </p>
-          <p class="mt-1 text-xs leading-5 text-stone-500">
+          <p class="mt-1 text-xs leading-5 text-ink-muted">
             {{ formatBytes(item.sizeBytes) }} · {{ formatStoredDate(item.addedAt) }}
           </p>
-          <p class="mt-1 text-xs leading-5 text-stone-500">
+          <p class="mt-1 text-xs leading-5 text-ink-muted">
             {{ item.placeholders.length > 0 ? item.placeholders.join('、') : '沒有偵測到欄位' }}
           </p>
           <p class="mt-2 text-xs leading-5 text-stone-600">
@@ -253,7 +242,7 @@ async function onFiles(files: File[]) {
                 v-for="(link, index) in usageLinks(item)"
                 :key="link.id"
                 :to="`/categories/${link.categoryId}`"
-                class="text-orange-800 hover:underline"
+                class="focus-control text-accent-ink hover:underline"
               >
                 {{ link.label }}<span v-if="index < usageLinks(item).length - 1">、</span>
               </RouterLink>
@@ -261,14 +250,14 @@ async function onFiles(files: File[]) {
           </p>
         </div>
         <div class="flex flex-wrap items-center gap-3">
-          <span class="text-xs text-stone-500"
+          <span class="text-xs text-ink-muted"
             >關聯 {{ new Set(item.usages.map((u) => u.categoryId)).size }} 個流程</span
           >
           <button
             v-if="session.canUpload"
             type="button"
             :disabled="replacementBusy"
-            class="text-sm text-orange-800 hover:underline"
+            class="btn-ghost text-sm text-accent-ink hover:underline"
             @click="replacing = replacing === item.id ? '' : item.id"
           >
             替換
@@ -284,7 +273,7 @@ async function onFiles(files: File[]) {
           <button
             v-if="session.canDelete"
             type="button"
-            class="text-sm text-stone-600 hover:text-rose-800"
+            class="btn-ghost text-sm text-stone-600 hover:text-tone-danger-ink"
             :aria-label="`移除 ${displayFileName(item.fileName)}`"
             @click="askRemove(item)"
           >
@@ -297,16 +286,16 @@ async function onFiles(files: File[]) {
 
   <div
     v-if="pendingDelete"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/40 px-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-nav/40 px-4"
     @click.self="pendingDelete = null"
   >
     <div
-      class="w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-sm"
+      class="w-full max-w-md rounded-2xl border border-edge bg-surface p-6 shadow-card"
       role="dialog"
       aria-modal="true"
       aria-labelledby="delete-template-title"
     >
-      <h2 id="delete-template-title" class="text-base font-semibold text-stone-950">移除範本</h2>
+      <h2 id="delete-template-title" class="text-base font-semibold text-ink-strong">移除範本</h2>
       <p class="mt-2 text-sm leading-6 text-stone-600">
         <template v-if="usageLinks(pendingDelete).length > 0">
           「{{
@@ -325,21 +314,10 @@ async function onFiles(files: File[]) {
         </li>
       </ul>
       <div class="mt-5 flex flex-wrap gap-3">
-        <button
-          type="button"
-          class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:bg-stone-300"
-          :disabled="deleting"
-          @click="confirmRemove"
-        >
+        <button type="button" class="btn-primary" :disabled="deleting" @click="confirmRemove">
           確定移除
         </button>
-        <button
-          type="button"
-          class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
-          @click="pendingDelete = null"
-        >
-          取消
-        </button>
+        <button type="button" class="btn-secondary" @click="pendingDelete = null">取消</button>
       </div>
     </div>
   </div>

@@ -49,8 +49,7 @@ function publish() {
   model.value = `${Number(year.value)}/${Number(month.value)}/${Number(day.value)}`
 }
 
-const selectClass =
-  'w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700'
+const selectClass = 'field w-full'
 </script>
 
 <template>
@@ -78,6 +77,6 @@ const selectClass =
         </select>
       </label>
     </div>
-    <p v-if="invalid" class="mt-1 text-xs text-rose-800">這個民國日期不存在。</p>
+    <p v-if="invalid" class="mt-1 text-xs text-tone-danger-ink">這個民國日期不存在。</p>
   </div>
 </template>

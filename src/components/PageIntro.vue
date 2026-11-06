@@ -7,10 +7,10 @@ defineProps<{
 </script>
 
 <template>
-  <header class="mb-8">
-    <p v-if="eyebrow" class="text-xs font-medium tracking-wide text-orange-800">{{ eyebrow }}</p>
+  <header class="mb-section">
+    <p v-if="eyebrow" class="text-xs font-medium tracking-wide text-accent-ink">{{ eyebrow }}</p>
     <h1
-      class="text-2xl font-semibold tracking-tight text-stone-950 sm:text-3xl"
+      class="text-2xl font-semibold tracking-tight text-ink-strong sm:text-page-title"
       :class="eyebrow ? 'mt-2' : ''"
     >
       {{ title }}

@@ -65,17 +65,11 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
     <RouterLink
       v-if="session.canEditCategory && categories.ready && categories.total === 0"
       to="/categories/new"
-      class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
+      class="btn-primary"
     >
       新增勤務流程
     </RouterLink>
-    <RouterLink
-      v-else
-      to="/categories"
-      class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-    >
-      瀏覽勤務流程
-    </RouterLink>
+    <RouterLink v-else to="/categories" class="btn-primary"> 瀏覽勤務流程 </RouterLink>
   </PageIntro>
 
   <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="摘要">
@@ -83,27 +77,31 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
       v-for="stat in stats"
       :key="stat.label"
       :to="stat.to"
-      class="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm transition hover:border-stone-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700"
+      class="rounded-2xl border border-edge bg-surface px-5 py-5 shadow-card transition hover:border-edge focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >
-      <p class="text-sm text-stone-500">{{ stat.label }}</p>
-      <p class="mt-3 text-3xl font-semibold tracking-tight text-stone-950 tabular-nums">
+      <p class="text-sm text-ink-muted">{{ stat.label }}</p>
+      <p class="mt-3 text-3xl font-semibold tracking-tight text-ink-strong tabular-nums">
         {{ stat.value }}
       </p>
-      <p class="mt-2 text-xs text-stone-500">{{ stat.hint }}</p>
+      <p class="mt-2 text-xs text-ink-muted">{{ stat.hint }}</p>
     </RouterLink>
   </section>
 
-  <p v-if="categories.error || templates.error" class="mt-4 text-sm text-rose-800" role="alert">
+  <p
+    v-if="categories.error || templates.error"
+    class="mt-4 text-sm text-tone-danger-ink"
+    role="alert"
+  >
     {{ categories.error || templates.error }}
   </p>
 
   <div class="mt-8 grid gap-6 lg:grid-cols-5">
     <section
-      class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm lg:col-span-3"
+      class="overflow-hidden rounded-2xl border border-edge bg-surface shadow-card lg:col-span-3"
     >
-      <div class="flex items-center justify-between gap-3 border-b border-stone-200 px-5 py-4">
+      <div class="flex items-center justify-between gap-3 border-b border-edge px-5 py-4">
         <h2 class="text-base font-semibold">勤務流程</h2>
-        <RouterLink to="/categories" class="text-sm text-orange-800 hover:underline"
+        <RouterLink to="/categories" class="focus-control text-sm text-accent-ink hover:underline"
           >查看全部</RouterLink
         >
       </div>
@@ -112,31 +110,27 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
         title="還沒有勤務流程"
         description="新增一個流程後，總覽會列出工作台。範本庫的文件可以稍後再連結過來。"
       >
-        <RouterLink
-          v-if="session.canEditCategory"
-          to="/categories/new"
-          class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-        >
+        <RouterLink v-if="session.canEditCategory" to="/categories/new" class="btn-primary">
           新增勤務流程
         </RouterLink>
         <p v-else class="text-sm text-stone-600">請由系統管理員或被授權的使用者新增。</p>
       </EmptyState>
-      <p v-else-if="!categories.ready" class="px-5 py-8 text-sm text-stone-500">
+      <p v-else-if="!categories.ready" class="px-5 py-8 text-sm text-ink-muted">
         正在讀取勤務流程。
       </p>
       <ul v-else class="divide-y divide-stone-200">
         <li v-for="item in categories.recent" :key="item.id">
           <RouterLink
             :to="`/categories/${item.id}`"
-            class="flex items-center justify-between gap-4 px-5 py-4 hover:bg-stone-50"
+            class="focus-control flex items-center justify-between gap-4 px-5 py-4 hover:bg-surface-muted"
           >
             <span class="min-w-0">
-              <span class="block text-sm font-medium text-stone-900">{{ item.name }}</span>
-              <span class="mt-1 block text-xs text-stone-500">
+              <span class="block text-sm font-medium text-ink">{{ item.name }}</span>
+              <span class="mt-1 block text-xs text-ink-muted">
                 {{ item.steps.length }} 個步驟 · {{ item.templateCount }} 份範本
               </span>
             </span>
-            <time class="shrink-0 text-xs text-stone-500" :datetime="item.updatedAt">{{
+            <time class="shrink-0 text-xs text-ink-muted" :datetime="item.updatedAt">{{
               formatStoredDate(item.updatedAt)
             }}</time>
           </RouterLink>
@@ -145,11 +139,11 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
     </section>
 
     <section
-      class="overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm lg:col-span-2"
+      class="overflow-hidden rounded-2xl border border-edge bg-surface shadow-card lg:col-span-2"
     >
-      <div class="flex items-center justify-between gap-3 border-b border-stone-200 px-5 py-4">
+      <div class="flex items-center justify-between gap-3 border-b border-edge px-5 py-4">
         <h2 class="text-base font-semibold">最近範本</h2>
-        <RouterLink to="/templates" class="text-sm text-orange-800 hover:underline"
+        <RouterLink to="/templates" class="focus-control text-sm text-accent-ink hover:underline"
           >查看全部</RouterLink
         >
       </div>
@@ -157,21 +151,21 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
         <li v-for="item in latestTemplates" :key="item.id" class="px-5 py-4">
           <RouterLink
             to="/templates"
-            class="break-all text-sm font-medium text-stone-900 hover:underline"
+            class="focus-control break-all text-sm font-medium text-ink hover:underline"
           >
             {{ displayFileName(item.fileName) }}
           </RouterLink>
-          <p class="mt-1 text-xs text-stone-500">
+          <p class="mt-1 text-xs text-ink-muted">
             {{ usageLabel(item.usages) }} · {{ formatBytes(item.sizeBytes) }}
           </p>
-          <p class="mt-2 text-xs text-stone-500">{{ formatStoredDate(item.addedAt) }}</p>
+          <p class="mt-2 text-xs text-ink-muted">{{ formatStoredDate(item.addedAt) }}</p>
         </li>
       </ul>
-      <p v-else class="px-5 py-8 text-sm text-stone-500">範本庫還沒有文件。</p>
+      <p v-else class="px-5 py-8 text-sm text-ink-muted">範本庫還沒有文件。</p>
     </section>
   </div>
 
-  <p class="mt-8 text-xs leading-5 text-stone-500">
+  <p class="mt-8 text-xs leading-5 text-ink-muted">
     產生文件時填入的姓名、日期與其他欄位只留在該畫面，不會寫進服務。
   </p>
 </template>

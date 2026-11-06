@@ -40,8 +40,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex min-h-dvh items-stretch bg-[#f6f4f1] text-stone-900">
-    <aside class="hidden w-64 shrink-0 bg-stone-950 md:block">
+  <div class="flex min-h-dvh items-stretch bg-canvas text-ink">
+    <aside class="hidden w-64 shrink-0 bg-nav md:block">
       <div class="sticky top-0 flex h-dvh flex-col">
         <SideNav id="desktop-nav" />
       </div>
@@ -49,12 +49,12 @@ onUnmounted(() => {
 
     <div
       v-if="menuOpen"
-      class="fixed inset-0 z-40 bg-stone-950/50 md:hidden"
+      class="fixed inset-0 z-40 bg-nav/50 md:hidden"
       @click="menuOpen = false"
     ></div>
 
     <aside
-      class="fixed inset-y-0 left-0 z-50 flex h-dvh w-64 flex-col bg-stone-950 transition-transform duration-200 md:hidden"
+      class="fixed inset-y-0 left-0 z-50 flex h-dvh w-64 flex-col bg-nav transition-transform duration-200 md:hidden"
       :class="menuOpen ? 'translate-x-0' : '-translate-x-full'"
     >
       <SideNav id="mobile-nav" @navigate="menuOpen = false" />
@@ -62,12 +62,12 @@ onUnmounted(() => {
 
     <div class="flex min-w-0 flex-1 flex-col">
       <header
-        class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-stone-200/80 bg-[#f6f4f1]/90 px-4 backdrop-blur md:px-8"
+        class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-edge/80 bg-canvas/90 px-4 backdrop-blur md:px-page-x"
       >
         <div class="flex min-w-0 items-center gap-3">
           <button
             type="button"
-            class="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-stone-300 bg-white text-stone-800 md:hidden"
+            class="btn-secondary h-10 w-10 items-center justify-center md:hidden"
             :aria-expanded="menuOpen"
             aria-controls="mobile-nav"
             @click="menuOpen = !menuOpen"
@@ -85,25 +85,19 @@ onUnmounted(() => {
           </button>
           <PoliceBadge class="md:hidden" />
           <p class="truncate text-sm font-semibold md:hidden">{{ appName }}</p>
-          <p class="hidden truncate text-sm text-stone-500 md:block">{{ appTagline }}</p>
+          <p class="hidden truncate text-sm text-ink-muted md:block">{{ appTagline }}</p>
         </div>
 
         <div class="flex items-center gap-3">
           <div class="min-w-0 text-right">
-            <p class="truncate text-sm font-medium text-stone-900">{{ session.displayName }}</p>
-            <p class="truncate text-xs text-stone-500">{{ session.roleLabel }}</p>
+            <p class="truncate text-sm font-medium text-ink">{{ session.displayName }}</p>
+            <p class="truncate text-xs text-ink-muted">{{ session.roleLabel }}</p>
           </div>
-          <button
-            type="button"
-            class="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 hover:bg-stone-50"
-            @click="logout"
-          >
-            登出
-          </button>
+          <button type="button" class="btn-secondary px-3 py-2" @click="logout">登出</button>
         </div>
       </header>
 
-      <main class="flex-1 px-4 py-8 md:px-8 md:py-10">
+      <main class="flex-1 px-4 py-8 md:px-page-x md:py-page-y">
         <div class="mx-auto max-w-6xl">
           <RouterView />
         </div>

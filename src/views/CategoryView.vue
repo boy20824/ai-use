@@ -412,7 +412,7 @@ onUnmounted(clearDraft)
   <div v-if="category">
     <RouterLink
       to="/categories"
-      class="mb-4 inline-flex text-sm text-stone-600 hover:text-stone-900"
+      class="focus-control mb-4 inline-flex text-sm text-stone-600 hover:text-ink"
     >
       回到全部流程
     </RouterLink>
@@ -426,13 +426,13 @@ onUnmounted(clearDraft)
     />
 
     <ul class="mb-4 flex flex-wrap gap-2" aria-label="流程資訊">
-      <li class="rounded-full bg-white px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
+      <li class="rounded-full bg-surface px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
         勤務流程
       </li>
-      <li class="rounded-full bg-white px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
+      <li class="rounded-full bg-surface px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
         {{ category.steps.length }} 個填寫步驟
       </li>
-      <li class="rounded-full bg-white px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
+      <li class="rounded-full bg-surface px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
         {{ category.templateCount }} 份範本
       </li>
     </ul>
@@ -440,14 +440,14 @@ onUnmounted(clearDraft)
       <RouterLink
         v-if="session.canEditCategory"
         :to="`/categories/${category.id}/edit`"
-        class="inline-flex rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
+        class="btn-secondary"
       >
         編輯流程
       </RouterLink>
       <button
         v-if="session.canDeleteCategory"
         type="button"
-        class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
+        class="btn-secondary"
         @click="confirmDelete = !confirmDelete"
       >
         刪除流程
@@ -456,33 +456,22 @@ onUnmounted(clearDraft)
 
     <div
       v-if="confirmDelete"
-      class="mb-8 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"
+      class="mb-8 rounded-2xl border border-edge bg-surface p-5 shadow-card"
       role="dialog"
       aria-modal="true"
       aria-labelledby="delete-category-title"
     >
-      <h2 id="delete-category-title" class="text-base font-semibold text-stone-950">
+      <h2 id="delete-category-title" class="text-base font-semibold text-ink-strong">
         刪除「{{ category.name }}」
       </h2>
       <p class="mt-2 text-sm leading-6 text-stone-600">
         只會刪除這個流程、它的步驟，以及步驟和範本的連結。範本檔仍留在範本庫。
       </p>
       <div class="mt-4 flex flex-wrap gap-3">
-        <button
-          type="button"
-          class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:bg-stone-300"
-          :disabled="deleting"
-          @click="removeCategory"
-        >
+        <button type="button" class="btn-primary" :disabled="deleting" @click="removeCategory">
           確定刪除
         </button>
-        <button
-          type="button"
-          class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
-          @click="confirmDelete = false"
-        >
-          取消
-        </button>
+        <button type="button" class="btn-secondary" @click="confirmDelete = false">取消</button>
       </div>
     </div>
 
@@ -490,9 +479,9 @@ onUnmounted(clearDraft)
       <label
         v-for="variant in category.variants"
         :key="variant.id"
-        class="cursor-pointer rounded-full border border-stone-300 px-4 py-2 text-sm"
+        class="cursor-pointer rounded-full border border-edge px-4 py-2 text-sm"
         :class="
-          selectedVariants.includes(variant.id) ? 'bg-orange-100 text-orange-950' : 'bg-white'
+          selectedVariants.includes(variant.id) ? 'bg-orange-100 text-orange-950' : 'bg-surface'
         "
       >
         <input v-model="selectedVariants" type="checkbox" :value="variant.id" /> {{ variant.name }}
@@ -508,13 +497,13 @@ onUnmounted(clearDraft)
       aria-label="流程完成進度"
     />
     <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_15rem]">
-      <aside class="self-start rounded-2xl border border-stone-200 bg-white p-4 lg:order-2">
+      <aside class="self-start rounded-2xl border border-edge bg-surface p-4 lg:order-2">
         <h2 class="font-semibold">全部範本</h2>
-        <p class="mt-2 text-xs text-stone-500">{{ fieldKeyHint }}：{{ fieldNames.join('、') }}</p>
+        <p class="mt-2 text-xs text-ink-muted">{{ fieldKeyHint }}：{{ fieldNames.join('、') }}</p>
         <ul class="mt-3 space-y-3">
           <li v-for="item in linkedTemplates" :key="item.id">
             <button
-              class="text-left text-sm text-orange-800 hover:underline disabled:text-stone-400"
+              class="btn-ghost text-left text-sm text-accent-ink hover:underline"
               :disabled="!canGenerate"
               @click="produceOne('', item.id)"
             >
@@ -531,11 +520,11 @@ onUnmounted(clearDraft)
             role="tab"
             aria-controls="panel-steps"
             :aria-selected="tab === 'steps'"
-            class="rounded-xl px-4 py-2.5 text-sm font-medium"
+            class="focus-control rounded-control px-4 py-2.5 text-sm font-medium"
             :class="
               tab === 'steps'
-                ? 'bg-stone-900 text-white'
-                : 'bg-white text-stone-700 ring-1 ring-stone-200'
+                ? 'bg-ink text-white'
+                : 'bg-surface text-stone-700 ring-1 ring-stone-200'
             "
             @click="tab = 'steps'"
           >
@@ -547,11 +536,11 @@ onUnmounted(clearDraft)
             role="tab"
             aria-controls="panel-overview"
             :aria-selected="tab === 'overview'"
-            class="rounded-xl px-4 py-2.5 text-sm font-medium"
+            class="focus-control rounded-control px-4 py-2.5 text-sm font-medium"
             :class="
               tab === 'overview'
-                ? 'bg-stone-900 text-white'
-                : 'bg-white text-stone-700 ring-1 ring-stone-200'
+                ? 'bg-ink text-white'
+                : 'bg-surface text-stone-700 ring-1 ring-stone-200'
             "
             @click="tab = 'overview'"
           >
@@ -564,9 +553,9 @@ onUnmounted(clearDraft)
           id="panel-steps"
           role="tabpanel"
           aria-labelledby="tab-steps"
-          class="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
+          class="rounded-2xl border border-edge bg-surface px-5 py-5 shadow-card"
         >
-          <h2 class="text-base font-semibold text-stone-950">填寫步驟</h2>
+          <h2 class="text-base font-semibold text-ink-strong">填寫步驟</h2>
           <p class="mt-1 text-sm leading-6 text-stone-600">
             基本資料的欄位只留在這個畫面。離開這個流程或登出後會清除，也不會送到服務。
           </p>
@@ -574,14 +563,14 @@ onUnmounted(clearDraft)
             <li class="col-span-full flex gap-4">
               <div class="flex w-8 flex-col items-center">
                 <span
-                  class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white"
+                  class="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white"
                 >
                   1
                 </span>
                 <span class="my-2 w-px flex-1 bg-stone-200" aria-hidden="true"></span>
               </div>
               <div class="min-w-0 flex-1 pb-8">
-                <h3 class="text-sm font-semibold text-stone-900">基本資料</h3>
+                <h3 class="text-sm font-semibold text-ink">基本資料</h3>
                 <p class="mt-1 text-sm leading-6 text-stone-600">
                   姓名與日期會套進這個流程各步驟的範本。日期預設為台北今天。
                 </p>
@@ -602,7 +591,7 @@ onUnmounted(clearDraft)
                       step="any"
                       autocomplete="off"
                       :placeholder="fieldPlaceholder(name)"
-                      class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+                      class="field mt-2 w-full"
                       @input="onFieldInput(name, $event)"
                     />
                   </div>
@@ -618,18 +607,18 @@ onUnmounted(clearDraft)
                   2
                 </span>
               </div>
-              <p class="pb-2 text-sm leading-6 text-stone-500">尚未設定後續步驟。</p>
+              <p class="pb-2 text-sm leading-6 text-ink-muted">尚未設定後續步驟。</p>
             </li>
 
             <li
               v-for="(step, index) in visibleSteps"
               :key="step.id"
-              class="flex gap-4 rounded-2xl border border-stone-200 p-4"
-              :class="done[step.id] ? 'bg-emerald-50' : 'bg-stone-50'"
+              class="flex gap-4 rounded-2xl border border-edge p-4"
+              :class="done[step.id] ? 'bg-emerald-50' : 'bg-surface-muted'"
             >
               <div class="flex w-8 flex-col items-center">
                 <span
-                  class="flex h-8 w-8 items-center justify-center rounded-full bg-stone-900 text-xs font-semibold text-white"
+                  class="flex h-8 w-8 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white"
                 >
                   {{ index + 2 }}
                 </span>
@@ -640,7 +629,7 @@ onUnmounted(clearDraft)
                 ></span>
               </div>
               <div class="min-w-0 flex-1 pb-8">
-                <h3 class="text-sm font-semibold text-stone-900 whitespace-pre-wrap">
+                <h3 class="text-sm font-semibold text-ink whitespace-pre-wrap">
                   {{ done[step.id] ? '✓ ' : '' }}{{ step.title ?? step.body }}
                 </h3>
                 <ul v-if="step.items?.length" class="mt-3 list-disc pl-5 text-sm">
@@ -648,13 +637,13 @@ onUnmounted(clearDraft)
                 </ul>
                 <p
                   v-if="step.note"
-                  class="mt-3 rounded-xl bg-amber-100 p-3 text-sm font-medium text-amber-950"
+                  class="mt-3 rounded-control bg-amber-100 p-3 text-sm font-medium text-amber-950"
                 >
                   {{ step.note }}
                 </p>
                 <button
                   type="button"
-                  class="mt-3 block text-sm text-orange-800 hover:underline"
+                  class="btn-ghost mt-3 block text-sm text-accent-ink hover:underline"
                   @click="printSop(step)"
                 >
                   列印 SOP
@@ -667,7 +656,7 @@ onUnmounted(clearDraft)
                   />
                   本步驟已完成
                 </label>
-                <p v-if="templatesFor(step).length === 0" class="mt-3 text-sm text-stone-500">
+                <p v-if="templatesFor(step).length === 0" class="mt-3 text-sm text-ink-muted">
                   這個步驟還沒有範本。
                 </p>
                 <div v-else class="mt-4">
@@ -676,24 +665,24 @@ onUnmounted(clearDraft)
                     <button
                       v-if="templatesFor(step).length > 1"
                       type="button"
-                      class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                      class="btn-primary"
                       :disabled="!canGenerate"
                       @click="produceStep(step.id, step.templateIds, index)"
                     >
                       產生本步驟全部
                     </button>
                   </div>
-                  <ul class="divide-y divide-stone-200 rounded-2xl border border-stone-200">
+                  <ul class="divide-y divide-stone-200 rounded-2xl border border-edge">
                     <li
                       v-for="item in templatesFor(step)"
                       :key="item.id"
                       class="flex items-center justify-between gap-3 px-4 py-3"
                     >
                       <span class="min-w-0">
-                        <span class="block break-all text-sm font-medium text-stone-900">{{
+                        <span class="block break-all text-sm font-medium text-ink">{{
                           displayFileName(item.fileName)
                         }}</span>
-                        <span class="mt-1 block text-xs text-stone-500">
+                        <span class="mt-1 block text-xs text-ink-muted">
                           {{
                             item.placeholders.length > 0
                               ? item.placeholders.join('、')
@@ -703,7 +692,7 @@ onUnmounted(clearDraft)
                       </span>
                       <button
                         type="button"
-                        class="shrink-0 rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 hover:bg-stone-50 disabled:cursor-not-allowed disabled:text-stone-400"
+                        class="btn-secondary shrink-0 px-3 py-2"
                         :disabled="!canGenerate"
                         @click="produceOne(step.id, item.id)"
                       >
@@ -714,7 +703,7 @@ onUnmounted(clearDraft)
                 </div>
                 <p
                   v-if="message && messageStepId === step.id"
-                  class="mt-3 rounded-xl px-3 py-2 text-sm leading-6"
+                  class="mt-3 rounded-control px-3 py-2 text-sm leading-6"
                   :class="
                     messageTone === 'ok'
                       ? 'bg-emerald-50 text-emerald-950'
@@ -734,9 +723,9 @@ onUnmounted(clearDraft)
           id="panel-overview"
           role="tabpanel"
           aria-labelledby="tab-overview"
-          class="rounded-2xl border border-stone-200 bg-white px-5 py-5 shadow-sm"
+          class="rounded-2xl border border-edge bg-surface px-5 py-5 shadow-card"
         >
-          <h2 class="text-base font-semibold text-stone-950">全部文件總覽</h2>
+          <h2 class="text-base font-semibold text-ink-strong">全部文件總覽</h2>
           <p class="mt-1 text-sm leading-6 text-stone-600">
             列出這個流程各步驟的範本，同一份只出現一次，預設全部勾選。取消勾選，或從範本庫暫時加入其他範本，只影響這次產生，不會改動流程設定。欄位與填寫步驟的基本資料共用，離開這個流程或登出後清除，也不會送到服務。
           </p>
@@ -744,20 +733,20 @@ onUnmounted(clearDraft)
           <div class="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
             <div>
               <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <h3 class="text-sm font-semibold text-stone-900">文件</h3>
+                <h3 class="text-sm font-semibold text-ink">文件</h3>
                 <button
                   type="button"
-                  class="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
+                  class="btn-secondary"
                   :aria-expanded="pickerOpen"
                   @click="pickerOpen = !pickerOpen"
                 >
                   從範本庫選取
                 </button>
               </div>
-              <p v-if="overviewList.length === 0" class="text-sm text-stone-500">
+              <p v-if="overviewList.length === 0" class="text-sm text-ink-muted">
                 這個流程還沒有範本。可從範本庫暫時加入。
               </p>
-              <ul v-else class="divide-y divide-stone-200 rounded-2xl border border-stone-200">
+              <ul v-else class="divide-y divide-stone-200 rounded-2xl border border-edge">
                 <li v-for="item in overviewList" :key="item.id" class="px-4 py-3">
                   <label class="flex items-start gap-3 text-sm text-stone-800">
                     <input
@@ -767,16 +756,16 @@ onUnmounted(clearDraft)
                       @change="toggleOverview(item.id, $event)"
                     />
                     <span class="min-w-0">
-                      <span class="block break-all font-medium text-stone-900">
+                      <span class="block break-all font-medium text-ink">
                         {{ displayFileName(item.fileName) }}
                         <span
                           v-if="isTemporary(item.id)"
-                          class="ml-2 text-xs font-normal text-orange-800"
+                          class="ml-2 text-xs font-normal text-accent-ink"
                         >
                           本次暫加
                         </span>
                       </span>
-                      <span class="mt-1 block text-xs text-stone-500">
+                      <span class="mt-1 block text-xs text-ink-muted">
                         {{
                           item.placeholders.length > 0
                             ? item.placeholders.join('、')
@@ -790,7 +779,7 @@ onUnmounted(clearDraft)
 
               <div
                 v-if="pickerOpen"
-                class="mt-3 rounded-2xl border border-stone-200 bg-stone-50 p-4"
+                class="mt-3 rounded-2xl border border-edge bg-surface-muted p-4"
               >
                 <label class="block text-xs font-medium text-stone-600" for="overview-picker">
                   搜尋範本
@@ -800,16 +789,16 @@ onUnmounted(clearDraft)
                   :value="pickerQuery"
                   type="search"
                   placeholder="請輸入檔名"
-                  class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+                  class="field mt-2 w-full"
                   @input="onPickerQuery"
                 />
-                <p class="mt-2 text-xs leading-5 text-stone-500">
+                <p class="mt-2 text-xs leading-5 text-ink-muted">
                   這裡勾選的範本只加進這次清單，不會寫進流程或步驟。
                 </p>
-                <p v-if="templates.items.length === 0" class="mt-3 text-sm text-stone-500">
+                <p v-if="templates.items.length === 0" class="mt-3 text-sm text-ink-muted">
                   範本庫還沒有文件。
                 </p>
-                <p v-else-if="additionChoices.length === 0" class="mt-3 text-sm text-stone-500">
+                <p v-else-if="additionChoices.length === 0" class="mt-3 text-sm text-ink-muted">
                   沒有其他可加入的範本。
                 </p>
                 <ul v-else class="mt-3 max-h-48 space-y-2 overflow-auto">
@@ -829,14 +818,14 @@ onUnmounted(clearDraft)
             </div>
 
             <div>
-              <h3 class="text-sm font-semibold text-stone-900">基本資料</h3>
+              <h3 class="text-sm font-semibold text-ink">基本資料</h3>
               <p class="mt-1 text-sm leading-6 text-stone-600">
                 已勾選範本裡的每個欄位只出現一次。日期與填寫步驟共用，預設為台北今天。{{
                   yearToken
                 }}、{{ monthToken }}、{{ dayToken }}、{{ dateToken }}、{{ dateSlashToken }}
                 都跟這個日期走，不會另外出現輸入欄。
               </p>
-              <p v-if="overviewFields.length === 0" class="mt-4 text-sm text-stone-500">
+              <p v-if="overviewFields.length === 0" class="mt-4 text-sm text-ink-muted">
                 勾選文件後，這裡會列出要填的欄位。
               </p>
               <div v-else class="mt-4 grid gap-4">
@@ -856,7 +845,7 @@ onUnmounted(clearDraft)
                     step="any"
                     autocomplete="off"
                     :placeholder="fieldPlaceholder(name)"
-                    class="mt-2 w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-orange-700"
+                    class="field mt-2 w-full"
                     @input="onFieldInput(name, $event)"
                   />
                 </div>
@@ -864,7 +853,7 @@ onUnmounted(clearDraft)
               <div class="mt-4 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
-                  class="rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                  class="btn-primary"
                   :disabled="!canGenerateOverview"
                   @click="produceChecked"
                 >
@@ -876,7 +865,7 @@ onUnmounted(clearDraft)
               </div>
               <p
                 v-if="overviewMessage"
-                class="mt-3 rounded-xl px-3 py-2 text-sm leading-6"
+                class="mt-3 rounded-control px-3 py-2 text-sm leading-6"
                 :class="
                   overviewTone === 'ok'
                     ? 'bg-emerald-50 text-emerald-950'
@@ -894,7 +883,7 @@ onUnmounted(clearDraft)
   </div>
 
   <div v-else-if="!categories.ready">
-    <p class="text-sm text-stone-500">正在讀取勤務流程。</p>
+    <p class="text-sm text-ink-muted">正在讀取勤務流程。</p>
   </div>
 
   <div v-else>
@@ -904,12 +893,7 @@ onUnmounted(clearDraft)
       description="這個流程不存在，或已經刪除。請回到列表重新選擇。"
     />
     <EmptyState title="沒有對應的工作台" description="流程可能已刪除，或連結不完整。">
-      <RouterLink
-        to="/categories"
-        class="inline-flex rounded-xl bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-      >
-        回到勤務流程
-      </RouterLink>
+      <RouterLink to="/categories" class="btn-primary"> 回到勤務流程 </RouterLink>
     </EmptyState>
   </div>
 </template>
