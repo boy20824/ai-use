@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import SplitterSourcePreview from '@/components/SplitterSourcePreview.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import {
   batch,
@@ -23,7 +24,6 @@ const busy = ref(false)
 const error = ref('')
 const status = ref('尚未加入圖片')
 const input = ref<HTMLInputElement>()
-const sourceCanvas = ref<HTMLCanvasElement>()
 const sliceCanvases = ref<HTMLCanvasElement[]>([])
 const previewState = ref<PreviewState>('empty')
 const previewMessage = ref('')
@@ -34,14 +34,7 @@ const preview = createPreviewRenderer((state, message) => {
 watchPostEffect(() => {
   const image = current.value
   const targets: PreviewTarget[] = []
-  if (image && sourceCanvas.value) {
-    targets.push({
-      canvas: sourceCanvas.value,
-      start: 0,
-      end: image.height,
-      maxWidth: 600,
-      maxHeight: 8192,
-    })
+  if (image) {
     for (const canvas of sliceCanvases.value) {
       targets.push({
         canvas,
@@ -129,9 +122,9 @@ function remove(id: number) {
 function adjust(index: number, value: number) {
   if (busy.value || !current.value) return
   const image = current.value
-  images.value = images.value.map((item) =>
-    item.id === image.id ? { ...item, cuts: moveCut(item.cuts, index, value, image.height) } : item,
-  )
+  const cuts = moveCut(image.cuts, index, value, image.height)
+  if (cuts[index] === image.cuts[index]) return
+  images.value = images.value.map((item) => (item.id === image.id ? { ...item, cuts } : item))
   releaseDownloads()
 }
 function reset() {
@@ -141,41 +134,6 @@ function reset() {
   images.value = images.value.map((item) =>
     item.id === id ? { ...item, cuts: defaultCuts(item.height) } : item,
   )
-}
-let drag: { pointer: number; index: number; id: number } | undefined
-function pointerDown(event: PointerEvent, index: number) {
-  if (busy.value || !current.value || (event.pointerType === 'mouse' && event.button !== 0)) return
-  const target = event.currentTarget as HTMLElement
-  target.focus({ preventScroll: true })
-  target.setPointerCapture(event.pointerId)
-  drag = { pointer: event.pointerId, index, id: current.value.id }
-  event.preventDefault()
-}
-function pointerMove(event: PointerEvent) {
-  if (!drag || drag.pointer !== event.pointerId || current.value?.id !== drag.id) return
-  const rect = (event.currentTarget as HTMLElement).parentElement!.getBoundingClientRect()
-  if (rect.height > 0)
-    adjust(drag.index, ((event.clientY - rect.top) * current.value.height) / rect.height)
-}
-function pointerEnd(event: PointerEvent) {
-  if (drag?.pointer === event.pointerId) drag = undefined
-}
-function keyCut(event: KeyboardEvent, index: number) {
-  const image = current.value
-  if (!image) return
-  const delta = event.shiftKey ? 10 : 1
-  const values: Record<string, number> = {
-    ArrowUp: image.cuts[index] - delta,
-    ArrowDown: image.cuts[index] + delta,
-    ArrowLeft: image.cuts[index] - delta,
-    ArrowRight: image.cuts[index] + delta,
-    Home: 0,
-    End: image.height,
-  }
-  if (event.key in values) {
-    event.preventDefault()
-    adjust(index, values[event.key])
-  }
 }
 function save(bytes: Uint8Array<ArrayBuffer> | Blob, name: string, type: string) {
   if (!alive) return
@@ -327,7 +285,10 @@ async function exportImages(mode: 'zip' | 'all' | number) {
           <h2>{{ current.name }}</h2>
           <button class="btn-secondary" :disabled="busy" @click="reset">重設為 1792px</button>
         </div>
-        <p>預覽配合畫面縮小，輸出保留來源像素。ZIP 路徑：圖片編號／切片編號.png。</p>
+        <p>
+          原圖以原尺寸顯示，超過可用寬度才縮小；可捲動查看完整圖片，輸出保留來源像素。ZIP
+          路徑：圖片編號／切片編號.png。
+        </p>
         <p
           class="splitter-preview-status"
           :data-state="previewState"
@@ -335,33 +296,7 @@ async function exportImages(mode: 'zip' | 'all' | number) {
         >
           {{ previewMessage }}
         </p>
-        <div
-          class="splitter-source"
-          :style="{ aspectRatio: `${current.width} / ${current.height}` }"
-        >
-          <canvas ref="sourceCanvas" role="img" aria-label="待切割原圖預覽">待切割原圖預覽</canvas>
-          <button
-            v-for="(cut, index) in current.cuts"
-            :key="`${current.id}-${index}`"
-            class="splitter-cut"
-            role="slider"
-            aria-orientation="vertical"
-            :aria-label="`切線 ${index + 1}（來源列）`"
-            :aria-valuemin="(current.cuts[index - 1] ?? 0) + 1"
-            :aria-valuemax="(current.cuts[index + 1] ?? current.height) - 1"
-            :aria-valuenow="cut"
-            :style="{ top: `${(cut / current.height) * 100}%` }"
-            :disabled="busy"
-            @pointerdown="pointerDown($event, index)"
-            @pointermove="pointerMove"
-            @pointerup="pointerEnd"
-            @pointercancel="pointerEnd"
-            @lostpointercapture="pointerEnd"
-            @keydown="keyCut($event, index)"
-          >
-            <span>{{ cut }}px ↕</span>
-          </button>
-        </div>
+        <SplitterSourcePreview :source="current" :disabled="busy" @adjust="adjust" />
         <h2>切片預覽與尺寸</h2>
         <ol class="splitter-slices">
           <li v-for="(slice, index) in slices(current.height, current.cuts)" :key="index">
@@ -474,49 +409,6 @@ async function exportImages(mode: 'zip' | 'all' | number) {
 .splitter-workspace h2 {
   overflow-wrap: anywhere;
   font-weight: 600;
-}
-.splitter-source {
-  position: relative;
-  width: 100%;
-  max-width: 600px;
-  max-height: 8192px;
-  margin: 24px auto;
-  background: white;
-}
-.splitter-source > canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-  user-select: none;
-}
-.splitter-cut {
-  position: absolute;
-  left: 0;
-  width: 100%;
-  height: 44px;
-  transform: translateY(-50%);
-  touch-action: none;
-  cursor: ns-resize;
-  z-index: 1;
-}
-.splitter-cut::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  border-top: 2px solid #b42318;
-}
-.splitter-cut span {
-  position: relative;
-  background: #b42318;
-  color: white;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
-}
-.splitter-cut:focus-visible {
-  z-index: 2;
 }
 .splitter-slices {
   display: grid;

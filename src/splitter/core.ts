@@ -282,11 +282,13 @@ export async function cropBitmap(
   width: number,
   height: number,
   decode: CropDecoder = browserCrop,
+  active: () => boolean = () => true,
 ) {
   let expired = false
   const previous = decodeQueues.get(decode) ?? Promise.resolve()
   const pending = previous.then(() => {
     if (expired) throw new Error('等待裁切解碼逾時；請重新載入頁面後重試。')
+    if (!active()) throw new Error('已取消預覽裁切。')
     return decode(file, 0, y, width, height)
   })
   decodeQueues.set(

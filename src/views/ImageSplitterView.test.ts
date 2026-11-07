@@ -122,6 +122,8 @@ beforeEach(() => {
         getImageData: () => ({ data: drawn!.pixels }),
       }) as unknown as CanvasRenderingContext2D,
   )
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(600)
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(4000)
   mount()
 })
 afterEach(() => {
@@ -206,7 +208,7 @@ describe('local multi-image splitter DOM', () => {
     expect(configured).toBeTruthy()
     expect(JSON.parse(configured!)).toEqual(["'self'"])
     await upload([fixture('fake-csp.png', 828, 4000)])
-    expect(host.querySelectorAll('.splitter-source canvas')).toHaveLength(1)
+    expect(host.querySelectorAll('.splitter-source canvas')).toHaveLength(2)
     expect(host.querySelectorAll('.splitter-thumbnail canvas')).toHaveLength(3)
     expect(
       host.querySelectorAll('img, [src], [srcset], [poster], object, embed, image'),
@@ -215,7 +217,9 @@ describe('local multi-image splitter DOM', () => {
     expect(URL.createObjectURL).not.toHaveBeenCalled()
     const canvases = [...host.querySelectorAll('canvas')]
     expect(canvases.every((canvas) => canvas.width > 0 && canvas.height > 0)).toBe(true)
-    expect(host.querySelector('.splitter-source')?.getAttribute('style')).toContain('828 / 4000')
+    expect(host.querySelector('.splitter-source-spacer')?.getAttribute('style')).toContain(
+      'width: 600px',
+    )
     expect(
       [...host.querySelectorAll('.splitter-thumbnail canvas')].map((canvas) => [
         canvas.getAttribute('data-start'),
@@ -280,7 +284,7 @@ describe('local multi-image splitter DOM', () => {
     cut().dispatchEvent(
       new PointerEvent('pointermove', {
         pointerId: 6,
-        clientY: 100 + (2000 * 600) / 50003,
+        clientY: 2100,
         bubbles: true,
       }),
     )
@@ -318,7 +322,7 @@ describe('local multi-image splitter DOM', () => {
     await vi.waitFor(() => expect(resolve).toBeTypeOf('function'))
     app!.unmount()
     app = undefined
-    resolve({ width: 8, height: 3584, close: closed })
+    resolve({ width: 8, height: 2048, close: closed })
     await new Promise((done) => setTimeout(done, 10))
     expect(closed).toHaveBeenCalledTimes(1)
     expect(blobs.size).toBe(0)

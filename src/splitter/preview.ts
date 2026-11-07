@@ -69,9 +69,16 @@ export function createPreviewRenderer(
             canvas.width = Math.max(1, Math.round(requested.width * scale))
             canvas.height = Math.max(1, Math.round((end - start) * scale))
           }
-          for (let start = 0; start < requested.height; start += bandRows(requested.width)) {
+          for (
+            let start = 0;
+            start < requested.height;
+            start += Math.min(2048, bandRows(requested.width))
+          ) {
             if (disposed || revision !== token) break
-            const end = Math.min(requested.height, start + bandRows(requested.width))
+            const end = Math.min(
+              requested.height,
+              start + Math.min(2048, bandRows(requested.width)),
+            )
             const intersecting = selected.filter(
               (target) => target.start < end && target.end > start,
             )
@@ -82,6 +89,7 @@ export function createPreviewRenderer(
               requested.width,
               end - start,
               decode,
+              () => !disposed && revision === token,
             )
             try {
               if (disposed || revision !== token) break
