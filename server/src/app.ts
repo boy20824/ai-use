@@ -125,6 +125,7 @@ const fieldSchema = z
   })
 const stepSchema = z
   .object({
+    canRunInParallel: z.boolean().optional(),
     categoryId: categoryIdSchema.optional(),
     id: stepIdSchema.optional(),
     body: z.string().trim().min(1).max(500).optional(),
@@ -417,8 +418,10 @@ function extrasValid(
     new Set(extras.fields.map((f) => f.key)).size !== extras.fields.length
   )
     return false
-  return steps.every((step) =>
-    (step.variantIds ?? []).every((v) => extras.variants.some((x) => x.id === v)),
+  return steps.every(
+    (step) =>
+      (!step.categoryId || step.categoryId === id) &&
+      (step.variantIds ?? []).every((v) => extras.variants.some((x) => x.id === v)),
   )
 }
 

@@ -148,6 +148,7 @@ async function save() {
         @drop.prevent="drop(index)"
       >
         <p>{{ steps.get(id)?.title ?? steps.get(id)?.body }}</p>
+        <p v-if="steps.get(id)?.canRunInParallel" class="text-sm">此步驟可請其他人同步進行</p>
         <p class="text-xs">來源：{{ sources(id) }}</p>
         <button
           type="button"

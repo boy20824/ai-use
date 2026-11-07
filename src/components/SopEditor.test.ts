@@ -89,3 +89,45 @@ it('keeps source ordering controls but removes reference-existing-step entry poi
     body: JSON.stringify({ ids: ['t', 's'] }),
   })
 })
+
+it('loads, toggles and saves the strict parallel boolean with existing step configuration', async () => {
+  await mount()
+  mocks.request.mockImplementation(
+    async () =>
+      new Response(JSON.stringify({ impact: { base: [], modules: [] } }), { status: 200 }),
+  )
+  button('編輯共用步驟').click()
+  await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledOnce())
+  const checkbox = [...host.querySelectorAll('label')]
+    .find((label) => label.textContent?.includes('此步驟可請其他人同步進行'))!
+    .querySelector('input')!
+  expect(checkbox.checked).toBe(false)
+  checkbox.checked = true
+  checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+  await nextTick()
+  button('儲存共用步驟').click()
+  await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledTimes(2))
+  expect(mocks.request).toHaveBeenLastCalledWith('/api/categories/mock/steps/s', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      title: 'Shared Mock',
+      body: 'Shared Mock',
+      items: [],
+      note: '',
+      canRunInParallel: true,
+      templateIds: [],
+    }),
+  })
+  category.steps[0] = { ...category.steps[0]!, canRunInParallel: true }
+  try {
+    button('編輯共用步驟').click()
+    await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledTimes(3))
+    expect(
+      [...host.querySelectorAll('label')]
+        .find((label) => label.textContent?.includes('此步驟可請其他人同步進行'))!
+        .querySelector('input')!.checked,
+    ).toBe(true)
+  } finally {
+    category.steps[0] = { id: 's', body: 'Shared Mock', templateIds: [] }
+  }
+})

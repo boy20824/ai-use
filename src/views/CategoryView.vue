@@ -1,4 +1,16 @@
 <script setup lang="ts">
+import StepFields from '@/components/StepFields.vue'
+import {
+  contextKey,
+  generationContexts,
+  sharedFieldNames,
+  localFieldNames,
+  scopeKey,
+  missingContextFields,
+  filledContext,
+  type GenerationContext,
+  type ScopedValues,
+} from '@/workbench/stepFields'
 import EmptyState from '@/components/EmptyState.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import PlaceholderGuide from '@/components/PlaceholderGuide.vue'
@@ -11,18 +23,13 @@ import { useTemplateStore } from '@/stores/templates'
 import type { CategoryStep } from '@/types/domain'
 import { downloadBlob, downloadBytes } from '@/utils/download'
 import { displayFileName } from '@/utils/fileName'
-import { applyRocDateFields, parseRocDate } from '@/utils/rocDate'
 import { composeSteps } from '@/workbench/compose'
 import { initialDraftValues } from '@/workbench/draft'
 import {
   checkedTemplates,
   dedupedIds,
   inputFields,
-  manualFieldsFromPlaceholders,
   missingOverviewFields,
-  overviewCatalog,
-  overviewDownloadName,
-  valuesForFields,
 } from '@/workbench/overview'
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
@@ -37,6 +44,7 @@ const categories = useCategoryStore()
 const templates = useTemplateStore()
 const session = useSessionStore()
 const values = ref<Record<string, string>>(initialDraftValues())
+const scopedValues = ref<ScopedValues>({})
 const busy = ref(false)
 const message = ref('')
 const messageTone = ref<'ok' | 'warn'>('ok')
@@ -63,6 +71,16 @@ const selectedVariants = ref<string[]>([])
 const visibleSteps = computed(() =>
   category.value ? composeSteps(category.value, selectedVariants.value) : [],
 )
+watch(
+  selectedVariants,
+  () => {
+    draftVersion++
+    busy.value = false
+    message.value = ''
+    overviewMessage.value = ''
+  },
+  { deep: true, flush: 'sync' },
+)
 const printStep = ref<CategoryStep | null>(null)
 async function printSop(step: CategoryStep) {
   printStep.value = step
@@ -77,50 +95,58 @@ function fieldLabel(key: string) {
   return category.value?.fields?.find((f) => f.key === key)?.name ?? key
 }
 
-const linkedTemplates = computed(() => {
-  const ids = visibleSteps.value.flatMap((step) => step.templateIds)
-  const seen = new Set<string>()
-  return ids
-    .filter((id) => {
-      if (seen.has(id)) return false
-      seen.add(id)
-      return true
-    })
-    .map((id) => templates.byId(id))
-    .filter((item) => item !== undefined)
-})
-
 function fieldPlaceholder(name: string) {
   if (name === '姓名') return '請輸入姓名'
   return `請輸入${name}`
 }
 
-const fieldNames = computed(() =>
-  manualFieldsFromPlaceholders(
-    linkedTemplates.value.flatMap((template) => template.placeholders),
-    ['姓名', '日期', ...(category.value?.fields?.map((f) => f.key) ?? [])],
-  ),
+const contexts = computed(() =>
+  generationContexts(visibleSteps.value, [], (id) => templates.byId(id)),
 )
-
-const missingFields = computed(() => {
-  const missing: string[] = []
-  for (const name of fieldNames.value) {
-    const raw = (values.value[name] ?? '').trim()
-    if (!raw) {
-      missing.push(name)
-      continue
-    }
-    if (name === '日期' && !parseRocDate(raw)) missing.push('日期格式')
+const fieldNames = computed(() =>
+  category.value ? sharedFieldNames(category.value, contexts.value) : [],
+)
+const baseIds = computed(() => new Set(category.value?.baseSteps?.map((ref) => ref.stepId) ?? []))
+const basicGroups = computed(() => visibleSteps.value.filter((step) => baseIds.value.has(step.id)))
+function contextsFor(stepId: string) {
+  return contexts.value.filter((context) => context.stepId === stepId)
+}
+function localFields(stepId: string) {
+  return localFieldNames(contextsFor(stepId), fieldNames.value)
+}
+function localValues(context: GenerationContext) {
+  return scopedValues.value[scopeKey(context)] ?? {}
+}
+function setLocal(context: GenerationContext, key: string, value: string) {
+  const scope = scopeKey(context)
+  scopedValues.value = {
+    ...scopedValues.value,
+    [scope]: { ...scopedValues.value[scope], [key]: value },
   }
-  return missing
-})
-
-const canGenerate = computed(() => missingFields.value.length === 0 && !busy.value)
-const generateHint = computed(() => {
-  if (missingFields.value.includes('日期格式')) return '日期不是有效的民國日期。'
-  if (missingFields.value.length === 0) return ''
-  return `請先在基本資料填寫：${missingFields.value.join('、')}。`
-})
+}
+function stepValues(stepId: string) {
+  const context = contextsFor(stepId)[0]
+  return context ? localValues(context) : {}
+}
+function setStepValue(stepId: string, key: string, value: string) {
+  const context = contextsFor(stepId)[0]
+  if (context) setLocal(context, key, value)
+}
+function stepMissing(stepId: string) {
+  return missingContextFields(
+    contextsFor(stepId),
+    fieldNames.value,
+    values.value,
+    scopedValues.value,
+  )
+}
+function canGenerateStep(stepId: string) {
+  return !busy.value && stepMissing(stepId).length === 0
+}
+const missingFields = computed(() => missingOverviewFields(fieldNames.value, values.value))
+const generateHint = computed(() =>
+  missingFields.value.length ? `請先在基本資料填寫：${missingFields.value.join('、')}。` : '',
+)
 
 const dateToken = '{{日期}}'
 const dateSlashToken = '{{日期_民國}}'
@@ -175,6 +201,7 @@ function clearDraft() {
   selectedVariants.value = []
   printStep.value = null
   values.value = initialDraftValues()
+  scopedValues.value = {}
   message.value = ''
   messageStepId.value = ''
   tab.value = 'steps'
@@ -199,8 +226,9 @@ function templatesFor(step: CategoryStep) {
   return step.templateIds.map((id) => templates.byId(id)).filter((item) => item !== undefined)
 }
 
-async function renderOne(id: string) {
-  const filled = applyRocDateFields(values.value)
+async function renderOne(context: GenerationContext) {
+  const id = context.templateId
+  const filled = filledContext(context, fieldNames.value, values.value, scopedValues.value)
   if (!filled) throw new Error('invalid-date')
   const template = templates.byId(id)
   const bytes = await templates.bytesFor(id)
@@ -212,13 +240,15 @@ async function renderOne(id: string) {
 }
 
 async function produceOne(stepId: string, templateId: string) {
-  if (!canGenerate.value) return
+  if (!canGenerateStep(stepId)) return
+  const context = contexts.value.find((item) => item.id === contextKey(stepId, templateId))
+  if (!context) return
   const version = draftVersion
   busy.value = true
   message.value = ''
   messageStepId.value = stepId
   try {
-    const rendered = await renderOne(templateId)
+    const rendered = await renderOne(context)
     if (version !== draftVersion) return
     downloadBytes(rendered.data, rendered.name, templateMimeType)
     messageTone.value = 'ok'
@@ -236,7 +266,7 @@ async function produceOne(stepId: string, templateId: string) {
 }
 
 async function produceStep(stepId: string, templateIds: string[], index: number) {
-  if (!canGenerate.value || !category.value || templateIds.length === 0) return
+  if (!canGenerateStep(stepId) || !category.value || templateIds.length === 0) return
   const version = draftVersion
   busy.value = true
   message.value = ''
@@ -245,7 +275,9 @@ async function produceStep(stepId: string, templateIds: string[], index: number)
   const failed: string[] = []
   for (const templateId of templateIds) {
     try {
-      rendered.push(await renderOne(templateId))
+      const context = contexts.value.find((item) => item.id === contextKey(stepId, templateId))
+      if (!context) throw new Error('missing-context')
+      rendered.push(await renderOne(context))
     } catch {
       const template = templates.byId(templateId)
       failed.push(template ? displayFileName(template.fileName) : '範本')
@@ -275,22 +307,40 @@ async function produceStep(stepId: string, templateIds: string[], index: number)
 const categoryTemplateIds = computed(() => dedupedIds(visibleSteps.value))
 
 const overviewList = computed(() =>
-  overviewCatalog(categoryTemplateIds.value, temporaryIds.value, (id) => {
-    const item = templates.byId(id)
-    if (!item) return undefined
-    return { id: item.id, fileName: item.fileName, placeholders: item.placeholders }
-  }),
+  generationContexts(visibleSteps.value, temporaryIds.value, (id) => templates.byId(id)),
 )
-
 const checkedOverview = computed(() => checkedTemplates(overviewList.value, unchecked.value))
-const overviewFields = computed(() => inputFields(checkedOverview.value))
-const overviewMissing = computed(() => missingOverviewFields(overviewFields.value, values.value))
+const overviewFields = computed(() => {
+  const needed = new Set(inputFields(checkedOverview.value))
+  return fieldNames.value.filter((name) => needed.has(name))
+})
+const overviewGroups = computed(() => {
+  const seen = new Set<string>()
+  return checkedOverview.value
+    .filter((context) => {
+      const key = scopeKey(context)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .map((context) => ({
+      context,
+      fields: localFieldNames(
+        checkedOverview.value.filter((item) => scopeKey(item) === scopeKey(context)),
+        fieldNames.value,
+      ),
+    }))
+})
+const overviewMissing = computed(() =>
+  missingContextFields(checkedOverview.value, fieldNames.value, values.value, scopedValues.value),
+)
 const canGenerateOverview = computed(
   () => checkedOverview.value.length > 0 && overviewMissing.value.length === 0 && !busy.value,
 )
 const overviewHint = computed(() => {
   if (checkedOverview.value.length === 0) return '請勾選至少一份文件。'
-  if (overviewMissing.value.includes('日期格式')) return '日期不是有效的民國日期。'
+  if (overviewMissing.value.some((name) => name.endsWith('：日期格式')))
+    return '日期不是有效的民國日期。'
   if (overviewMissing.value.length === 0) return ''
   return `請先填寫：${overviewMissing.value.join('、')}。`
 })
@@ -319,19 +369,20 @@ function toggleTemporary(id: string, event: Event) {
   const target = event.target
   if (!(target instanceof HTMLInputElement)) return
   if (categoryTemplateIds.value.includes(id)) return
+  const key = contextKey(null, id)
   if (target.checked) {
     if (!temporaryIds.value.includes(id)) temporaryIds.value = [...temporaryIds.value, id]
-    if (unchecked.value[id]) {
+    if (unchecked.value[key]) {
       const next = { ...unchecked.value }
-      delete next[id]
+      delete next[key]
       unchecked.value = next
     }
     return
   }
   temporaryIds.value = temporaryIds.value.filter((item) => item !== id)
-  if (!unchecked.value[id]) return
+  if (!unchecked.value[key]) return
   const next = { ...unchecked.value }
-  delete next[id]
+  delete next[key]
   unchecked.value = next
 }
 
@@ -347,23 +398,11 @@ async function produceChecked() {
   busy.value = true
   overviewMessage.value = ''
   const selected = checkedOverview.value
-  const filled = applyRocDateFields(valuesForFields(values.value, overviewFields.value))
-  if (!filled) {
-    overviewTone.value = 'warn'
-    overviewMessage.value = '日期不是有效的民國日期。'
-    busy.value = false
-    return
-  }
   const rendered: { name: string; data: Uint8Array }[] = []
   const failed: string[] = []
   for (const template of selected) {
     try {
-      const bytes = await templates.bytesFor(template.id)
-      if (!bytes) throw new Error('missing-template')
-      rendered.push({
-        name: overviewDownloadName(template.fileName),
-        data: renderDocx(bytes, filled),
-      })
+      rendered.push(await renderOne(template))
     } catch {
       failed.push(displayFileName(template.fileName))
     }
@@ -415,6 +454,7 @@ onUnmounted(clearDraft)
   <Teleport to="body">
     <article v-if="printStep" id="sop-print" class="hidden">
       <h1>{{ printStep.title ?? printStep.body }}</h1>
+      <p v-if="printStep.canRunInParallel">此步驟可請其他人同步進行</p>
       <ul>
         <li v-for="(item, i) in printStep.items" :key="i">{{ item }}</li>
       </ul>
@@ -507,13 +547,13 @@ onUnmounted(clearDraft)
         <h2 class="font-semibold">全部範本</h2>
         <p class="mt-2 text-xs text-ink-muted">{{ fieldKeyHint }}：{{ fieldNames.join('、') }}</p>
         <ul class="mt-3 space-y-3">
-          <li v-for="item in linkedTemplates" :key="item.id">
+          <li v-for="item in contexts" :key="item.id">
             <button
               class="btn-ghost text-left text-sm text-accent-ink hover:underline"
-              :disabled="!canGenerate"
-              @click="produceOne('', item.id)"
+              :disabled="!canGenerateStep(item.stepId!)"
+              @click="produceOne(item.stepId!, item.templateId)"
             >
-              {{ displayFileName(item.fileName) }}
+              {{ item.stepTitle }}：{{ displayFileName(item.fileName) }}
             </button>
           </li>
         </ul>
@@ -604,6 +644,22 @@ onUnmounted(clearDraft)
                     </div>
                   </div>
                 </div>
+                <section
+                  v-for="step in basicGroups"
+                  :key="step.id"
+                  :aria-label="`基本資料：${step.title ?? step.body}`"
+                >
+                  <p v-if="localFields(step.id).length" class="mt-3 text-sm">
+                    {{ step.title ?? step.body }}
+                  </p>
+                  <StepFields
+                    :fields="localFields(step.id)"
+                    :values="stepValues(step.id)"
+                    :definitions="category.fields"
+                    :prefix="`base-${step.id}`"
+                    @update="(key, value) => setStepValue(step.id, key, value)"
+                  />
+                </section>
               </details>
             </li>
 
@@ -669,6 +725,18 @@ onUnmounted(clearDraft)
                     </button>
                   </details>
                 </div>
+                <p v-if="step.canRunInParallel" class="mt-2 text-sm">此步驟可請其他人同步進行</p>
+                <StepFields
+                  v-if="!baseIds.has(step.id)"
+                  :fields="localFields(step.id)"
+                  :values="stepValues(step.id)"
+                  :definitions="category.fields"
+                  :prefix="`step-${step.id}`"
+                  @update="(key, value) => setStepValue(step.id, key, value)"
+                />
+                <p v-if="stepMissing(step.id).length" class="mt-2 text-xs text-ink-muted">
+                  請先填寫：{{ stepMissing(step.id).join('、') }}
+                </p>
                 <p v-if="templatesFor(step).length === 0" class="mt-3 text-sm text-ink-muted">
                   這個步驟還沒有範本。
                 </p>
@@ -678,7 +746,7 @@ onUnmounted(clearDraft)
                       v-if="templatesFor(step).length > 1"
                       type="button"
                       class="btn-primary"
-                      :disabled="!canGenerate"
+                      :disabled="!canGenerateStep(step.id)"
                       @click="produceStep(step.id, step.templateIds, index)"
                     >
                       產生本步驟全部
@@ -705,8 +773,8 @@ onUnmounted(clearDraft)
                       <button
                         type="button"
                         class="btn-secondary shrink-0 px-3 py-2"
-                        :title="generateHint || '產出 .docx'"
-                        :disabled="!canGenerate"
+                        :title="stepMissing(step.id).join('、') || '產出 .docx'"
+                        :disabled="!canGenerateStep(step.id)"
                         @click="produceOne(step.id, item.id)"
                       >
                         產生
@@ -740,9 +808,17 @@ onUnmounted(clearDraft)
         >
           <h2 class="text-base font-semibold text-ink-strong">全部文件總覽</h2>
           <p class="mt-1 text-sm leading-6 text-stone-600">
-            列出這個流程各步驟的範本，同一份只出現一次，預設全部勾選。取消勾選，或從範本庫暫時加入其他範本，只影響這次產生，不會改動流程設定。欄位與範本步驟的基本資料共用，離開這個流程或登出後清除，也不會送到服務。
+            列出這個流程各步驟的範本，依所屬步驟分列，預設全部勾選。取消勾選，或從範本庫暫時加入其他範本，只影響這次產生，不會改動流程設定。欄位與範本步驟的基本資料共用，離開這個流程或登出後清除，也不會送到服務。
           </p>
 
+          <ol aria-label="完整流程總覽" class="mt-4 space-y-2">
+            <li v-for="step in visibleSteps" :key="step.id">
+              <span>{{ step.title ?? step.body }}</span>
+              <span v-if="step.canRunInParallel" class="ml-2 text-sm"
+                >此步驟可請其他人同步進行</span
+              >
+            </li>
+          </ol>
           <div class="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
             <div>
               <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
@@ -770,14 +846,17 @@ onUnmounted(clearDraft)
                     />
                     <span class="min-w-0">
                       <span class="block break-all font-medium text-ink">
-                        {{ displayFileName(item.fileName) }}
+                        {{ item.stepTitle }}：{{ displayFileName(item.fileName) }}
                         <span
-                          v-if="isTemporary(item.id)"
+                          v-if="isTemporary(item.templateId)"
                           class="ml-2 text-xs font-normal text-accent-ink"
                         >
                           本次暫加
                         </span>
                       </span>
+                      <span v-if="item.canRunInParallel" class="block text-sm"
+                        >此步驟可請其他人同步進行</span
+                      >
                       <span class="mt-1 block text-xs text-ink-muted">
                         {{
                           item.placeholders.length > 0
@@ -833,7 +912,7 @@ onUnmounted(clearDraft)
             <div>
               <h3 class="text-sm font-semibold text-ink">基本資料</h3>
               <p class="mt-1 text-sm leading-6 text-stone-600">
-                已勾選範本裡的每個欄位只出現一次。日期與範本步驟共用，預設為台北今天。{{
+                共用欄位只填一次，步驟專屬欄位分開填寫。日期與範本步驟共用，預設為台北今天。{{
                   yearToken
                 }}、{{ monthToken }}、{{ dayToken }}、{{ dateToken }}、{{ dateSlashToken }}
                 都跟這個日期走，不會另外出現輸入欄。
@@ -863,6 +942,23 @@ onUnmounted(clearDraft)
                   />
                 </div>
               </div>
+              <section
+                v-for="group in overviewGroups"
+                :key="scopeKey(group.context)"
+                :aria-label="group.context.stepTitle"
+                class="mt-4"
+              >
+                <p v-if="group.fields.length" class="text-sm font-medium">
+                  {{ group.context.stepTitle }}
+                </p>
+                <StepFields
+                  :fields="group.fields"
+                  :values="localValues(group.context)"
+                  :definitions="category.fields"
+                  :prefix="`overview-${scopeKey(group.context)}`"
+                  @update="(key, value) => setLocal(group.context, key, value)"
+                />
+              </section>
               <div class="mt-4 flex flex-wrap items-center gap-3">
                 <button
                   type="button"

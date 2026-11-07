@@ -108,6 +108,7 @@ export interface FieldDefRecord {
   type: 'text' | 'number'
 }
 export interface StepDetails {
+  canRunInParallel?: boolean
   categoryId?: string
   order?: number
   title?: string
@@ -560,6 +561,11 @@ export function migrate(db: AppDatabase) {
     })()
     migrateModules(db)
     migrateCombinationOrders(db)
+    // Additive settings preserve legacy step rows/details byte for byte.
+    db.exec(`CREATE TABLE IF NOT EXISTS step_parallel_settings (
+      step_id TEXT PRIMARY KEY REFERENCES category_steps(id) ON DELETE CASCADE,
+      can_run_in_parallel INTEGER NOT NULL DEFAULT 0 CHECK(can_run_in_parallel IN (0,1)));
+      INSERT OR IGNORE INTO step_parallel_settings(step_id) SELECT id FROM category_steps;`)
   })()
 }
 
@@ -895,6 +901,14 @@ export function createQueries(db: AppDatabase) {
           note: '',
           variantIds: [],
           ...JSON.parse(details.details),
+          canRunInParallel:
+            (
+              db
+                .prepare(
+                  'SELECT can_run_in_parallel AS enabled FROM step_parallel_settings WHERE step_id = ?',
+                )
+                .get(step.id) as { enabled: number } | undefined
+            )?.enabled === 1,
         }
       })
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
@@ -978,6 +992,11 @@ export function createQueries(db: AppDatabase) {
           step.order ?? input.steps.indexOf(step),
         )
     }
+    for (const step of input.steps)
+      db.prepare(
+        `INSERT INTO step_parallel_settings(step_id, can_run_in_parallel) VALUES (?, ?)
+        ON CONFLICT(step_id) DO UPDATE SET can_run_in_parallel = excluded.can_run_in_parallel`,
+      ).run(step.id, step.canRunInParallel === true ? 1 : 0)
     input.steps.forEach((step, index) =>
       db.prepare('UPDATE category_steps SET details = ? WHERE id = ?').run(
         JSON.stringify({
@@ -1237,9 +1256,26 @@ export function createQueries(db: AppDatabase) {
           input.id,
         )
         if (result.changes === 0) return false
+        const parallelChanges = input.steps.filter((step) => {
+          const previous = db
+            .prepare(
+              'SELECT can_run_in_parallel AS enabled FROM step_parallel_settings WHERE step_id = ?',
+            )
+            .get(step.id) as { enabled: number } | undefined
+          return (previous?.enabled === 1) !== (step.canRunInParallel === true)
+        })
         const created = writeSteps(input.id, input.steps)
         writeDetails(input, created)
         writeAudit(actorUsername, 'category_update', '', '', input.id, input.name)
+        for (const step of parallelChanges)
+          writeAudit(
+            actorUsername,
+            'category_update',
+            '',
+            '',
+            input.id,
+            `step_parallel:${step.id}:${step.canRunInParallel === true}`,
+          )
         return true
       })
       try {

@@ -17,6 +17,7 @@ export interface FieldDef {
   type: 'text' | 'number'
 }
 export interface StepDetails {
+  canRunInParallel?: boolean
   categoryId?: string
   order?: number
   title?: string

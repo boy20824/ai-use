@@ -57,6 +57,7 @@ interface DraftStep {
   key: string
   id?: string
   body: string
+  canRunInParallel: boolean
   items: string
   note: string
   variantIds: string[]
@@ -95,6 +96,7 @@ function blankStep(): DraftStep {
   return {
     key: crypto.randomUUID(),
     body: '',
+    canRunInParallel: false,
     items: '',
     note: '',
     variantIds: [],
@@ -114,6 +116,7 @@ function fillFrom(category: CaseCategory) {
     key: step.id,
     id: step.id,
     body: step.title ?? step.body,
+    canRunInParallel: step.canRunInParallel ?? false,
     items: (step.items ?? []).join('\n'),
     note: step.note ?? '',
     variantIds: [...(step.variantIds ?? [])],
@@ -282,6 +285,7 @@ async function submit() {
       .map((s) => s.trim())
       .filter(Boolean),
     note: step.note.trim(),
+    canRunInParallel: step.canRunInParallel,
     variantIds: step.variantIds,
     templateIds: step.templateIds,
   }))
@@ -447,6 +451,10 @@ async function submit() {
                 class="field mt-2 w-full"
               />
             </label>
+            <label class="mt-3 block text-sm"
+              ><input v-model="step.canRunInParallel" type="checkbox" />
+              此步驟可請其他人同步進行</label
+            >
             <div class="mt-2 flex flex-wrap gap-3">
               <button
                 type="button"
