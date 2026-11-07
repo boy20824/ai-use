@@ -6,6 +6,7 @@ defineProps<{
   disabledReason: string
   title: string
   hint: string
+  compact?: boolean
   accept?: string
 }>()
 
@@ -55,9 +56,10 @@ function onChange(event: Event) {
   <label
     v-else
     class="focus-within:ring-2 focus-within:ring-accent focus-within:ring-offset-2 focus-within:ring-offset-canvas block cursor-pointer rounded-2xl border border-dashed px-5 py-8 text-center transition"
-    :class="
-      dragging ? 'border-ink bg-surface-muted' : 'border-edge bg-surface hover:border-edge-strong'
-    "
+    :class="[
+      compact ? 'compact-upload' : '',
+      dragging ? 'border-ink bg-surface-muted' : 'border-edge bg-surface hover:border-edge-strong',
+    ]"
     @dragenter.prevent="onDragOver"
     @dragover.prevent="onDragOver"
     @dragleave="onDragLeave"
