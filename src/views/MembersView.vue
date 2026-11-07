@@ -146,7 +146,7 @@ onMounted(() => {
   <PageIntro
     eyebrow="管理"
     title="會員管理"
-    description="系統管理員可以新增會員、啟用或停用帳號，並決定誰可以維護勤務流程。停用後，該帳號的登入階段會立即失效。"
+    description="系統管理員可以新增會員、啟用或停用帳號，並決定誰可以維護案件範本。停用後，該帳號的登入階段會立即失效。"
   >
     <button type="button" class="btn-primary" @click="showForm = !showForm">新增會員</button>
   </PageIntro>

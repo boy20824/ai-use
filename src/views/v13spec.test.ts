@@ -160,11 +160,10 @@ describe('workflow acceptance UI', () => {
     }
   })
 
-  it('updates the green completed card and progress and clears input/completion on navigation', async () => {
+  it('shows fixed steps without completion tracking and clears fields on navigation', async () => {
     const router = await mount()
-    await check(input('本步驟已完成'), true)
-    expect(host.querySelector('progress')?.value).toBe(1)
-    expect(host.querySelector('li.bg-emerald-50')?.textContent).toContain('✓ 共同步驟')
+    expect(host.querySelector('progress')).toBeNull()
+    expect(host.textContent).not.toContain('本步驟已完成')
     const field = host.querySelector('input[type="number"]') as HTMLInputElement
     expect(field).not.toBeNull()
     field.value = '0.35'
@@ -173,7 +172,7 @@ describe('workflow acceptance UI', () => {
     await router.push('/categories/another-mock')
     await nextTick()
     expect((host.querySelector('input[type="number"]') as HTMLInputElement).value).toBe('')
-    expect(host.querySelector('progress')?.value).toBe(0)
+    expect(host.querySelector('progress')).toBeNull()
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
   })

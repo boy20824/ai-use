@@ -5,7 +5,8 @@ import EmptyState from '@/components/EmptyState.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
-import { formatStoredDate } from '@/utils/rocDate'
+import CategoryView from './CategoryView.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import { computed, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -13,6 +14,10 @@ const categories = useCategoryStore()
 const session = useSessionStore()
 const keyword = ref('')
 const group = ref<CategoryGroup>('criminal')
+const selection = ref('')
+const selected = computed(
+  () => visible.value.find((item) => item.id === selection.value) ?? visible.value[0],
+)
 
 const visible = computed(() => {
   const query = keyword.value.trim().toLocaleLowerCase()
@@ -31,23 +36,22 @@ const visible = computed(() => {
 
 <template>
   <PageIntro
-    eyebrow="工作台"
-    title="勤務流程"
-    description="流程由系統管理員或被授權可維護流程的使用者建立，例如竊盜案、毀損案。進入工作台後可依步驟產生文件，或在全部文件總覽一次勾選。"
+    title="案件範本"
+    description="依分類選擇案件類別，查看固定範本步驟與各步驟使用的範本。"
   >
     <RouterLink
       v-if="session.canEditCategory && categories.total > 0"
       to="/categories/new"
       class="btn-primary"
     >
-      新增勤務流程
+      新增案件範本
     </RouterLink>
   </PageIntro>
 
   <div
-    class="mb-4 inline-flex flex-wrap gap-1.5 rounded-card bg-tone-neutral p-1"
+    class="group-tabs mb-5 inline-flex flex-wrap gap-1 rounded-control bg-tone-neutral/60 p-1"
     role="tablist"
-    aria-label="勤務分類"
+    aria-label="案件分類"
   >
     <button
       v-for="(label, key) in categoryGroups"
@@ -55,7 +59,9 @@ const visible = computed(() => {
       role="tab"
       :aria-selected="group === key"
       class="focus-control rounded-control px-3 py-2 text-sm font-medium"
-      :class="group === key ? 'bg-ink text-white' : 'text-ink-muted hover:bg-surface-muted'"
+      :class="
+        group === key ? 'bg-surface text-ink shadow-card' : 'text-ink-muted hover:bg-surface-muted'
+      "
       @click="group = key"
     >
       {{ label }}
@@ -64,60 +70,62 @@ const visible = computed(() => {
   <p v-if="categories.error" class="mb-4 text-sm text-tone-danger-ink" role="alert">
     {{ categories.error }}
   </p>
-  <p v-if="!categories.ready" class="text-sm text-ink-muted">正在讀取勤務流程。</p>
+  <p v-if="!categories.ready" class="text-sm text-ink-muted">正在讀取案件範本。</p>
 
   <EmptyState
     v-else-if="categories.total === 0"
-    title="還沒有勤務流程"
+    title="還沒有案件範本"
     description="建立第一個流程後，就可以寫下填寫步驟，並從範本庫選取 Word 範本。範本會集中保存，刪除流程不會刪除檔案。"
   >
     <RouterLink v-if="session.canEditCategory" to="/categories/new" class="btn-primary">
-      新增勤務流程
+      新增案件範本
     </RouterLink>
     <p v-else class="text-sm text-stone-600">請由系統管理員或被授權的使用者新增。</p>
   </EmptyState>
 
   <template v-else>
-    <div class="mb-6 max-w-md">
-      <label for="category-search" class="block text-sm font-medium text-stone-800">搜尋</label>
-      <input
-        id="category-search"
-        v-model="keyword"
-        type="search"
-        name="category-search"
-        placeholder="流程名稱或簡述"
-        class="field mt-2 w-full"
-      />
-    </div>
-
-    <EmptyState
-      v-if="visible.length === 0"
-      title="沒有符合的流程"
-      description="請改用其他關鍵字，或清空搜尋後看全部流程。"
-    />
-
-    <section v-else class="grid gap-4 md:grid-cols-2" aria-label="勤務流程">
-      <RouterLink
-        v-for="item in visible"
-        :key="item.id"
-        :to="`/categories/${item.id}`"
-        class="flex h-full flex-col rounded-card border border-edge bg-surface p-5 shadow-card transition-colors hover:border-edge-strong focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    <div class="case-browser">
+      <label v-if="visible.length" class="mobile-case-select"
+        ><span class="sr-only">選擇案件類別</span
+        ><select
+          class="field w-full"
+          :value="selected?.id"
+          @change="selection = ($event.target as HTMLSelectElement).value"
+        >
+          <option v-for="item in visible" :key="item.id" :value="item.id">
+            {{ item.name }} · {{ item.steps.length }} 個範本步驟
+          </option>
+        </select></label
       >
-        <span class="flex items-center justify-between gap-3">
-          <time class="text-xs text-ink-muted" :datetime="item.updatedAt">{{
-            formatStoredDate(item.updatedAt)
-          }}</time>
-        </span>
-        <h2 class="mt-3 text-lg font-semibold tracking-tight text-ink-strong">{{ item.name }}</h2>
-        <p class="mt-2 flex-1 text-sm leading-6 text-stone-600">
-          {{ item.summary || '尚未填寫簡述' }}
-        </p>
-        <span class="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
-          <span>{{ item.steps.length }} 個步驟</span>
-          <span>{{ item.templateCount }} 份範本</span>
-        </span>
-        <span class="mt-4 text-sm font-medium text-ink">進入工作台</span>
-      </RouterLink>
-    </section>
+      <aside class="data-panel case-selector">
+        <div class="panel-heading"><h2>案件類別</h2></div>
+        <div class="p-3">
+          <label for="category-search" class="sr-only">搜尋案件類別</label
+          ><input
+            id="category-search"
+            v-model="keyword"
+            type="search"
+            placeholder="搜尋案件類別"
+            class="field w-full"
+          />
+        </div>
+        <p v-if="!visible.length" class="p-4 text-sm text-ink-muted">沒有符合的案件類別。</p>
+        <button
+          v-for="item in visible"
+          :key="item.id"
+          type="button"
+          class="case-select-row focus-control"
+          :class="{ selected: selected?.id === item.id }"
+          :aria-pressed="selected?.id === item.id"
+          @click="selection = item.id"
+        >
+          <AppIcon name="folder" /><span
+            ><strong>{{ item.name }}</strong
+            ><small>{{ item.steps.length }} 個範本步驟</small></span
+          ><span>›</span>
+        </button>
+      </aside>
+      <CategoryView v-if="selected" :key="selected.id" :selected-id="selected.id" embedded />
+    </div>
   </template>
 </template>

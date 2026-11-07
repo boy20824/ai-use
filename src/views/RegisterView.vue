@@ -58,7 +58,7 @@ async function submit() {
       <div class="max-w-md">
         <p class="text-3xl font-semibold tracking-tight">註冊後即可產生文件</p>
         <p class="mt-6 text-sm leading-7 text-ink-subtle">
-          新帳號是一般使用者，可以登入並在工作台產生文件。維護勤務流程與會員管理要由系統管理員另外授權。
+          新帳號是一般使用者，可以登入並在工作台產生文件。維護案件範本與會員管理要由系統管理員另外授權。
         </p>
       </div>
     </section>

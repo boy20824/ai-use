@@ -343,7 +343,7 @@ async function submit() {
     const created = await categories.create(input)
     await router.push(`/categories/${created.id}`)
   } catch (cause) {
-    formError.value = cause instanceof Error ? cause.message : '無法儲存勤務流程。'
+    formError.value = cause instanceof Error ? cause.message : '無法儲存案件範本。'
   } finally {
     saving.value = false
   }
@@ -353,7 +353,7 @@ async function submit() {
 <template>
   <PageIntro
     eyebrow="工作台"
-    :title="isEdit ? '編輯勤務流程' : '新增勤務流程'"
+    :title="isEdit ? '編輯案件範本' : '新增案件範本'"
     description="名稱必填且不可重複。基本資料（姓名、日期）會固定出現在流程第一步。這裡的步驟可以寫說明，並從範本庫選取要在該步驟產生的文件。"
   >
     <RouterLink
@@ -367,20 +367,20 @@ async function submit() {
   <p v-if="categories.error" class="mb-4 text-sm text-tone-danger-ink" role="alert">
     {{ categories.error }}
   </p>
-  <p v-if="!categories.ready" class="text-sm text-ink-muted">正在讀取勤務流程。</p>
+  <p v-if="!categories.ready" class="text-sm text-ink-muted">正在讀取案件範本。</p>
   <EmptyState
     v-else-if="!session.canEditCategory"
     title="此身分不能建立或編輯流程"
     description="只有系統管理員，或被授權可維護流程的使用者，可以建立或編輯流程、步驟與範本連結。其他已登入的使用者仍可在工作台產生文件。"
   >
-    <RouterLink to="/categories" class="btn-primary"> 回到勤務流程 </RouterLink>
+    <RouterLink to="/categories" class="btn-primary"> 回到案件範本 </RouterLink>
   </EmptyState>
   <EmptyState
     v-else-if="isEdit && !existing"
     title="找不到這個流程"
     description="流程可能已刪除，或連結不完整。"
   >
-    <RouterLink to="/categories" class="btn-primary"> 回到勤務流程 </RouterLink>
+    <RouterLink to="/categories" class="btn-primary"> 回到案件範本 </RouterLink>
   </EmptyState>
 
   <form
