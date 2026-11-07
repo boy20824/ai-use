@@ -46,6 +46,7 @@ export interface CategoryModule {
 export interface CaseCategory {
   baseSteps?: StepRef[]
   modules?: CategoryModule[]
+  combinationOrders?: { moduleIds: string[]; stepIds: string[] }[]
   group?: CategoryGroup
   variants?: Variant[]
   fields?: FieldDef[]

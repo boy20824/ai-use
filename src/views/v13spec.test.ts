@@ -6,6 +6,7 @@ import CategoryView from './CategoryView.vue'
 
 const mocks = vi.hoisted(() => {
   const category = {
+    combinationOrders: [] as { moduleIds: string[]; stepIds: string[] }[],
     id: 'mock-flow',
     name: '模擬流程',
     summary: '',
@@ -308,4 +309,41 @@ describe('workflow acceptance UI', () => {
     await nextTick()
     expect(document.querySelector('#sop-print')).toBeNull()
   })
+})
+
+it('keeps #21 completion checkboxes functional with saved cross-source order and browser-only values', async () => {
+  mocks.category.combinationOrders = [
+    { moduleIds: ['stop', 'crash'], stepIds: ['crash-step', 'common', 'stop-step'] },
+  ]
+  try {
+    const router = await mount()
+    await check(input('肇事'), true)
+    await check(input('攔查'), true)
+    expect(
+      [...host.querySelectorAll('.fixed-step h3')].map((el) => el.textContent?.trim()),
+    ).toEqual(['肇事專屬', '共同步驟', '攔查專屬'])
+    const completion = host.querySelector('[aria-label="共同步驟：已完成"]') as HTMLInputElement
+    await check(completion, true)
+    expect(completion.checked).toBe(true)
+    expect(completion.closest('.fixed-step')?.classList.contains('bg-tone-ok')).toBe(true)
+    await check(completion, false)
+    expect(completion.closest('.fixed-step')?.classList.contains('bg-tone-ok')).toBe(false)
+    await check(completion, true)
+    const field = host.querySelector('input[type="number"]') as HTMLInputElement
+    field.value = '0.35'
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    await router.push('/categories/another-mock')
+    await router.push('/categories/mock-flow')
+    await check(input('攔查'), true)
+    await check(input('肇事'), true)
+    expect(
+      (host.querySelector('[aria-label="共同步驟：已完成"]') as HTMLInputElement).checked,
+    ).toBe(false)
+    expect((host.querySelector('input[type="number"]') as HTMLInputElement).value).toBe('')
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+  } finally {
+    mocks.category.combinationOrders = []
+  }
 })

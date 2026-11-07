@@ -4,6 +4,7 @@ import { createApp, h, nextTick, type App } from 'vue'
 import SopEditor from './SopEditor.vue'
 import type { CaseCategory } from '@/types/domain'
 const mocks = vi.hoisted(() => ({ request: vi.fn(), reload: vi.fn(async () => {}) }))
+vi.mock('./CombinationOrderEditor.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/services/api', () => ({
   apiRequest: mocks.request,
   apiErrorMessage: async () => 'Error',
@@ -77,24 +78,14 @@ it('shows both sections, hides entity deletes for maintainers, and removes only 
     method: 'DELETE',
   })
 })
-it('references the existing ID in a module and reorders all refs in one request', async () => {
+it('keeps source ordering controls but removes reference-existing-step entry points', async () => {
   await mount()
+  expect(host.querySelector('[aria-label="引用既有步驟"]')).toBeNull()
+  expect(host.textContent).not.toContain('引用既有步驟')
   button('引用下移').click()
   await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledOnce())
   expect(mocks.request).toHaveBeenLastCalledWith('/api/categories/mock/order/base', {
     method: 'PUT',
     body: JSON.stringify({ ids: ['t', 's'] }),
-  })
-  button('Mock module').click()
-  await nextTick()
-  const select = host.querySelector('[aria-label="引用既有步驟"]') as HTMLSelectElement
-  select.value = 't'
-  select.dispatchEvent(new Event('change', { bubbles: true }))
-  await nextTick()
-  button('引用既有步驟').click()
-  await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledTimes(2))
-  expect(mocks.request).toHaveBeenLastCalledWith('/api/categories/mock/refs/module%3Am/t', {
-    method: 'PUT',
-    body: JSON.stringify({ stepId: 't', sortOrder: 1 }),
   })
 })

@@ -1,4 +1,4 @@
-import { migrateModules } from './modules.ts'
+import { migrateCombinationOrders, migrateModules } from './modules.ts'
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
@@ -144,6 +144,7 @@ export interface ModuleRecord {
 export interface CategoryRecord {
   baseSteps?: StepRef[]
   modules?: ModuleRecord[]
+  combinationOrders?: { moduleIds: string[]; stepIds: string[] }[]
   group: CategoryGroup
   variants: VariantRecord[]
   fields: FieldDefRecord[]
@@ -558,6 +559,7 @@ export function migrate(db: AppDatabase) {
       UNIQUE(category_id, key));`)
     })()
     migrateModules(db)
+    migrateCombinationOrders(db)
   })()
 }
 
@@ -914,6 +916,16 @@ export function createQueries(db: AppDatabase) {
           'SELECT step_id AS stepId, sort_order AS sortOrder FROM module_step_refs WHERE module_id = ? ORDER BY sort_order, step_id',
         )
         .all(m.id) as StepRef[],
+    }))
+    category.combinationOrders = (
+      db
+        .prepare(
+          'SELECT module_key, step_ids FROM category_combination_orders WHERE category_id = ? ORDER BY module_key',
+        )
+        .all(row.id) as { module_key: string; step_ids: string }[]
+    ).map((order) => ({
+      moduleIds: JSON.parse(order.module_key),
+      stepIds: JSON.parse(order.step_ids),
     }))
     return category
   }

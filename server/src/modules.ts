@@ -55,3 +55,13 @@ export function migrateModules(db: AppDatabase) {
     db.prepare('INSERT INTO config_migrations VALUES (?)').run('sop-modules-v1')
   })()
 }
+
+/** Independent additive setting: step IDs deliberately have no FK so stale IDs can be ignored. */
+export function migrateCombinationOrders(db: AppDatabase) {
+  db.transaction(() => {
+    db.exec(`CREATE TABLE IF NOT EXISTS category_combination_orders (
+      category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+      module_key TEXT NOT NULL, step_ids TEXT NOT NULL,
+      PRIMARY KEY(category_id, module_key));`)
+  })()
+}

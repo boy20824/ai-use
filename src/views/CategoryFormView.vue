@@ -358,6 +358,7 @@ async function submit() {
   <form
     v-else-if="!isEdit || populated"
     class="max-w-3xl rounded-2xl border border-edge bg-surface p-5 shadow-card sm:p-6"
+    :class="{ 'xl:max-w-none': isEdit && wizard === 3 }"
     @submit.prevent="submit"
   >
     <ol class="mb-6 flex gap-3 text-sm" aria-label="編輯進度">
@@ -408,7 +409,7 @@ async function submit() {
     <section v-show="wizard === 2" aria-label="情境模組設定">
       <h2 class="font-semibold">情境模組</h2>
       <p class="mt-2 text-sm">
-        儲存案類後，可新增、引用及排序模組步驟。基本 SOP 固定先加入，再依模組順序合成。
+        儲存案類後，可新增及維護模組步驟，並設定基本 SOP 與所選情境模組的組合專屬順序。
       </p>
     </section>
     <section v-show="wizard === 3">
