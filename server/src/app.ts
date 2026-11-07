@@ -299,6 +299,7 @@ function publicCategory(category: CategoryRecord) {
     variants: category.variants,
     baseSteps: category.baseSteps,
     modules: category.modules,
+    combinationOrders: category.combinationOrders,
     fields: category.fields,
     name: category.name,
     summary: category.summary,
@@ -929,6 +930,65 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     return reply.code(204).send()
   })
 
+  app.put('/api/categories/:id/combination-order', async (request, reply) => {
+    const actor = requireCategoryManager(request, reply, 'category_update', {})
+    if (!actor) return
+    const id = categoryIdSchema.safeParse(requestId(request))
+    const body = z
+      .object({
+        moduleIds: z.array(stepIdSchema).max(10000),
+        stepIds: z
+          .array(stepIdSchema)
+          .max(10000)
+          .refine((ids) => new Set(ids).size === ids.length),
+      })
+      .strict()
+      .safeParse(request.body)
+    if (!id.success || !body.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+    const outcome = db.transaction(() => {
+      const category = queries.getCategory(id.data)
+      if (!category) return { status: 404, code: 'not-found', message: '找不到勤務流程。' }
+      const moduleIds = [...new Set(body.data.moduleIds)].sort()
+      if (
+        moduleIds.some(
+          (moduleId) =>
+            !category.modules?.some((m) => m.id === moduleId && m.categoryId === id.data),
+        )
+      )
+        return { status: 400, code: 'invalid-input', message: '模組須屬於本案類。' }
+      const refs = [
+        ...(category.baseSteps ?? []),
+        ...(category.modules ?? []).filter((m) => moduleIds.includes(m.id)).flatMap((m) => m.steps),
+      ]
+      const expected = new Set(refs.map((r) => r.stepId))
+      if (
+        expected.size !== body.data.stepIds.length ||
+        body.data.stepIds.some((stepId) => !expected.has(stepId)) ||
+        refs.some((r) => !category.steps.some((s) => s.id === r.stepId))
+      )
+        return {
+          status: 400,
+          code: 'invalid-input',
+          message: '排序須完整包含本組合全部步驟，且不可重複或跨案類。',
+        }
+      const key = JSON.stringify(moduleIds)
+      queries.configWrite(
+        id.data,
+        actor.username,
+        `combination_order:${key}:${JSON.stringify(body.data.stepIds)}`,
+        () => {
+          db.prepare(
+            `INSERT INTO category_combination_orders(category_id, module_key, step_ids) VALUES (?, ?, ?)
+          ON CONFLICT(category_id, module_key) DO UPDATE SET step_ids = excluded.step_ids`,
+          ).run(id.data, key, JSON.stringify(body.data.stepIds))
+        },
+      )
+      return { category: publicCategory(queries.getCategory(id.data)!) }
+    })()
+    if ('status' in outcome) return fail(reply, outcome.status!, outcome.code!, outcome.message!)
+    return outcome
+  })
+
   app.put('/api/categories/:id/order/:scope', async (request, reply) => {
     const actor = requireCategoryManager(request, reply, 'category_update', {})
     if (!actor) return
@@ -1154,24 +1214,25 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       if (request.method !== 'POST' && !current.some((v) => v.id === childId))
         return fail(reply, 404, 'not-found', '找不到項目。')
       if (request.method === 'DELETE' && resource === 'steps') {
-        return db.transaction(() => {
+        const outcome = db.transaction(() => {
           const impact = queries.stepImpact(childId)
           if (impact.base.length || impact.modules.length)
-            return reply.code(409).send({ message: '步驟仍被引用，請先移除引用。', impact })
+            return { status: 409, body: { message: '步驟仍被引用，請先移除引用。', impact } }
           const confirmed = z
             .object({ confirm: z.literal(true) })
             .strict()
             .safeParse(request.body)
           if (!confirmed.success)
-            return reply.code(409).send({ message: '請確認刪除步驟及文件關聯。', impact })
+            return { status: 409, body: { message: '請確認刪除步驟及文件關聯。', impact } }
           queries.configWrite(category.id, actor.username, `step_delete:${childId}`, () => {
             db.prepare('DELETE FROM category_steps WHERE id = ? AND category_id = ?').run(
               childId,
               category.id,
             )
           })
-          return reply.code(204).send()
+          return { status: 204, body: undefined }
         })()
+        return reply.code(outcome.status).send(outcome.body)
       }
       const incoming = request.body && typeof request.body === 'object' ? request.body : {}
       const body = { ...current.find((v) => v.id === childId), ...incoming }

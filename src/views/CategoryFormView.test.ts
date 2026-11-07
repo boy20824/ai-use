@@ -3,10 +3,14 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, type App } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import CategoryFormView from './CategoryFormView.vue'
+import type { CaseCategory } from '@/types/domain'
 
-const mocks = vi.hoisted(() => ({ create: vi.fn(async () => ({ id: 'created' })) }))
+const mocks = vi.hoisted(() => ({
+  create: vi.fn(async () => ({ id: 'created' })),
+  byId: vi.fn<() => CaseCategory | undefined>(() => undefined),
+}))
 vi.mock('@/stores/categories', () => ({
-  useCategoryStore: () => ({ ready: true, byId: () => undefined, create: mocks.create }),
+  useCategoryStore: () => ({ ready: true, byId: mocks.byId, create: mocks.create }),
 }))
 vi.mock('@/stores/templates', () => ({
   useTemplateStore: () => ({ items: [], byId: () => undefined }),
@@ -24,6 +28,7 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   mocks.create.mockClear()
+  mocks.byId.mockReset()
   if (execCommandDescriptor) Object.defineProperty(document, 'execCommand', execCommandDescriptor)
   else Reflect.deleteProperty(document, 'execCommand')
 })
@@ -44,22 +49,27 @@ async function submit() {
     .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
   await nextTick()
 }
-async function mountFields() {
+async function mountForm(path = '/categories/new') {
   host = document.createElement('div')
   document.body.append(host)
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: '/categories/new', name: 'category-new', component: CategoryFormView },
-      { path: '/categories/:id/edit', component: { render: () => h('div') } },
+      { path: '/categories/:id/edit', name: 'category-edit', component: CategoryFormView },
+      { path: '/categories/:id', component: { render: () => h('div') } },
       { path: '/categories', component: { render: () => h('div') } },
     ],
   })
-  await router.push('/categories/new')
+  await router.push(path)
   await router.isReady()
   app = createApp({ render: () => h(RouterView) }).use(router)
   app.mount(host)
   await nextTick()
+  return router
+}
+async function mountFields() {
+  await mountForm()
   await type('#category-name', '公共危險')
   await submit()
   expect(button('繼續設定步驟')).toBeDefined()
@@ -84,6 +94,63 @@ it('skips optional variants, derives the key from the trimmed name and copies it
       fields: [expect.objectContaining({ name: '酒測值', key: '酒測值', type: 'text' })],
     }),
   )
+})
+
+it('keeps create views narrow throughout the wizard', async () => {
+  await mountForm()
+  await type('#category-name', '公共危險')
+  for (let step = 1; step <= 3; step++) {
+    expect(host.querySelector('form')?.classList.contains('max-w-3xl')).toBe(true)
+    expect(host.querySelector('form')?.classList.contains('xl:max-w-none')).toBe(false)
+    if (step < 3) await submit()
+  }
+})
+
+it('widens only the existing SOP step and preserves its reorder across internal transitions', async () => {
+  mocks.byId.mockReturnValue({
+    id: 'existing',
+    name: '公共危險',
+    summary: '',
+    updatedAt: '',
+    templateCount: 0,
+    steps: ['A', 'B'].map((id) => ({ id, body: id, templateIds: [] })),
+    baseSteps: ['A', 'B'].map((stepId, sortOrder) => ({ stepId, sortOrder })),
+    modules: [],
+  })
+  const router = await mountForm('/categories/existing/edit')
+  const form = host.querySelector('form')!
+  expect(form.classList.contains('xl:max-w-none')).toBe(false)
+  await submit()
+  expect(form.classList.contains('xl:max-w-none')).toBe(false)
+  await submit()
+  expect(form.classList.contains('max-w-3xl')).toBe(true)
+  expect(form.classList.contains('xl:max-w-none')).toBe(true)
+  const editor = host.querySelector('[aria-label="組合專屬順序"]')!
+  expect(editor.parentElement?.classList.contains('xl:grid-cols-2')).toBe(true)
+  expect(editor.parentElement?.classList.contains('grid-cols-2')).toBe(false)
+  const move = host.querySelector('[aria-label="B：上移"]') as HTMLButtonElement
+  move.click()
+  await nextTick()
+  const order = () =>
+    [...editor.querySelectorAll('[data-step-id]')].map((li) => li.getAttribute('data-step-id'))
+  expect(order()).toEqual(['B', 'A'])
+  button('上一步').click()
+  await nextTick()
+  expect(form.classList.contains('xl:max-w-none')).toBe(false)
+  expect(host.querySelector('[aria-label="組合專屬順序"]')).toBe(editor)
+  button('上一步').click()
+  await nextTick()
+  expect(form.classList.contains('xl:max-w-none')).toBe(false)
+  await submit()
+  const confirm = vi.fn(() => false)
+  vi.stubGlobal('confirm', confirm)
+  await router.push('/categories')
+  expect(router.currentRoute.value.path).toBe('/categories/existing/edit')
+  expect(confirm).toHaveBeenCalledOnce()
+  await submit()
+  expect(form.classList.contains('xl:max-w-none')).toBe(true)
+  expect(order()).toEqual(['B', 'A'])
+  expect(editor.textContent).toContain('順序尚未儲存')
 })
 
 it.each(['unavailable', 'rejected'])(

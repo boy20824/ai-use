@@ -823,3 +823,172 @@ describe('v1.3 workflow spec', () => {
     ).toEqual({ sort_order: 0 })
   })
 })
+
+it('persists isolated combination defaults, validates exact ownership/sets, reconciles stale IDs, and migrates without loss', async () => {
+  const { app, db } = await setup()
+  const admin = await login(app)
+  db.prepare('UPDATE users SET can_manage_categories = 1 WHERE username = ?').run('clerk')
+  const manager = await login(app, 'clerk')
+  const normal = await login(app, 'viewer')
+  const c = await category(app, admin, 'Combination Mock')
+  const other = await category(app, admin, 'Foreign Mock')
+  const base = `/api/categories/${c.id}`
+  const ids: Record<string, string> = {}
+  for (const title of ['A', 'B', 'C', 'D', 'J']) {
+    const response = await request(app, manager, 'POST', `${base}/steps`, { title })
+    expect(response.statusCode).toBe(201)
+    ids[title] = response.json().step.id
+  }
+  for (const [moduleId, title, sortOrder] of [
+    ['alcohol', 'D', 0],
+    ['arrest', 'J', 1],
+  ] as const) {
+    expect(
+      (
+        await request(app, manager, 'POST', `${base}/modules/${moduleId}`, {
+          name: moduleId,
+          sortOrder,
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(
+      (
+        await request(app, manager, 'PUT', `${base}/refs/${moduleId}/${ids[title]}`, {
+          stepId: ids[title],
+          sortOrder: 0,
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(
+      (await request(app, manager, 'DELETE', `${base}/refs/base/${ids[title]}`)).statusCode,
+    ).toBe(200)
+  }
+  const foreignStep = (
+    await request(app, admin, 'POST', `/api/categories/${other.id}/steps`, { title: 'Foreign' })
+  ).json().step.id
+  await request(app, admin, 'POST', `/api/categories/${other.id}/modules/foreign-module`, {
+    name: 'Foreign',
+    sortOrder: 0,
+  })
+  const sourceSnapshot = () =>
+    [
+      'base_step_refs',
+      'module_step_refs',
+      'category_modules',
+      'category_steps',
+      'step_templates',
+      'category_variants',
+    ].map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())
+  const before = sourceSnapshot()
+  const payload = {
+    moduleIds: ['arrest', 'alcohol', 'alcohol'],
+    stepIds: [...'ADBJC'].map((id) => ids[id]!),
+  }
+  expect((await request(app, normal, 'PUT', `${base}/combination-order`, payload)).statusCode).toBe(
+    403,
+  )
+  for (const invalid of [
+    { ...payload, stepIds: payload.stepIds.slice(1) },
+    { ...payload, stepIds: [...payload.stepIds, ids.A] },
+    { ...payload, stepIds: [foreignStep, ...payload.stepIds.slice(1)] },
+    { ...payload, stepIds: ['missing-step', ...payload.stepIds.slice(1)] },
+    { ...payload, moduleIds: ['foreign-module'] },
+    { ...payload, moduleIds: ['missing-module'] },
+    { ...payload, caseValues: { mock: 'do not accept' } },
+  ])
+    expect(
+      (await request(app, manager, 'PUT', `${base}/combination-order`, invalid)).statusCode,
+    ).toBe(400)
+  expect(db.prepare('SELECT * FROM category_combination_orders').all()).toEqual([])
+  expect(
+    (await request(app, manager, 'PUT', `${base}/combination-order`, payload)).statusCode,
+  ).toBe(200)
+  expect(db.prepare('SELECT module_key, step_ids FROM category_combination_orders').get()).toEqual({
+    module_key: '["alcohol","arrest"]',
+    step_ids: JSON.stringify(payload.stepIds),
+  })
+  const load = async () => (await request(app, normal, 'GET', base)).json().category
+  expect((await load()).combinationOrders).toEqual([
+    { moduleIds: ['alcohol', 'arrest'], stepIds: payload.stepIds },
+  ])
+  expect((await load()).baseSteps.map((r: { stepId: string }) => r.stepId)).toEqual([
+    ids.A,
+    ids.B,
+    ids.C,
+  ])
+  expect(sourceSnapshot()).toEqual(before)
+  const baseOnly = { moduleIds: [], stepIds: [...'CBA'].map((id) => ids[id]!) }
+  expect(
+    (await request(app, manager, 'PUT', `${base}/combination-order`, baseOnly)).statusCode,
+  ).toBe(200)
+  expect((await load()).combinationOrders).toHaveLength(2)
+  // Repeated migration preserves existing config, entities, references, and documents.
+  const orders = db.prepare('SELECT * FROM category_combination_orders ORDER BY module_key').all()
+  db.exec('DROP TABLE category_combination_orders')
+  migrate(db)
+  migrate(db)
+  expect(sourceSnapshot()).toEqual(before)
+  for (const row of orders as { category_id: string; module_key: string; step_ids: string }[])
+    db.prepare('INSERT INTO category_combination_orders VALUES (?, ?, ?)').run(
+      row.category_id,
+      row.module_key,
+      row.step_ids,
+    )
+  migrate(db)
+  migrate(db)
+  expect(db.prepare('SELECT * FROM category_combination_orders ORDER BY module_key').all()).toEqual(
+    orders,
+  )
+  expect(sourceSnapshot()).toEqual(before)
+  expect(db.pragma('foreign_key_check')).toEqual([])
+  // Audit failure rolls back the upsert as well.
+  db.exec(
+    "CREATE TRIGGER fail_combo_audit BEFORE INSERT ON audit_log WHEN NEW.detail LIKE 'combination_order:%' BEGIN SELECT RAISE(ABORT, 'Mock audit failure'); END;",
+  )
+  expect(
+    (
+      await request(app, manager, 'PUT', `${base}/combination-order`, {
+        ...payload,
+        stepIds: [...payload.stepIds].reverse(),
+      })
+    ).statusCode,
+  ).toBe(500)
+  expect(db.prepare('SELECT * FROM category_combination_orders ORDER BY module_key').all()).toEqual(
+    orders,
+  )
+  db.exec('DROP TRIGGER fail_combo_audit')
+  // Removing a reference and deleting its entity cannot invalidate saved configurations.
+  await request(app, manager, 'DELETE', `${base}/refs/alcohol/${ids.D}`)
+  expect(
+    (await request(app, admin, 'DELETE', `${base}/steps/${ids.D}`, { confirm: true })).statusCode,
+  ).toBe(204)
+  expect(db.prepare('SELECT id FROM category_steps WHERE id = ?').get(ids.D)).toBeUndefined()
+  expect((await request(app, manager, 'POST', `${base}/steps`, { title: 'E' })).statusCode).toBe(
+    201,
+  )
+  expect(
+    (await load()).steps.map((s: { id: string; title: string }) => ({ id: s.id, title: s.title })),
+  ).not.toContainEqual({ id: ids.D, title: 'D' })
+  expect((await load()).steps.some((s: { title: string }) => s.title === 'E')).toBe(true)
+  expect(db.prepare('SELECT * FROM category_combination_orders ORDER BY module_key').all()).toEqual(
+    orders,
+  )
+  expect(
+    db
+      .prepare(
+        "SELECT actor_username, category_id, detail FROM audit_log WHERE detail LIKE 'combination_order:%' ORDER BY id",
+      )
+      .all(),
+  ).toEqual([
+    {
+      actor_username: 'clerk',
+      category_id: c.id,
+      detail: `combination_order:["alcohol","arrest"]:${JSON.stringify(payload.stepIds)}`,
+    },
+    {
+      actor_username: 'clerk',
+      category_id: c.id,
+      detail: `combination_order:[]:${JSON.stringify(baseOnly.stepIds)}`,
+    },
+  ])
+})
