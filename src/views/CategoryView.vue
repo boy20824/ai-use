@@ -107,7 +107,7 @@ const contexts = computed(() =>
 const mappingIssues = computed(() =>
   category.value
     ? fieldMappingIssues(
-        category.value.fields ?? [],
+        (category.value.fields ?? []).filter((field) => field.scope !== 'base'),
         generationContexts(category.value.steps, [], (id) => templates.byId(id)),
       )
     : [],

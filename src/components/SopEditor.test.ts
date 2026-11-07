@@ -23,6 +23,7 @@ const category: CaseCategory = {
   steps: [
     { id: 's', body: 'Shared Mock', templateIds: [] },
     { id: 't', body: 'Other Mock', templateIds: [] },
+    { id: 'unreferenced', body: 'Retained Mock', templateIds: ['retained-docx'] },
   ],
   baseSteps: [
     { stepId: 's', sortOrder: 0 },
@@ -68,6 +69,15 @@ it('shows both sections, hides entity deletes for maintainers, and removes only 
   await mount()
   expect(host.querySelector('[aria-label="基本 SOP"]')).not.toBeNull()
   expect(host.querySelector('[aria-label="情境模組"]')).not.toBeNull()
+  expect(host.textContent).not.toContain('共用步驟實體（含未引用步驟）')
+  expect(host.querySelector('details')).toBeNull()
+  expect(category.steps).toHaveLength(3)
+  expect(category.steps[2]).toEqual({
+    id: 'unreferenced',
+    body: 'Retained Mock',
+    templateIds: ['retained-docx'],
+  })
+  expect(host.textContent).not.toContain('Retained Mock')
   expect(host.textContent).not.toContain('來源樣態')
   expect(host.textContent).not.toContain('目標樣態')
   expect(host.textContent).not.toContain('刪除共用步驟實體')

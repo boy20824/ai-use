@@ -96,6 +96,7 @@ const variantSchema = z
   .strict()
 const fieldSchema = z
   .object({
+    scope: z.literal('base').optional(),
     id: stepIdSchema,
     categoryId: categoryIdSchema.optional(),
     name: z.string().trim().min(1).max(80).optional(),

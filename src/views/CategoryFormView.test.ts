@@ -79,7 +79,7 @@ async function mountFields() {
   await type('[aria-label="欄位名稱"]', '  酒測值  ')
 }
 
-it('skips optional variants, copies the trimmed key and reports a field with no output', async () => {
+it('skips optional variants, copies the trimmed key and saves a standalone base field', async () => {
   const writeText = vi.fn(async () => {})
   vi.stubGlobal('navigator', { clipboard: { writeText } })
   await mountFields()
@@ -89,9 +89,11 @@ it('skips optional variants, copies the trimmed key and reports a field with no 
   await vi.waitFor(() => expect(button('已複製')).toBeDefined())
   expect(writeText).toHaveBeenCalledWith('{{酒測值}}')
   await submit()
-  expect(mocks.create).not.toHaveBeenCalled()
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{酒測值}}')
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain('偵測到的欄位：無')
+  expect(mocks.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      fields: [expect.objectContaining({ key: '酒測值', name: '酒測值', scope: 'base' })],
+    }),
+  )
 })
 
 it('keeps create views narrow throughout the wizard', async () => {

@@ -2,13 +2,16 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
 import { loadConfig, resolveServerPath, type AppConfig, type SeedPasswords } from './config.ts'
 import { createQueries, migrate, openDatabase } from './db.ts'
 import { templateFilePath } from './files.ts'
 import { seedReferenceData } from './seed.ts'
 import { createShutdown } from './shutdown.ts'
+
+// Configuration tests use only explicit mock env values, never local .env files.
+vi.mock('dotenv', () => ({ config: vi.fn() }))
 
 const passwords: SeedPasswords = {
   clerk: 'clerk-pass',
