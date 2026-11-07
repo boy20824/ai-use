@@ -1,11 +1,11 @@
 import bcrypt from 'bcryptjs'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import PizZip from 'pizzip'
-import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
 import type { AppConfig, SeedPasswords } from './config.ts'
 import { cookieSecureFromEnv } from './config.ts'
@@ -124,7 +124,11 @@ function auth(response: { cookies: { name: string; value: string }[] }, originHe
 
 describe('security controls', () => {
   const databases: AppDatabase[] = []
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(`${'0'.repeat(35)}:0`)))
+  })
   afterEach(() => {
+    vi.unstubAllGlobals()
     for (const db of databases.splice(0)) db.close()
   })
   afterAll(() => {
@@ -151,6 +155,7 @@ describe('security controls', () => {
       expect(short.statusCode).toBe(400)
       expect(tooManyBytes.statusCode).toBe(400)
       expect(wrong.json()).toEqual(short.json())
+      expect(fetch).not.toHaveBeenCalled()
       expect(createQueries(db).findUserByUsername('clerk')!.passwordHash).toBe(original)
       expect((await app.inject({ url: '/api/auth/me', cookies: current.cookies })).statusCode).toBe(
         200,
@@ -163,6 +168,79 @@ describe('security controls', () => {
       await app.close()
     }
   })
+
+  it.each(['compromised', 'unavailable'])(
+    'handles %s breach checks without leaking audit details',
+    async (outcome) => {
+      const { app, db } = await boot()
+      databases.push(db)
+      const newPassword = 'test-only-replacement-password'
+      const sha1 = createHash('sha1').update(newPassword).digest('hex').toUpperCase()
+      const details = 'private upstream response details'
+      vi.mocked(fetch).mockImplementation(async () => {
+        if (outcome === 'unavailable') throw new Error(`${details}:${newPassword}:${sha1}`)
+        return new Response(`${sha1.slice(5)}:42`)
+      })
+      try {
+        const current = auth(await login(app, 'clerk', passwords.clerk))
+        const original = createQueries(db).findUserByUsername('clerk')!.passwordHash
+        const response = await app.inject({
+          method: 'POST',
+          url: '/api/auth/change-password',
+          ...current,
+          payload: { currentPassword: passwords.clerk, newPassword },
+        })
+        expect(response.statusCode).toBe(outcome === 'compromised' ? 400 : 204)
+        const updated = createQueries(db).findUserByUsername('clerk')!.passwordHash
+        if (outcome === 'compromised') {
+          expect(response.json()).toEqual({
+            error: 'breached-password',
+            message: '新密碼曾出現在資料外洩中，請使用其他密碼。',
+          })
+          expect(updated).toBe(original)
+        } else {
+          expect(bcrypt.compareSync(newPassword, updated)).toBe(true)
+        }
+        const audit = db.prepare('SELECT * FROM audit_log').all()
+        expect(
+          db
+            .prepare(
+              'SELECT detail, template_id, file_name, category_id, target_username FROM audit_log WHERE action = ?',
+            )
+            .all('breach_check_unavailable'),
+        ).toEqual(
+          outcome === 'unavailable'
+            ? [
+                {
+                  detail: '',
+                  template_id: '',
+                  file_name: '',
+                  category_id: '',
+                  target_username: '',
+                },
+              ]
+            : [],
+        )
+        for (const secret of [
+          newPassword,
+          passwords.clerk,
+          sha1,
+          sha1.slice(0, 5),
+          sha1.slice(5),
+          original,
+          updated,
+          details,
+        ]) {
+          expect(JSON.stringify(audit)).not.toContain(secret)
+        }
+        expect(
+          (await app.inject({ url: '/api/auth/me', cookies: current.cookies })).statusCode,
+        ).toBe(200)
+      } finally {
+        await app.close()
+      }
+    },
+  )
 
   it('updates the bcrypt hash, revokes other sessions, and retains the current and other users sessions', async () => {
     const { app, db } = await boot()

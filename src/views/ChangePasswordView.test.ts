@@ -4,9 +4,9 @@ import { createApp, nextTick, type App } from 'vue'
 import ChangePasswordView from './ChangePasswordView.vue'
 
 const request = vi.hoisted(() => vi.fn())
-vi.mock('@/services/api', () => ({
+vi.mock('@/services/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/api')>()),
   apiRequest: request,
-  apiErrorMessage: async () => '無法變更密碼，請確認輸入資料後再試。',
 }))
 
 let app: App | undefined
@@ -27,6 +27,7 @@ async function submit() {
   host
     .querySelector('form')!
     .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+  await nextTick()
   await vi.waitFor(() => expect(host.querySelector('button')!.disabled).toBe(false))
   await nextTick()
 }
@@ -76,6 +77,20 @@ describe('change password form', () => {
     await fill('confirm-password', 'replacement-password')
     await submit()
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('無法變更密碼')
+    expect([...host.querySelectorAll('input')].every((input) => input.value === '')).toBe(true)
+  })
+
+  it('displays the breached-password message returned by the API and clears passwords', async () => {
+    const message = '新密碼曾出現在資料外洩中，請使用其他密碼。'
+    request.mockResolvedValue(
+      Response.json({ error: 'breached-password', message }, { status: 400 }),
+    )
+    mount()
+    await fill('current-password', 'current-password')
+    await fill('new-password', 'replacement-password')
+    await fill('confirm-password', 'replacement-password')
+    await submit()
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe(message)
     expect([...host.querySelectorAll('input')].every((input) => input.value === '')).toBe(true)
   })
 })

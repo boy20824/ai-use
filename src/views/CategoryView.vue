@@ -49,6 +49,8 @@ const pickerOpen = ref(false)
 const pickerQuery = ref('')
 const overviewMessage = ref('')
 const overviewTone = ref<'ok' | 'warn'>('ok')
+const completedSteps = ref<string[]>([])
+let draftVersion = 0
 
 const categoryId = computed(() => {
   if (props.selectedId) return props.selectedId
@@ -150,10 +152,23 @@ watch(
   { immediate: true },
 )
 
-watch(categoryId, () => {
-  clearDraft()
-  confirmDelete.value = false
-})
+watch(
+  categoryId,
+  () => {
+    clearDraft()
+    confirmDelete.value = false
+  },
+  { flush: 'sync' },
+)
+
+// A reloaded workflow or replacement template must not inherit old checkmarks.
+watch(
+  [category, () => templates.items],
+  () => {
+    completedSteps.value = []
+  },
+  { flush: 'sync' },
+)
 
 watch(
   () => session.authenticated,
@@ -163,6 +178,9 @@ watch(
 )
 
 function clearDraft() {
+  draftVersion++
+  completedSteps.value = []
+  busy.value = false
   selectedVariants.value = []
   printStep.value = null
   values.value = initialDraftValues()
@@ -204,27 +222,31 @@ async function renderOne(id: string) {
 
 async function produceOne(stepId: string, templateId: string) {
   if (!canGenerate.value) return
+  const version = draftVersion
   busy.value = true
   message.value = ''
   messageStepId.value = stepId
   try {
     const rendered = await renderOne(templateId)
+    if (version !== draftVersion) return
     downloadBytes(rendered.data, rendered.name, templateMimeType)
     messageTone.value = 'ok'
     message.value = `已下載「${rendered.name}」。填寫內容沒有被保存。`
   } catch (error) {
+    if (version !== draftVersion) return
     messageTone.value = 'warn'
     message.value =
       error instanceof Error && error.message === 'invalid-date'
         ? '日期不是有效的民國日期。'
         : '無法產生這份文件。請確認範本裡的欄位寫成雙大括號。'
   } finally {
-    busy.value = false
+    if (version === draftVersion) busy.value = false
   }
 }
 
 async function produceStep(stepId: string, templateIds: string[], index: number) {
   if (!canGenerate.value || !category.value || templateIds.length === 0) return
+  const version = draftVersion
   busy.value = true
   message.value = ''
   messageStepId.value = stepId
@@ -237,6 +259,7 @@ async function produceStep(stepId: string, templateIds: string[], index: number)
       const template = templates.byId(templateId)
       failed.push(template ? displayFileName(template.fileName) : '範本')
     }
+    if (version !== draftVersion) return
   }
   try {
     if (rendered.length === 0) {
@@ -246,6 +269,7 @@ async function produceStep(stepId: string, templateIds: string[], index: number)
     }
     const base = (category.value.name || '範本').replace(/[\\/:*?"<>|]/g, '_')
     const zip = await zipGeneratedFiles(rendered)
+    if (version !== draftVersion) return
     downloadBlob(zip, `${base}-步驟${index + 2}.zip`)
     messageTone.value = failed.length > 0 ? 'warn' : 'ok'
     message.value =
@@ -253,7 +277,7 @@ async function produceStep(stepId: string, templateIds: string[], index: number)
         ? `已下載 ${rendered.length} 份文件。無法產生：${failed.join('、')}。填寫內容沒有被保存。`
         : `已下載 ${rendered.length} 份文件。填寫內容沒有被保存。`
   } finally {
-    busy.value = false
+    if (version === draftVersion) busy.value = false
   }
 }
 
@@ -328,6 +352,7 @@ function onPickerQuery(event: Event) {
 
 async function produceChecked() {
   if (!canGenerateOverview.value || !category.value) return
+  const version = draftVersion
   busy.value = true
   overviewMessage.value = ''
   const selected = checkedOverview.value
@@ -351,6 +376,7 @@ async function produceChecked() {
     } catch {
       failed.push(displayFileName(template.fileName))
     }
+    if (version !== draftVersion) return
   }
   try {
     if (rendered.length === 0) {
@@ -360,6 +386,7 @@ async function produceChecked() {
     }
     const base = (category.value.name || '範本').replace(/[\\/:*?"<>|]/g, '_')
     const zip = await zipGeneratedFiles(rendered)
+    if (version !== draftVersion) return
     downloadBlob(zip, `${base}-勾選文件.zip`)
     overviewTone.value = failed.length > 0 ? 'warn' : 'ok'
     overviewMessage.value =
@@ -367,7 +394,7 @@ async function produceChecked() {
         ? `已下載 ${rendered.length} 份文件。無法產生：${failed.join('、')}。填寫內容沒有被保存。`
         : `已下載 ${rendered.length} 份文件。填寫內容沒有被保存。`
   } finally {
-    busy.value = false
+    if (version === draftVersion) busy.value = false
   }
 }
 
@@ -593,6 +620,7 @@ onUnmounted(clearDraft)
               v-for="(step, index) in visibleSteps"
               :key="step.id"
               class="fixed-step flex gap-4 border-b border-edge py-5"
+              :class="{ 'bg-tone-ok': completedSteps.includes(step.id) }"
             >
               <div class="flex w-8 flex-col items-center">
                 <span
@@ -608,9 +636,24 @@ onUnmounted(clearDraft)
               </div>
               <div class="step-content min-w-0 flex-1">
                 <div class="step-description">
-                  <h3 class="text-sm font-semibold text-ink whitespace-pre-wrap">
+                  <h3
+                    class="text-sm font-semibold text-ink whitespace-pre-wrap"
+                    :class="{ 'line-through': completedSteps.includes(step.id) }"
+                  >
                     {{ step.title ?? step.body }}
                   </h3>
+                  <label
+                    class="mt-2 inline-flex cursor-pointer items-center gap-2 text-sm text-ink"
+                  >
+                    <input
+                      v-model="completedSteps"
+                      type="checkbox"
+                      :value="step.id"
+                      :aria-label="`${step.title ?? step.body}：已完成`"
+                      class="focus-control h-4 w-4"
+                    />
+                    已完成
+                  </label>
                   <details class="step-instructions mt-2 text-xs text-ink-muted">
                     <summary class="focus-control cursor-pointer">步驟說明 / 列印</summary>
                     <ul v-if="step.items?.length" class="mt-3 list-disc pl-5 text-sm">

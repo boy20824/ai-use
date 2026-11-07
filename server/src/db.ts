@@ -20,10 +20,11 @@ export type AuditAction =
   | 'feedback_delete'
   | 'feedback_moderate'
   | 'password_change'
+  | 'breach_check_unavailable'
 
 export type FeedbackStatus = 'pending' | 'in_progress' | 'done'
 
-const auditActionsSql = `'upload', 'delete', 'category_create', 'category_update', 'category_delete', 'member_list', 'member_create', 'member_update', 'feedback_update', 'feedback_delete', 'feedback_moderate', 'password_change'`
+const auditActionsSql = `'upload', 'delete', 'category_create', 'category_update', 'category_delete', 'member_list', 'member_create', 'member_update', 'feedback_update', 'feedback_delete', 'feedback_moderate', 'password_change', 'breach_check_unavailable'`
 
 export type AuditResult = 'allowed' | 'denied'
 
@@ -776,7 +777,7 @@ function needsAuditUpgrade(db: AppDatabase): boolean {
   if (!tableExists(db, 'audit_log')) return false
   const names = new Set(columnNames(db, 'audit_log'))
   if (!names.has('result') || !names.has('detail') || !names.has('target_username')) return true
-  return !tableSql(db, 'audit_log').includes("'password_change'")
+  return !tableSql(db, 'audit_log').includes("'breach_check_unavailable'")
 }
 
 function ensureAuditSchema(db: AppDatabase) {

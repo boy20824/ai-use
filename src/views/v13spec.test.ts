@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createApp, h, nextTick, type App } from 'vue'
+import { createApp, h, nextTick, ref, type App, type Ref } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import CategoryView from './CategoryView.vue'
 
@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => {
         variantIds: ['stop'],
         items: ['檢查證件'],
         note: '主動攔查',
-        templateIds: [],
+        templateIds: [] as string[],
       },
       {
         id: 'common',
@@ -35,7 +35,7 @@ const mocks = vi.hoisted(() => {
         variantIds: [],
         items: ['共同細項'],
         note: '<script>mock</script>',
-        templateIds: [],
+        templateIds: [] as string[],
       },
       {
         id: 'crash-step',
@@ -45,18 +45,28 @@ const mocks = vi.hoisted(() => {
         variantIds: ['crash'],
         items: [],
         note: '',
-        templateIds: [],
+        templateIds: [] as string[],
       },
     ],
   }
-  return { category }
+  return { category, bytesFor: vi.fn(), download: vi.fn() }
 })
 vi.mock('@/stores/categories', () => ({
   useCategoryStore: () => ({ byId: () => mocks.category, ready: true }),
 }))
 vi.mock('@/stores/templates', () => ({
-  useTemplateStore: () => ({ items: [], byId: () => undefined }),
+  useTemplateStore: () => ({
+    items: [],
+    byId: (id: string) =>
+      id === 'test-template' ? { id, fileName: 'test.docx', placeholders: [] } : undefined,
+    bytesFor: mocks.bytesFor,
+  }),
 }))
+vi.mock('@/services/docxTemplates', () => ({
+  renderDocx: () => new Uint8Array(),
+  templateMimeType: 'test/docx',
+}))
+vi.mock('@/utils/download', () => ({ downloadBytes: mocks.download, downloadBlob: mocks.download }))
 vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({
     authenticated: true,
@@ -67,13 +77,18 @@ vi.mock('@/stores/session', () => ({
 
 let app: App | undefined
 let host: HTMLDivElement
-async function mount() {
+async function mount(selectedId?: Ref<string>) {
   host = document.createElement('div')
   document.body.append(host)
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
-      { path: '/categories/:id', component: CategoryView },
+      {
+        path: '/categories/:id',
+        component: selectedId
+          ? { render: () => h(CategoryView, { selectedId: selectedId.value, embedded: true }) }
+          : CategoryView,
+      },
       { path: '/categories', component: { render: () => h('div') } },
     ],
   })
@@ -88,6 +103,8 @@ afterEach(() => {
   app?.unmount()
   host?.remove()
   vi.restoreAllMocks()
+  mocks.bytesFor.mockReset()
+  mocks.download.mockReset()
 })
 function input(label: string) {
   const element = [...host.querySelectorAll('label')]
@@ -160,10 +177,18 @@ describe('workflow acceptance UI', () => {
     }
   })
 
-  it('shows fixed steps without completion tracking and clears fields on navigation', async () => {
+  it('toggles accessible completion checkboxes and clears them and fields on case navigation', async () => {
     const router = await mount()
     expect(host.querySelector('progress')).toBeNull()
-    expect(host.textContent).not.toContain('本步驟已完成')
+    const completed = input('已完成')
+    expect(completed.getAttribute('aria-label')).toBe('共同步驟：已完成')
+    expect(completed.classList.contains('focus-control')).toBe(true)
+    await check(completed, true)
+    expect(host.querySelector('.fixed-step')?.classList.contains('bg-tone-ok')).toBe(true)
+    expect(host.querySelector('.fixed-step h3')?.classList.contains('line-through')).toBe(true)
+    await check(completed, false)
+    expect(host.querySelector('.fixed-step')?.classList.contains('bg-tone-ok')).toBe(false)
+    await check(completed, true)
     const field = host.querySelector('input[type="number"]') as HTMLInputElement
     expect(field).not.toBeNull()
     field.value = '0.35'
@@ -172,10 +197,72 @@ describe('workflow acceptance UI', () => {
     await router.push('/categories/another-mock')
     await nextTick()
     expect((host.querySelector('input[type="number"]') as HTMLInputElement).value).toBe('')
+    expect(input('已完成').checked).toBe(false)
+    await router.push('/categories/mock-flow')
+    expect(input('已完成').checked).toBe(false)
     expect(host.querySelector('progress')).toBeNull()
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
   })
+
+  it('resets completion when the embedded template selection changes', async () => {
+    const selected = ref('mock-flow')
+    await mount(selected)
+    await check(input('已完成'), true)
+    selected.value = 'another-template'
+    await nextTick()
+    expect(input('已完成').checked).toBe(false)
+    selected.value = 'mock-flow'
+    await nextTick()
+    expect(input('已完成').checked).toBe(false)
+  })
+
+  it.each(['resolve', 'reject'])(
+    'ignores stale async generation %s after switching away and back',
+    async (outcome) => {
+      const step = mocks.category.steps[1]!
+      step.templateIds.push('test-template')
+      let resolve!: (value: Uint8Array) => void
+      let reject!: (error: Error) => void
+      mocks.bytesFor.mockReturnValue(
+        new Promise<Uint8Array>((yes, no) => {
+          resolve = yes
+          reject = no
+        }),
+      )
+      try {
+        const router = await mount()
+        await check(input('已完成'), true)
+        for (const field of host.querySelectorAll<HTMLInputElement>(
+          '#panel-steps input[type="text"], #panel-steps input[type="number"]',
+        )) {
+          field.value = field.type === 'number' ? '0.35' : '測試姓名'
+          field.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+        await nextTick()
+        const button = [...host.querySelectorAll('button')].find(
+          (el) => el.textContent?.trim() === '產生',
+        )!
+        button.click()
+        await nextTick()
+        expect(mocks.bytesFor).toHaveBeenCalledOnce()
+        await router.push('/categories/other')
+        await router.push('/categories/mock-flow')
+        expect(input('已完成').checked).toBe(false)
+        await check(input('已完成'), true)
+        if (outcome === 'resolve') resolve(new Uint8Array())
+        else reject(new Error('stale error'))
+        await Promise.resolve()
+        await nextTick()
+        await nextTick()
+        expect(input('已完成').checked).toBe(true)
+        expect(mocks.download).not.toHaveBeenCalled()
+        expect(host.querySelector('.step-content [role="status"]')).toBeNull()
+      } finally {
+        step.templateIds.pop()
+      }
+    },
+  )
 
   it('prints only the chosen step through an escaped print-only document', async () => {
     await mount()

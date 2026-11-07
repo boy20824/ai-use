@@ -31,6 +31,7 @@ import {
   type UserRecord,
 } from './db.ts'
 import { readTemplateBytes, removeTemplateFile, writeTemplateFile } from './files.ts'
+import { checkPasswordBreach } from './breachCheck.ts'
 
 export interface AuthUser {
   id: string
@@ -749,6 +750,14 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     ) {
       denied()
       return fail(reply, 400, 'invalid-input', '無法變更密碼，請確認輸入資料後再試。')
+    }
+    const breach = await checkPasswordBreach(parsed.data.newPassword)
+    if (breach === 'compromised') {
+      denied()
+      return fail(reply, 400, 'breached-password', '新密碼曾出現在資料外洩中，請使用其他密碼。')
+    }
+    if (breach === 'unavailable') {
+      queries.insertAudit(user.username, 'breach_check_unavailable', '', '', '', '')
     }
     const hash = bcrypt.hashSync(parsed.data.newPassword, 10)
     if (!queries.changePassword(record, token, hash)) {
