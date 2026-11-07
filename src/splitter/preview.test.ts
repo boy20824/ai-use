@@ -1,18 +1,19 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { format } from 'prettier'
 import { createPreviewRenderer, type PreviewTarget } from './preview'
-
-const file = (name: string) => new File(['synthetic'], name)
-function target(start = 0, end = 10000, maxWidth = 600, maxHeight = 8192): PreviewTarget {
-  return { canvas: document.createElement('canvas'), start, end, maxWidth, maxHeight }
-}
-function bitmap(width = 828, height = 10000) {
-  return { width, height, close: vi.fn() } as unknown as ImageBitmap & {
-    close: ReturnType<typeof vi.fn>
-  }
-}
+import { bandRows } from './core'
+const source = () => ({ file: new File(['synthetic'], 'fake.png'), width: 17, height: 50001 })
+const target = (start = 0, end = 50001): PreviewTarget => ({
+  canvas: document.createElement('canvas'),
+  start,
+  end,
+  maxWidth: 600,
+  maxHeight: 8192,
+})
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 function drawing() {
   const draw = vi.fn()
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
@@ -20,144 +21,122 @@ function drawing() {
   )
   return draw
 }
-function pending<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (error: Error) => void
-  const promise = new Promise<T>((yes, no) => {
-    resolve = yes
-    reject = no
-  })
-  return { promise, resolve, reject }
-}
-afterEach(() => {
-  vi.restoreAllMocks()
-})
-describe('CSP-compatible local canvas preview lifecycle', () => {
-  it('draws exact source rectangles, bounds backing dimensions, redraws adjusted slices without decoding again and releases every canvas', async () => {
-    const draw = drawing()
-    const image = bitmap()
-    const decode = vi.fn(async () => image)
-    const report = vi.fn()
-    const renderer = createPreviewRenderer(report, decode)
-    const source = { file: file('fake.png'), width: 828, height: 10000 }
-    const full = target()
-    const first = target(0, 1792, 100, 320)
-    const last = target(8960, 10000, 100, 320)
-    renderer.update(source, [full, first, last])
-    await vi.waitFor(() => expect(report).toHaveBeenLastCalledWith('ready', expect.any(String)))
-    expect(decode).toHaveBeenCalledExactlyOnceWith(source.file)
-    expect(draw.mock.calls).toEqual([
-      [image, 0, 0, 828, 10000, 0, 0, 600, 7246],
-      [image, 0, 0, 828, 1792, 0, 0, 100, 216],
-      [image, 0, 8960, 828, 1040, 0, 0, 100, 126],
-    ])
-    const adjusted = target(1, 10000, 100, 320)
-    renderer.update(source, [full, adjusted])
-    expect(decode).toHaveBeenCalledTimes(1)
-    expect(draw).toHaveBeenLastCalledWith(image, 0, 1, 828, 9999, 0, 0, 26, 320)
-    expect([
-      first.canvas.width,
-      first.canvas.height,
-      last.canvas.width,
-      last.canvas.height,
-    ]).toEqual([0, 0, 0, 0])
-    renderer.dispose()
-    expect(image.close).toHaveBeenCalledTimes(1)
-    expect([
-      full.canvas.width,
-      full.canvas.height,
-      adjusted.canvas.width,
-      adjusted.canvas.height,
-    ]).toEqual([0, 0, 0, 0])
-    renderer.dispose()
-    expect(image.close).toHaveBeenCalledTimes(1)
-    mkdirSync('evidence/splitter', { recursive: true })
-    writeFileSync(
-      'evidence/splitter/preview-draw-manifest.json',
-      await format(
-        JSON.stringify({
-          syntheticOnly: true,
-          source: { width: source.width, height: source.height },
-          drawImageArgumentsWithoutBitmap: draw.mock.calls.map((call) => call.slice(1)),
-          originalPixelCoordinates: true,
-          repeatedDecodeForCutAdjustment: false,
-          bitmapClosedExactlyOnce: true,
-          canvasBackingStoresZeroAfterDispose: true,
-          note: 'DOM canvas context and browser image decoder are mocked; these are actual production renderer calls, not a browser screenshot or proof of browser CSP enforcement.',
-        }),
-        { parser: 'json', printWidth: 100 },
-      ),
+describe('cropped local preview', () => {
+  it('uses only sequential cropped bitmaps, bounded backing stores and source row coordinates', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    const draw = drawing(),
+      report = vi.fn(),
+      closed = vi.fn()
+    const decode = vi.fn(
+      async (_file: File, _x: number, _y: number, width: number, height: number) =>
+        ({ width, height, close: closed }) as unknown as ImageBitmap,
     )
+    const renderer = createPreviewRenderer(report, decode)
+    const image = source(),
+      full = target(),
+      crossing = target(16000, 18000)
+    renderer.update(image, [full, crossing])
+    await vi.waitFor(() => expect(report).toHaveBeenLastCalledWith('ready', expect.any(String)))
+    expect(decode.mock.calls.map((call) => call.slice(1))).toEqual([
+      [0, 0, 17, 16384],
+      [0, 16384, 17, 16384],
+      [0, 32768, 17, 16384],
+      [0, 49152, 17, 849],
+    ])
+    expect(full.canvas.height).toBe(2048)
+    expect(draw.mock.calls.some((call) => call[2] === 16000 && call[4] === 384)).toBe(true)
+    expect(draw.mock.calls.some((call) => call[2] === 0 && call[4] === 1616)).toBe(true)
+    expect(closed).toHaveBeenCalledTimes(4)
+    renderer.dispose()
+    expect(full.canvas.width).toBe(0)
+    expect(crossing.canvas.height).toBe(0)
   })
-  it('serializes pending decoding, skips superseded selections, closes stale results and draws only the latest targets', async () => {
-    const draw = drawing()
-    const first = pending<ImageBitmap>()
-    const latest = pending<ImageBitmap>()
-    const decode = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(latest.promise)
-    const renderer = createPreviewRenderer(vi.fn(), decode)
-    const a = { file: file('fake-A.png'), width: 828, height: 10000 }
-    const b = { ...a, file: file('fake-B.png') }
-    const c = { ...a, file: file('fake-C.png') }
-    const staleTarget = target()
-    const latestTarget = target()
-    renderer.update(a, [staleTarget])
-    renderer.update(b, [target()])
-    renderer.update(c, [latestTarget])
-    expect(decode).toHaveBeenCalledTimes(1)
-    const stale = bitmap()
-    first.resolve(stale)
-    await vi.waitFor(() => expect(decode).toHaveBeenCalledTimes(2))
-    expect(decode.mock.calls.map(([f]) => f)).toEqual([a.file, c.file])
-    expect(stale.close).toHaveBeenCalledTimes(1)
-    expect(draw).not.toHaveBeenCalled()
-    const good = bitmap()
-    latest.resolve(good)
-    await vi.waitFor(() => expect(draw).toHaveBeenCalledTimes(1))
-    expect(draw.mock.calls[0][0]).toBe(good)
-    expect(staleTarget.canvas.width).toBe(0)
-    renderer.update(undefined, [])
-    expect(good.close).toHaveBeenCalledTimes(1)
-    expect(latestTarget.canvas.width).toBe(0)
+  it('allocates thumbnail backing only while it intersects the viewport', async () => {
+    drawing()
+    let notify!: (entries: { target: HTMLCanvasElement; isIntersecting: boolean }[]) => void
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(callback: typeof notify) {
+          notify = callback
+        }
+        observe() {}
+        disconnect() {}
+      },
+    )
+    const report = vi.fn()
+    const renderer = createPreviewRenderer(
+      report,
+      async (_f, _x, _y, width, height) => ({ width, height, close() {} }) as ImageBitmap,
+    )
+    const full = target(),
+      thumb = target(16000, 18000)
+    renderer.update(source(), [full, thumb])
+    await vi.waitFor(() => expect(report).toHaveBeenLastCalledWith('ready', expect.any(String)))
+    expect(thumb.canvas.width).toBe(0)
+    report.mockClear()
+    notify([{ target: thumb.canvas, isIntersecting: true }])
+    await vi.waitFor(() => expect(report).toHaveBeenLastCalledWith('ready', expect.any(String)))
+    expect(thumb.canvas.height).toBeGreaterThan(0)
+    notify([{ target: thumb.canvas, isIntersecting: false }])
+    expect(thumb.canvas.height).toBe(0)
     renderer.dispose()
   })
-  it('does not draw or report after unmount; closes the pending bitmap', async () => {
-    const draw = drawing()
-    const wait = pending<ImageBitmap>()
-    const report = vi.fn()
-    const renderer = createPreviewRenderer(report, async () => wait.promise)
-    const canvas = target()
-    renderer.update({ file: file('fake.png'), width: 828, height: 10000 }, [canvas])
+  it('closes stale pending results, serializes selection changes and cleans up on disposal', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    const draw = drawing(),
+      report = vi.fn(),
+      close = vi.fn()
+    let resolve!: (bitmap: ImageBitmap) => void
+    const decode = vi.fn(
+      () =>
+        new Promise<ImageBitmap>((done) => {
+          resolve = done
+        }),
+    )
+    const renderer = createPreviewRenderer(report, decode)
+    const a = source(),
+      b = source(),
+      canvas = target()
+    renderer.update(a, [canvas])
+    renderer.update(b, [target()])
+    await vi.waitFor(() => expect(decode).toHaveBeenCalledTimes(1))
+    resolve({ width: 17, height: bandRows(17), close } as unknown as ImageBitmap)
+    await vi.waitFor(() => expect(decode).toHaveBeenCalledTimes(2))
+    expect(draw).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledTimes(1)
     renderer.dispose()
     report.mockClear()
-    const image = bitmap()
-    wait.resolve(image)
-    await vi.waitFor(() => expect(image.close).toHaveBeenCalledTimes(1))
-    expect(draw).not.toHaveBeenCalled()
+    resolve({ width: 17, height: bandRows(17), close } as unknown as ImageBitmap)
+    await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2))
     expect(report).not.toHaveBeenCalled()
     expect(canvas.canvas.width).toBe(0)
   })
-  it('reports decode and canvas failures, closes bitmaps and permits another selection', async () => {
-    const draw = drawing()
-    const image = bitmap()
+  it('surfaces decoder and canvas failures and releases bitmaps', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    const draw = drawing(),
+      report = vi.fn(),
+      close = vi.fn()
     const decode = vi
       .fn()
       .mockRejectedValueOnce(new Error('synthetic decode error'))
-      .mockResolvedValue(image)
-    const report = vi.fn()
-    const renderer = createPreviewRenderer(report, decode)
-    const source = { file: file('fake.png'), width: 828, height: 10000 }
-    const full = target()
-    renderer.update(source, [full])
+      .mockImplementation(async (_f, _x, _y, width, height) => ({ width, height, close }))
+    const renderer = createPreviewRenderer(report, decode),
+      canvas = target()
+    renderer.update(source(), [canvas])
     await vi.waitFor(() =>
-      expect(report).toHaveBeenLastCalledWith('error', 'synthetic decode error'),
+      expect(report).toHaveBeenLastCalledWith(
+        'error',
+        expect.stringContaining('synthetic decode error'),
+      ),
     )
     draw.mockImplementation(() => {
       throw new Error('synthetic draw error')
     })
-    renderer.update({ ...source, file: file('fake-next.png') }, [full])
+    renderer.update(source(), [canvas])
     await vi.waitFor(() => expect(report).toHaveBeenLastCalledWith('error', 'synthetic draw error'))
-    expect(image.close).toHaveBeenCalledTimes(1)
-    expect(full.canvas.width).toBe(0)
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(canvas.canvas.width).toBe(0)
     renderer.dispose()
   })
 })

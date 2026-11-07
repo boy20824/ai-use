@@ -18,7 +18,7 @@ import {
   type Source,
 } from './core'
 
-const evidence = new URL('../../evidence/splitter/', import.meta.url)
+const evidence = new URL('../../evidence/splitter-long/', import.meta.url)
 mkdirSync(evidence, { recursive: true })
 // Independent decoder verifies the PNG wire format, CRCs and zlib checksum.
 function decode(png: Uint8Array) {
@@ -48,7 +48,9 @@ function decode(png: Uint8Array) {
     if (type === 'IDAT') data.push(body)
     offset += length + 12
   }
-  expect(types).toEqual(['IHDR', 'IDAT', 'IEND'])
+  expect(types[0]).toBe('IHDR')
+  expect(types.at(-1)).toBe('IEND')
+  expect(types.slice(1, -1).every((type) => type === 'IDAT')).toBe(true)
   const raw = inflateSync(Buffer.concat(data))
   expect(raw.length).toBe((width * 4 + 1) * height)
   const pixels = Buffer.alloc(width * height * 4)
@@ -122,9 +124,9 @@ describe('source row splitting and real PNG pipeline', () => {
   })
   it('rejects unsupported headers and excessive dimensions', () => {
     expect(() => dimensions(new TextEncoder().encode('<svg/>'))).toThrow()
-    expect(() => checkDimensions(8193, 10)).toThrow()
-    expect(() => checkDimensions(1, 24001)).toThrow()
-    expect(() => checkDimensions(4000, 4000)).toThrow()
+    expect(() => checkDimensions(8193, 10)).not.toThrow()
+    expect(() => checkDimensions(1, 24001)).not.toThrow()
+    expect(() => checkDimensions(4000, 4000)).not.toThrow()
     const fixture = encodeSlice(pixels(3, 10), 3, 10, { start: 0, end: 10 })
     expect(dimensions(fixture)).toEqual({ width: 3, height: 10 })
   })
@@ -132,9 +134,12 @@ describe('source row splitting and real PNG pipeline', () => {
     const sources = reorder([source(17, 10000, 1), source(23, 3584, 2)], 1, 0)
     sources[0].cuts = moveCut(sources[0].cuts, 0, 13, sources[0].height)
     const calls: number[] = []
-    const decodeSource = async (image: Source) => {
+    const decodeSource = async (image: Source, start: number, end: number) => {
       calls.push(image.id)
-      return pixels(image.width, image.height, image.id)
+      return pixels(image.width, image.height, image.id).subarray(
+        start * image.width * 4,
+        end * image.width * 4,
+      )
     }
     const zipBytes = await makeZip(sources, () => true, decodeSource)
     expect(calls).toEqual([2, 1])

@@ -1,13 +1,11 @@
 import JSZip from 'jszip'
 
 export const SLICE_HEIGHT = 1792
-export const LIMITS = {
-  images: 12,
-  fileBytes: 20 * 1024 ** 2,
-  totalBytes: 40 * 1024 ** 2,
-  pixels: 12_000_000,
-  width: 8192,
-  height: 24000,
+export const LIMITS = { fileBytes: 200 * 1024 ** 2 }
+// Bound application-owned decode/canvas/RGBA buffers; browser codecs may decode more internally.
+export const BAND_BYTES = 16 * 1024 ** 2
+export function bandRows(width: number) {
+  return Math.max(1, Math.min(16384, Math.floor(BAND_BYTES / (width * 4))))
 }
 export interface Source {
   id: number
@@ -70,11 +68,10 @@ export function checkDimensions(width: number, height: number) {
     !Number.isInteger(height) ||
     width < 1 ||
     height < 1 ||
-    width > LIMITS.width ||
-    height > LIMITS.height ||
-    width * height > LIMITS.pixels
+    width > 0x7fffffff ||
+    height > 0x7fffffff
   )
-    throw new Error('圖片超過限制：寬 8192、高 24000、總計 1200 萬像素。')
+    throw new Error('圖片尺寸無效或超過 PNG 格式可表示的範圍。')
 }
 // Inspect raster headers before invoking the browser decoder. SVG is excluded.
 export function dimensions(bytes: Uint8Array): { width: number; height: number } {
@@ -188,57 +185,297 @@ export function encodeSlice(
   }
   return output
 }
-export async function readPixels(source: Source) {
-  const bitmap = await createImageBitmap(source.file)
+// Each PNG is encoded incrementally. Only encoded chunks are retained, never whole-slice RGBA.
+export class PngRows {
+  private parts: BlobPart[]
+  private rows = 0
+  private a = 1
+  private b = 0
+  constructor(
+    private width: number,
+    private height: number,
+  ) {
+    checkDimensions(width, height)
+    const ihdr = new Uint8Array(13)
+    const view = new DataView(ihdr.buffer)
+    view.setUint32(0, width)
+    view.setUint32(4, height)
+    ihdr.set([8, 6, 0, 0, 0], 8)
+    this.parts = [
+      new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+      chunk('IHDR', ihdr),
+      chunk('IDAT', new Uint8Array([0x78, 0x01])),
+    ]
+  }
+  append(rgba: Uint8Array | Uint8ClampedArray) {
+    const stride = this.width * 4
+    const rows = rgba.length / stride
+    if (!Number.isInteger(rows) || this.rows + rows > this.height)
+      throw new Error('切片像素範圍無效。')
+    // Split even an unusually wide row into bounded stored-DEFLATE blocks.
+    let row = 0,
+      column = 0
+    while (row < rows) {
+      const raw = new Uint8Array(Math.min(65535, (rows - row) * (stride + 1) - column))
+      let pos = 0
+      while (pos < raw.length) {
+        if (column === 0) {
+          raw[pos++] = 0
+          column++
+        }
+        const count = Math.min(raw.length - pos, stride + 1 - column)
+        raw.set(rgba.subarray(row * stride + column - 1, row * stride + column - 1 + count), pos)
+        pos += count
+        column += count
+        if (column === stride + 1) {
+          row++
+          column = 0
+        }
+      }
+      for (const byte of raw) {
+        this.a = (this.a + byte) % 65521
+        this.b = (this.b + this.a) % 65521
+      }
+      const block = new Uint8Array(raw.length + 5)
+      block.set([
+        0,
+        raw.length & 255,
+        raw.length >>> 8,
+        ~raw.length & 255,
+        (~raw.length >>> 8) & 255,
+      ])
+      block.set(raw, 5)
+      this.parts.push(chunk('IDAT', block))
+    }
+    this.rows += rows
+  }
+  finish() {
+    if (this.rows !== this.height) throw new Error('切片列數不完整。')
+    const tail = new Uint8Array(9)
+    tail.set([1, 0, 0, 255, 255])
+    new DataView(tail.buffer).setUint32(5, ((this.b << 16) | this.a) >>> 0)
+    this.parts.push(chunk('IDAT', tail), chunk('IEND', new Uint8Array()))
+    const blob = new Blob(this.parts, { type: 'image/png' })
+    this.parts = []
+    return blob
+  }
+}
+export const DECODE_TIMEOUT = 30000
+export type CropDecoder = (
+  file: File,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) => Promise<ImageBitmap>
+export const browserCrop: CropDecoder = (file, x, y, width, height) =>
+  createImageBitmap(file, x, y, width, height, {
+    imageOrientation: 'none',
+    premultiplyAlpha: 'none',
+  })
+// A timed-out browser operation cannot be aborted. Close its late result and do not start
+// another decode in this operation; callers surface an actionable error instead of hanging.
+const decodeQueues = new WeakMap<CropDecoder, Promise<void>>()
+export async function cropBitmap(
+  file: File,
+  y: number,
+  width: number,
+  height: number,
+  decode: CropDecoder = browserCrop,
+) {
+  let expired = false
+  const previous = decodeQueues.get(decode) ?? Promise.resolve()
+  const pending = previous.then(() => {
+    if (expired) throw new Error('等待裁切解碼逾時；請重新載入頁面後重試。')
+    return decode(file, 0, y, width, height)
+  })
+  decodeQueues.set(
+    decode,
+    pending.then(
+      () => {},
+      () => {},
+    ),
+  )
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      pending.then((bitmap) => {
+        if (expired) {
+          bitmap.close()
+          throw new Error('解碼已逾時。')
+        }
+        if (bitmap.width !== width || bitmap.height !== height) {
+          bitmap.close()
+          throw new Error('瀏覽器未能解碼指定裁切範圍；請轉存為 PNG 後重試。')
+        }
+        return bitmap
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          expired = true
+          reject(
+            new Error(
+              '本機圖片裁切解碼逾時（30 秒）。請重新載入頁面，將圖片轉存為 PNG 或分成較小檔案後重試。',
+            ),
+          )
+        }, DECODE_TIMEOUT)
+      }),
+    ])
+  } catch (cause) {
+    throw new Error(
+      `無法處理圖片裁切；瀏覽器可能不支援此尺寸或記憶體不足。請轉存 PNG 或分成較小檔案後重試。${cause instanceof Error ? cause.message : ''}`,
+    )
+  } finally {
+    clearTimeout(timer)
+  }
+}
+export async function readBand(source: Source, start: number, end: number) {
+  const bitmap = await cropBitmap(source.file, start, source.width, end - start)
   const canvas = document.createElement('canvas')
   try {
-    if (bitmap.width !== source.width || bitmap.height !== source.height)
-      throw new Error('圖片尺寸已變更，請重新加入。')
     canvas.width = source.width
-    canvas.height = source.height
+    canvas.height = end - start
     const context = canvas.getContext('2d', { willReadFrequently: true })
-    if (!context) throw new Error('瀏覽器無法建立畫布。')
+    if (!context) throw new Error('瀏覽器無法建立畫布；請縮小圖片寬度後重試。')
     context.drawImage(bitmap, 0, 0)
-    return context.getImageData(0, 0, source.width, source.height).data
+    return context.getImageData(0, 0, source.width, end - start).data
   } finally {
     bitmap.close()
     canvas.width = canvas.height = 0
   }
 }
+export type BandReader = (
+  source: Source,
+  start: number,
+  end: number,
+) => Promise<Uint8Array | Uint8ClampedArray>
 export async function batch(
   images: Source[],
   active: () => boolean,
-  emit: (path: string, png: Uint8Array<ArrayBuffer>) => Promise<void>,
-  decode: (source: Source) => Promise<Uint8Array | Uint8ClampedArray> = readPixels,
+  emit: (path: string, png: Blob) => Promise<void>,
+  decode: BandReader = readBand,
+  only?: { imageIndex: number; sliceIndex: number },
 ) {
   for (let imageIndex = 0; imageIndex < images.length; imageIndex++) {
     if (!active()) return
+    if (only && imageIndex !== only.imageIndex) continue
     const image = images[imageIndex]
-    const rgba = await decode(image)
-    for (const [sliceIndex, slice] of slices(image.height, image.cuts).entries()) {
+    checkDimensions(image.width, image.height)
+    const ranges = slices(image.height, image.cuts)
+    const first = only ? only.sliceIndex : 0
+    const last = only ? only.sliceIndex + 1 : ranges.length
+    if (!ranges[first]) throw new Error('切片不存在。')
+    let sliceIndex = first
+    let encoder = new PngRows(image.width, ranges[first].end - ranges[first].start)
+    const stride = image.width * 4
+    const stop = ranges[last - 1].end
+    for (let start = ranges[first].start; start < stop; start += bandRows(image.width)) {
       if (!active()) return
-      await emit(
-        `${pad(imageIndex)}/${pad(sliceIndex)}.png`,
-        encodeSlice(rgba, image.width, image.height, slice),
-      )
+      const end = Math.min(stop, start + bandRows(image.width))
+      const rgba = await decode(image, start, end)
+      if (!active()) return
+      if (rgba.length !== (end - start) * stride)
+        throw new Error('裁切解碼列數不完整；請轉存 PNG 後重試。')
+      let row = start
+      while (row < end) {
+        const next = Math.min(end, ranges[sliceIndex].end)
+        encoder.append(rgba.subarray((row - start) * stride, (next - start) * stride))
+        row = next
+        if (row === ranges[sliceIndex].end) {
+          if (!active()) return
+          await emit(`${pad(imageIndex)}/${pad(sliceIndex)}.png`, encoder.finish())
+          sliceIndex++
+          if (!active()) return
+          if (sliceIndex < last)
+            encoder = new PngRows(image.width, ranges[sliceIndex].end - ranges[sliceIndex].start)
+        }
+      }
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
     }
   }
 }
+// JSZip's writer emits classic ZIP fields (no ZIP64 generation). Validate actual
+// output representation, not source totals; PNG exports remain unrestricted.
+export function nextZipLayout(
+  previous: { entries: number; local: number; directory: number },
+  path: string,
+  bytes: number,
+) {
+  const length = new TextEncoder().encode(path).length
+  const next = {
+    entries: previous.entries + 1,
+    local: previous.local + 30 + length + bytes + 16,
+    directory: previous.directory + 46 + length,
+  }
+  if (
+    bytes >= 0xffffffff ||
+    next.entries >= 0xffff ||
+    next.local >= 0xffffffff ||
+    next.directory >= 0xffffffff
+  )
+    throw new Error(
+      '輸出超過此 ZIP 編碼器的 ZIP32 格式範圍；請改用逐片 PNG 或將圖片分批下載 ZIP。圖片匯入與 PNG 處理沒有合計容量限制。',
+    )
+  return next
+}
 export async function makeZip(
   images: Source[],
   active: () => boolean,
-  decode: (source: Source) => Promise<Uint8Array | Uint8ClampedArray> = readPixels,
+  decode: BandReader = readBand,
 ) {
   const zip = new JSZip()
+  let layout = { entries: 0, local: 0, directory: 0 }
   await batch(
     images,
     active,
     async (path, png) => {
-      zip.file(path, png, { createFolders: false })
+      // JSZip retains all encoded entries and buffers the final archive. No artificial total cap.
+      layout = nextZipLayout(layout, path, png.size)
+      zip.file(path, await png.arrayBuffer(), { createFolders: false })
     },
     decode,
   )
   if (!active()) return null
-  return zip.generateAsync({ type: 'uint8array', compression: 'STORE' })
+  const bytes = await zip.generateAsync(
+    { type: 'uint8array', compression: 'STORE', streamFiles: true },
+    () => {
+      if (!active()) throw new Error('已取消 ZIP。')
+    },
+  )
+  return active() ? bytes : null
+}
+
+// Read PNG's fixed header or walk JPEG segments with tiny reads, skipping payloads.
+// No full-file arrayBuffer or bitmap probe, even when a JPEG has large APP segments.
+export async function readDimensions(file: File) {
+  const deadline = Date.now() + DECODE_TIMEOUT
+  const read = async (offset: number, length: number) => {
+    if (Date.now() > deadline) throw new Error('讀取圖片標頭逾時；請將圖片轉存為 PNG 後重試。')
+    return new Uint8Array(await file.slice(offset, offset + length).arrayBuffer())
+  }
+  const head = await read(0, 24)
+  if (head[0] !== 255 || head[1] !== 216) return dimensions(head)
+  let offset = 2
+  while (offset + 4 <= file.size) {
+    const marker = await read(offset, 4)
+    if (marker[0] !== 255) break
+    if (marker[1] === 255) {
+      offset++
+      continue
+    }
+    const code = marker[1]
+    if (code === 0xda || code === 0xd9) break
+    if (code === 0x01 || (code >= 0xd0 && code <= 0xd7)) {
+      offset += 2
+      continue
+    }
+    const length = (marker[2] << 8) | marker[3]
+    if (length < 2 || offset + 2 + length > file.size) break
+    if ([0xc0, 0xc1, 0xc2].includes(code) && length >= 8) {
+      const size = await read(offset + 4, 5)
+      return { width: (size[3] << 8) | size[4], height: (size[1] << 8) | size[2] }
+    }
+    offset += length + 2
+  }
+  throw new Error('無法讀取圖片；僅支援有效的 PNG、JPEG。')
 }
