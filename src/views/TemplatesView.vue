@@ -140,7 +140,7 @@ async function onFiles(files: File[]) {
     description="每一份 Word 範本只保存一次，不屬於單一勤務流程。流程透過連結使用這些範本。上傳與連結需要可維護流程的權限，刪除只有系統管理員可以操作。"
   />
 
-  <div class="mb-6">
+  <div class="mb-4">
     <PlaceholderGuide />
     <p class="mt-2 text-xs text-stone-600">
       範本欄位寫法：{{ fieldKeyHint
@@ -155,7 +155,7 @@ async function onFiles(files: File[]) {
     </p>
   </div>
 
-  <div v-if="session.canUpload" class="mb-6">
+  <div v-if="session.canUpload" class="mb-4">
     <FileDropzone
       :enabled="true"
       :disabled-reason="disabledReason"
@@ -217,71 +217,95 @@ async function onFiles(files: File[]) {
 
   <p v-else-if="!templates.ready" class="text-sm text-ink-muted">正在讀取範本庫。</p>
 
-  <section v-else class="overflow-hidden rounded-2xl border border-edge bg-surface shadow-card">
-    <ul class="divide-y divide-stone-200">
-      <li
-        v-for="item in visible"
-        :key="item.id"
-        class="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
-      >
-        <div class="min-w-0">
-          <p class="break-all text-sm font-medium text-ink">
-            {{ displayFileName(item.fileName) }}
-          </p>
-          <p class="mt-1 text-xs leading-5 text-ink-muted">
-            {{ formatBytes(item.sizeBytes) }} · {{ formatStoredDate(item.addedAt) }}
-          </p>
-          <p class="mt-1 text-xs leading-5 text-ink-muted">
-            {{ item.placeholders.length > 0 ? item.placeholders.join('、') : '沒有偵測到欄位' }}
-          </p>
-          <p class="mt-2 text-xs leading-5 text-stone-600">
-            <span>使用於：</span>
-            <template v-if="usageLinks(item).length === 0">尚未被任何步驟使用</template>
+  <section
+    v-else
+    class="overflow-x-auto rounded-card border border-edge bg-surface shadow-card"
+    aria-label="範本清單"
+  >
+    <table class="w-full min-w-[760px] border-collapse text-left text-sm">
+      <thead>
+        <tr class="border-b border-edge bg-surface-muted text-xs text-ink-muted">
+          <th scope="col" class="px-4 py-3">範本檔案</th>
+          <th scope="col" class="px-4 py-3">欄位鍵</th>
+          <th scope="col" class="px-4 py-3">使用於流程</th>
+          <th scope="col" class="px-4 py-3">更新時間</th>
+          <th scope="col" class="px-4 py-3">操作</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-edge">
+        <tr v-for="item in visible" :key="item.id" class="align-top">
+          <td class="max-w-64 px-4 py-4">
+            <p class="break-all font-semibold text-ink">{{ displayFileName(item.fileName) }}</p>
+            <p class="mt-1 text-xs text-ink-muted">{{ formatBytes(item.sizeBytes) }}</p>
+          </td>
+          <td class="max-w-48 px-4 py-4 text-xs leading-6 text-ink-muted">
+            <template v-if="item.placeholders.length > 0">
+              <span
+                v-for="key in item.placeholders"
+                :key="key"
+                class="mr-1 inline-block rounded border border-edge bg-surface-muted px-1.5 font-mono"
+              >
+                {{ key }}
+              </span>
+            </template>
+            <span v-else>沒有偵測到欄位</span>
+          </td>
+          <td class="max-w-64 px-4 py-4 text-xs leading-5">
+            <span v-if="usageLinks(item).length === 0" class="text-ink-muted"
+              >尚未被任何步驟使用</span
+            >
             <template v-else>
               <RouterLink
-                v-for="(link, index) in usageLinks(item)"
+                v-for="link in usageLinks(item)"
                 :key="link.id"
                 :to="`/categories/${link.categoryId}`"
-                class="focus-control text-accent-ink hover:underline"
+                class="focus-control mb-1 block text-accent-ink hover:underline"
               >
-                {{ link.label }}<span v-if="index < usageLinks(item).length - 1">、</span>
+                {{ link.label }}
               </RouterLink>
             </template>
-          </p>
-        </div>
-        <div class="flex flex-wrap items-center gap-3">
-          <span class="text-xs text-ink-muted"
-            >關聯 {{ new Set(item.usages.map((u) => u.categoryId)).size }} 個流程</span
-          >
-          <button
-            v-if="session.canUpload"
-            type="button"
-            :disabled="replacementBusy"
-            class="btn-ghost text-sm text-accent-ink hover:underline"
-            @click="replacing = replacing === item.id ? '' : item.id"
-          >
-            替換
-          </button>
-          <label v-if="replacing === item.id" class="text-xs text-stone-600"
-            >選擇新版 .docx<input
-              type="file"
-              accept=".docx"
-              :disabled="replacementBusy"
-              class="block max-w-52"
-              @change="replaceFile"
-          /></label>
-          <button
-            v-if="session.canDelete"
-            type="button"
-            class="btn-ghost text-sm text-stone-600 hover:text-tone-danger-ink"
-            :aria-label="`移除 ${displayFileName(item.fileName)}`"
-            @click="askRemove(item)"
-          >
-            移除
-          </button>
-        </div>
-      </li>
-    </ul>
+            <span
+              class="mt-2 inline-flex rounded-pill bg-tone-neutral px-2 py-0.5 text-xs text-tone-neutral-ink"
+            >
+              關聯 {{ new Set(item.usages.map((u) => u.categoryId)).size }} 個流程
+            </span>
+          </td>
+          <td class="whitespace-nowrap px-4 py-4 text-xs text-ink-muted">
+            {{ formatStoredDate(item.addedAt) }}
+          </td>
+          <td class="px-4 py-4">
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                v-if="session.canUpload"
+                type="button"
+                :disabled="replacementBusy"
+                class="btn-secondary px-2.5 py-1.5 text-xs"
+                @click="replacing = replacing === item.id ? '' : item.id"
+              >
+                替換
+              </button>
+              <label v-if="replacing === item.id" class="text-xs text-ink-muted"
+                >選擇新版 .docx<input
+                  type="file"
+                  accept=".docx"
+                  :disabled="replacementBusy"
+                  class="block max-w-52"
+                  @change="replaceFile"
+              /></label>
+              <button
+                v-if="session.canDelete"
+                type="button"
+                class="btn-secondary px-2.5 py-1.5 text-xs text-tone-danger-ink"
+                :aria-label="`移除 ${displayFileName(item.fileName)}`"
+                @click="askRemove(item)"
+              >
+                移除
+              </button>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </section>
 
   <div

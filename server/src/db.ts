@@ -19,10 +19,11 @@ export type AuditAction =
   | 'feedback_update'
   | 'feedback_delete'
   | 'feedback_moderate'
+  | 'password_change'
 
 export type FeedbackStatus = 'pending' | 'in_progress' | 'done'
 
-const auditActionsSql = `'upload', 'delete', 'category_create', 'category_update', 'category_delete', 'member_list', 'member_create', 'member_update', 'feedback_update', 'feedback_delete', 'feedback_moderate'`
+const auditActionsSql = `'upload', 'delete', 'category_create', 'category_update', 'category_delete', 'member_list', 'member_create', 'member_update', 'feedback_update', 'feedback_delete', 'feedback_moderate', 'password_change'`
 
 export type AuditResult = 'allowed' | 'denied'
 
@@ -362,6 +363,14 @@ const accountTables = `
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS password_change_attempts (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ip TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS password_attempts_user ON password_change_attempts(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS password_attempts_ip ON password_change_attempts(ip, created_at);
 
   CREATE TABLE IF NOT EXISTS login_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -767,7 +776,7 @@ function needsAuditUpgrade(db: AppDatabase): boolean {
   if (!tableExists(db, 'audit_log')) return false
   const names = new Set(columnNames(db, 'audit_log'))
   if (!names.has('result') || !names.has('detail') || !names.has('target_username')) return true
-  return !tableSql(db, 'audit_log').includes("'member_update'")
+  return !tableSql(db, 'audit_log').includes("'password_change'")
 }
 
 function ensureAuditSchema(db: AppDatabase) {
@@ -1339,6 +1348,53 @@ export function createQueries(db: AppDatabase) {
         return { ok: true, user: mapUser(updated) }
       })
       return apply()
+    },
+    consumePasswordChangeAttempt(userId: string, ip: string, now: number) {
+      return db.transaction(() => {
+        const after = now - 15 * 60_000
+        db.prepare('DELETE FROM password_change_attempts WHERE created_at <= ?').run(after)
+        const counts = db
+          .prepare(
+            `
+          SELECT
+            (SELECT COUNT(*) FROM password_change_attempts WHERE user_id = ?) AS per_user,
+            (SELECT COUNT(*) FROM password_change_attempts WHERE ip = ?) AS per_ip
+        `,
+          )
+          .get(userId, ip) as { per_user: number; per_ip: number }
+        if (counts.per_user >= 5 || counts.per_ip >= 5) return false
+        db.prepare(
+          'INSERT INTO password_change_attempts (user_id, ip, created_at) VALUES (?, ?, ?)',
+        ).run(userId, ip, now)
+        return true
+      })()
+    },
+    changePassword(user: UserRecord, currentSession: string, passwordHash: string) {
+      return db.transaction(() => {
+        const changed = db
+          .prepare(
+            `
+          UPDATE users SET password_hash = ?
+          WHERE id = ? AND password_hash = ? AND active = 1
+            AND EXISTS (SELECT 1 FROM sessions WHERE id = ? AND user_id = ? AND expires_at > ?)
+        `,
+          )
+          .run(
+            passwordHash,
+            user.id,
+            user.passwordHash,
+            currentSession,
+            user.id,
+            new Date().toISOString(),
+          )
+        if (changed.changes !== 1) return false
+        db.prepare('DELETE FROM sessions WHERE user_id = ? AND id <> ?').run(
+          user.id,
+          currentSession,
+        )
+        writeAudit(user.username, 'password_change', '', '', '', '', 'allowed', user.username)
+        return true
+      })()
     },
     insertSession(id: string, userId: string, expiresAt: string) {
       insertSession.run(id, userId, expiresAt)

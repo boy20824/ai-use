@@ -41,7 +41,7 @@ onUnmounted(() => {
 
 <template>
   <div class="flex min-h-dvh items-stretch bg-canvas text-ink">
-    <aside class="hidden w-64 shrink-0 bg-nav md:block">
+    <aside class="hidden w-[248px] shrink-0 bg-nav md:block">
       <div class="sticky top-0 flex h-dvh flex-col">
         <SideNav id="desktop-nav" />
       </div>
@@ -62,7 +62,7 @@ onUnmounted(() => {
 
     <div class="flex min-w-0 flex-1 flex-col">
       <header
-        class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-edge/80 bg-canvas/90 px-4 backdrop-blur md:px-page-x"
+        class="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-edge/80 bg-canvas/90 px-4 backdrop-blur md:px-page-x"
       >
         <div class="flex min-w-0 items-center gap-3">
           <button
@@ -98,7 +98,7 @@ onUnmounted(() => {
       </header>
 
       <main class="flex-1 px-4 py-8 md:px-page-x md:py-page-y">
-        <div class="mx-auto max-w-6xl">
+        <div class="mx-auto max-w-[1120px]">
           <RouterView />
         </div>
       </main>

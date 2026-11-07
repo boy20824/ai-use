@@ -1,9 +1,11 @@
+import bcrypt from 'bcryptjs'
+import { randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import PizZip from 'pizzip'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
 import type { AppConfig, SeedPasswords } from './config.ts'
 import { cookieSecureFromEnv } from './config.ts'
@@ -127,6 +129,176 @@ describe('security controls', () => {
   })
   afterAll(() => {
     rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it('rejects incorrect current passwords and short new passwords without changing credentials', async () => {
+    const { app, db } = await boot()
+    databases.push(db)
+    try {
+      const current = auth(await login(app, 'clerk', passwords.clerk))
+      const original = createQueries(db).findUserByUsername('clerk')!.passwordHash
+      const change = (currentPassword: string, newPassword: string) =>
+        app.inject({
+          method: 'POST',
+          url: '/api/auth/change-password',
+          ...current,
+          payload: { currentPassword, newPassword },
+        })
+      const wrong = await change('incorrect-password', 'new-password-12345')
+      const short = await change(passwords.clerk, 'short')
+      const tooManyBytes = await change(passwords.clerk, '密'.repeat(25))
+      expect(wrong.statusCode).toBe(400)
+      expect(short.statusCode).toBe(400)
+      expect(tooManyBytes.statusCode).toBe(400)
+      expect(wrong.json()).toEqual(short.json())
+      expect(createQueries(db).findUserByUsername('clerk')!.passwordHash).toBe(original)
+      expect((await app.inject({ url: '/api/auth/me', cookies: current.cookies })).statusCode).toBe(
+        200,
+      )
+      const audit = db.prepare("SELECT * FROM audit_log WHERE action = 'password_change'").all()
+      expect(audit).toHaveLength(3)
+      expect(JSON.stringify(audit)).not.toContain(passwords.clerk)
+      expect(JSON.stringify(audit)).not.toContain('incorrect-password')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('updates the bcrypt hash, revokes other sessions, and retains the current and other users sessions', async () => {
+    const { app, db } = await boot()
+    databases.push(db)
+    try {
+      const current = auth(await login(app, 'clerk', passwords.clerk))
+      const otherUser = auth(await login(app, 'viewer', passwords.viewer))
+      const queries = createQueries(db)
+      const user = queries.findUserByUsername('clerk')!
+      const otherTokens = [randomBytes(32).toString('hex'), randomBytes(32).toString('hex')]
+      for (const token of otherTokens) {
+        queries.insertSession(token, user.id, new Date(Date.now() + 60_000).toISOString())
+      }
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/auth/change-password',
+        ...current,
+        payload: { currentPassword: passwords.clerk, newPassword: 'replacement-password-123' },
+      })
+      expect(response.statusCode).toBe(204)
+      expect(response.cookies).toHaveLength(0)
+      const hash = queries.findUserById(user.id)!.passwordHash
+      expect(hash).not.toBe(user.passwordHash)
+      expect(bcrypt.compareSync('replacement-password-123', hash)).toBe(true)
+      expect(bcrypt.compareSync(passwords.clerk, hash)).toBe(false)
+      for (const token of otherTokens) {
+        expect(
+          (await app.inject({ url: '/api/auth/me', cookies: { session: token } })).statusCode,
+        ).toBe(401)
+      }
+      for (const cookies of [current.cookies, otherUser.cookies]) {
+        expect((await app.inject({ url: '/api/auth/me', cookies })).statusCode).toBe(200)
+      }
+      expect(
+        db.prepare("SELECT result FROM audit_log WHERE action = 'password_change'").all(),
+      ).toEqual([{ result: 'allowed' }])
+      const audit = JSON.stringify(db.prepare('SELECT * FROM audit_log').all())
+      expect(audit).not.toContain('replacement-password-123')
+      expect(audit).not.toContain(hash)
+      expect((await login(app, 'clerk', passwords.clerk)).statusCode).toBe(401)
+      expect((await login(app, 'clerk', 'replacement-password-123')).statusCode).toBe(200)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('requires login and CSRF and limits password changes per user and IP across app restarts', async () => {
+    const { app, db } = await boot()
+    databases.push(db)
+    const payload = { currentPassword: 'wrong-password', newPassword: 'replacement-password-123' }
+    const current = auth(await login(app, 'clerk', passwords.clerk))
+    const otherUser = auth(await login(app, 'viewer', passwords.viewer))
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/auth/change-password',
+          ...current,
+          cookies: { csrf: current.cookies.csrf },
+          payload,
+        })
+      ).statusCode,
+    ).toBe(401)
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/auth/change-password',
+          cookies: current.cookies,
+          payload,
+        })
+      ).statusCode,
+    ).toBe(403)
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/auth/change-password',
+            ...current,
+            payload,
+          })
+        ).statusCode,
+      ).toBe(400)
+    }
+    // A different IP cannot bypass the per-user limit; another user cannot bypass the IP limit.
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/auth/change-password',
+          ...current,
+          remoteAddress: '192.0.2.40',
+          payload,
+        })
+      ).statusCode,
+    ).toBe(429)
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/auth/change-password',
+          ...otherUser,
+          payload,
+        })
+      ).statusCode,
+    ).toBe(429)
+    await app.close()
+    const restarted = await buildApp(db, config())
+    const clock = vi.spyOn(Date, 'now')
+    try {
+      expect(
+        (
+          await restarted.inject({
+            method: 'POST',
+            url: '/api/auth/change-password',
+            ...current,
+            payload,
+          })
+        ).statusCode,
+      ).toBe(429)
+      clock.mockReturnValue(Date.now() + 15 * 60_000 + 1)
+      expect(
+        (
+          await restarted.inject({
+            method: 'POST',
+            url: '/api/auth/change-password',
+            ...current,
+            payload,
+          })
+        ).statusCode,
+      ).toBe(400)
+    } finally {
+      clock.mockRestore()
+      await restarted.close()
+    }
   })
 
   it('locks login after repeated failures and limits the request rate', async () => {

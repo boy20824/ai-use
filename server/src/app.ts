@@ -64,6 +64,17 @@ const loginSchema = z
   })
   .strict()
 
+const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1).max(200),
+    newPassword: z
+      .string()
+      .min(12)
+      .max(200)
+      .refine((value) => Buffer.byteLength(value, 'utf8') <= 72),
+  })
+  .strict()
+
 const categoryIdSchema = z.string().regex(/^[a-z0-9-]{1,64}$/)
 const templateIdSchema = z.string().regex(/^[a-zA-Z0-9-]{1,64}$/)
 
@@ -715,6 +726,36 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const user = requireUser(request, reply)
     if (!user) return
     return { user: publicUser(user) }
+  })
+
+  app.post('/api/auth/change-password', async (request, reply) => {
+    const user = requireUser(request, reply)
+    if (!user) return
+    const denied = () =>
+      queries.insertAudit(user.username, 'password_change', '', '', '', '', 'denied', user.username)
+    if (!queries.consumePasswordChangeAttempt(user.id, request.ip, Date.now())) {
+      denied()
+      reply.header('retry-after', 900)
+      return fail(reply, 429, 'rate-limited', '請求過多，請稍後再試。')
+    }
+    const parsed = changePasswordSchema.safeParse(request.body)
+    const record = queries.findUserById(user.id)
+    const token = sessionToken(request, config)
+    if (
+      !parsed.success ||
+      !record ||
+      !token ||
+      !bcrypt.compareSync(parsed.data.currentPassword, record.passwordHash)
+    ) {
+      denied()
+      return fail(reply, 400, 'invalid-input', '無法變更密碼，請確認輸入資料後再試。')
+    }
+    const hash = bcrypt.hashSync(parsed.data.newPassword, 10)
+    if (!queries.changePassword(record, token, hash)) {
+      denied()
+      return fail(reply, 400, 'invalid-input', '無法變更密碼，請確認輸入資料後再試。')
+    }
+    return reply.code(204).send()
   })
 
   app.post('/api/auth/logout', async (request, reply) => {
