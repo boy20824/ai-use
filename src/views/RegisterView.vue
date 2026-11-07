@@ -64,7 +64,9 @@ async function submit() {
     </section>
 
     <section class="flex items-center justify-center bg-canvas px-4 py-10">
-      <div class="w-full max-w-md rounded-3xl border border-edge bg-surface p-6 shadow-card sm:p-8">
+      <div
+        class="w-full max-w-md rounded-3xl registration-card border border-edge bg-surface p-6 shadow-card sm:p-8"
+      >
         <p class="text-xs font-medium tracking-wide text-accent-ink lg:hidden">{{ appName }}</p>
         <h1 class="mt-2 text-2xl font-semibold tracking-tight text-ink-strong">註冊帳號</h1>
         <p class="mt-3 text-sm leading-6 text-stone-600">
