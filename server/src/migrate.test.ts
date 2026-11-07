@@ -35,6 +35,42 @@ const legacySchema = `
 `
 
 describe('category migration', () => {
+  it('upgrades the password-change audit schema and preserves existing events', () => {
+    const db = openDatabase(':memory:')
+    try {
+      migrate(db)
+      const schema = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'audit_log'").get() as {
+        sql: string
+      }
+      db.exec('DROP TABLE audit_log')
+      db.exec(schema.sql.replace(", 'breach_check_unavailable'", ''))
+      createQueries(db).insertAudit(
+        'test-user',
+        'password_change',
+        '',
+        '',
+        '',
+        '',
+        'denied',
+        'test-user',
+      )
+      const original = db.prepare('SELECT * FROM audit_log').all()
+      migrate(db)
+      migrate(db)
+      expect(db.prepare('SELECT * FROM audit_log').all()).toEqual(original)
+      createQueries(db).insertAudit('test-user', 'breach_check_unavailable', '', '', '', '')
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM audit_log WHERE action = 'breach_check_unavailable'",
+          )
+          .get(),
+      ).toEqual({ count: 1 })
+    } finally {
+      db.close()
+    }
+  })
+
   it('deletes only the fixed seeded categories and keeps template files', () => {
     expect([...seededCategoryIds]).toEqual([
       'general-assist',
