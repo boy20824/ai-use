@@ -11,6 +11,6 @@ export function fieldMappingIssues(fields: FieldDef[], templates: OverviewTempla
     .filter((field) => !scanned.includes(field.key))
     .map(
       (field) =>
-        `欄位「${field.name ?? field.key}」的鍵「${field.key}」未出現在關聯範本。${outputHint}請在 Word 使用 {{${field.key}}} 並重新上傳，或移除此未使用的欄位定義。偵測到的欄位：${scanned.join('、') || '無'}。`,
+        `欄位「${field.name ?? field.key}」的鍵「${field.key}」未出現在關聯範本。${outputHint}請在 Word 使用 {{${field.key}}} 並重新上傳，既有定義及映射保留，請確認範本關聯。偵測到的欄位：${scanned.join('、') || '無'}。`,
     )
 }

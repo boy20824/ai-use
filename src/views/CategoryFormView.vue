@@ -10,6 +10,7 @@ import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { displayFileName } from '@/utils/fileName'
 import { fieldMappingIssues } from '@/workbench/fieldMapping'
+import { inputFields } from '@/workbench/overview'
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
@@ -81,6 +82,54 @@ const group = ref<CategoryGroup>('criminal')
 const wizard = ref(1)
 const variants = ref<Variant[]>([])
 const fields = ref<FieldDef[]>([])
+const sopScope = ref('base')
+// Definitions have category-wide keys, not module ownership. Classify only by
+// exact tags on attached base templates; never guess from editable labels.
+function attachedTemplates(stepIds?: Set<string>) {
+  return steps.value
+    .filter((step) => !stepIds || (step.id && stepIds.has(step.id)))
+    .flatMap((step) => step.templateIds)
+    .flatMap((id) => {
+      const template = templates.byId(id)
+      return template ? [template] : []
+    })
+}
+const baseTemplateFields = computed(() =>
+  inputFields(
+    attachedTemplates(
+      isEdit.value ? new Set(existing.value?.baseSteps?.map((ref) => ref.stepId) ?? []) : undefined,
+    ),
+  ),
+)
+const legacyFields = computed(() =>
+  fields.value.filter(
+    (field) =>
+      existing.value?.fields?.some((saved) => saved.id === field.id) &&
+      !baseTemplateFields.value.includes(field.key),
+  ),
+)
+const manualFields = computed(() =>
+  fields.value.filter((field) => !legacyFields.value.includes(field)),
+)
+const legacyIssues = computed(() => fieldMappingIssues(legacyFields.value, attachedTemplates()))
+const scenarioKeys = computed(() =>
+  inputFields(
+    attachedTemplates(
+      new Set(
+        existing.value?.modules?.flatMap((module) => module.steps.map((ref) => ref.stepId)) ?? [],
+      ),
+    ),
+  ),
+)
+function removeField(field: FieldDef) {
+  // A shared base/scenario definition is still an explicit legacy mapping.
+  if (
+    existing.value?.fields?.some((saved) => saved.id === field.id) &&
+    scenarioKeys.value.includes(field.key)
+  )
+    return
+  fields.value = fields.value.filter((entry) => entry !== field)
+}
 const summary = ref('')
 const steps = ref<DraftStep[]>([])
 const populated = ref(false)
@@ -116,7 +165,7 @@ function fillFrom(category: CaseCategory) {
   name.value = category.name
   group.value = category.group ?? 'criminal'
   variants.value = (category.variants ?? []).map((v) => ({ ...v }))
-  const incomingFields = (category.fields ?? []).map((f) => ({ ...f, name: f.name ?? f.key }))
+  const incomingFields = (category.fields ?? []).map((f) => ({ ...f }))
   // Step/module saves reload the same category while manual definitions are still unsaved.
   if (loadedCategoryId !== category.id || JSON.stringify(fields.value) === loadedFields)
     fields.value = incomingFields
@@ -304,18 +353,19 @@ async function submit() {
     formError.value = '請填寫每個步驟的內容，或移除空白步驟。'
     return
   }
-  const mappedFields = fields.value.map((field) => ({
-    ...field,
-    name: field.name?.trim(),
-    key: fieldKey(field),
-  }))
-  const linkedTemplates = [...new Set(prepared.flatMap((step) => step.templateIds))].flatMap(
-    (id) => {
-      const template = templates.byId(id)
-      return template ? [template] : []
-    },
+  const mappedFields = fields.value.map((field) =>
+    legacyFields.value.includes(field)
+      ? { ...field }
+      : { ...field, name: field.name?.trim(), key: fieldKey(field) },
   )
-  const issues = fieldMappingIssues(mappedFields, linkedTemplates)
+  // New/manual base definitions must map to base output. Unmatched retained
+  // legacy entries are reported without preventing unrelated maintenance.
+  const issues = fieldMappingIssues(
+    mappedFields.filter((field) => !legacyFields.value.some((legacy) => legacy.id === field.id)),
+    attachedTemplates(
+      isEdit.value ? new Set(existing.value?.baseSteps?.map((ref) => ref.stepId) ?? []) : undefined,
+    ),
+  )
   if (issues.length) {
     formError.value = issues.join('\n')
     return
@@ -440,7 +490,12 @@ async function submit() {
       </p>
     </section>
     <section v-show="wizard === 3">
-      <SopEditor v-if="isEdit && existing" :category="existing" />
+      <SopEditor
+        v-if="isEdit && existing"
+        :key="existing.id"
+        :category="existing"
+        @scope-change="sopScope = $event"
+      />
       <fieldset v-if="!isEdit" class="mt-6">
         <legend class="text-sm font-medium text-stone-800">基本 SOP</legend>
         <p class="mt-1 text-sm leading-6 text-stone-600">
@@ -593,9 +648,9 @@ async function submit() {
           新增步驟
         </button>
       </fieldset>
-      <fieldset class="mt-6">
-        <legend class="font-semibold">細項欄位</legend>
-        <div v-for="(field, i) in fields" :key="field.id" class="mt-3 grid gap-2 sm:grid-cols-4">
+      <fieldset v-if="sopScope === 'base'" class="mt-6" aria-label="基本 SOP 細項欄位">
+        <legend class="font-semibold">基本 SOP 細項欄位</legend>
+        <div v-for="field in manualFields" :key="field.id" class="mt-3 grid gap-2 sm:grid-cols-4">
           <input
             v-model="field.name"
             aria-label="欄位名稱"
@@ -622,7 +677,11 @@ async function submit() {
           <button
             type="button"
             class="btn-ghost text-sm text-tone-danger-ink"
-            @click="fields.splice(i, 1)"
+            :disabled="
+              !!existing?.fields?.some((saved) => saved.id === field.id) &&
+              scenarioKeys.includes(field.key)
+            "
+            @click="removeField(field)"
           >
             移除欄位
           </button>
@@ -644,10 +703,33 @@ async function submit() {
         <p class="mt-2 text-xs text-ink-muted">
           範本欄位寫法：{{
             fieldKeyHint
-          }}。已儲存的欄位鍵固定，修改名稱只改顯示文字。專屬欄位依關聯範本顯示在步驟內；只有基本 SOP
-          使用的明確欄位鍵才共用。只儲存欄位定義。
+          }}。已儲存的欄位鍵固定，修改名稱只改顯示文字。手動新增只用於基本 SOP；基本 SOP
+          使用的明確欄位鍵才共用。與情境共用的既有定義保留，不提供移除。只儲存欄位定義。
         </p>
       </fieldset>
+      <p v-if="sopScope !== 'base'" class="mt-4 text-sm text-ink-muted">
+        情境欄位由步驟所附 DOCX 的標記自動產生，在工作台對應步驟內填寫。
+      </p>
+      <section v-if="legacyFields.length" class="mt-6" aria-label="既有欄位定義（保留）">
+        <h3 class="font-semibold">既有欄位定義（保留）</h3>
+        <p class="mt-2 text-sm text-ink-muted">
+          以下定義未對應基本 SOP，保留原有名稱、型別及映射；情境欄位仍依 DOCX 自動顯示。
+        </p>
+        <ul class="mt-2 text-sm">
+          <li v-for="field in legacyFields" :key="field.id">
+            {{ field.name ?? field.key }} · <code v-text="'{{' + field.key + '}}'" /> ·
+            {{ field.type }}
+          </li>
+        </ul>
+        <p
+          v-for="issue in legacyIssues"
+          :key="issue"
+          role="alert"
+          class="mt-2 text-sm text-tone-danger-ink"
+        >
+          {{ issue }}
+        </p>
+      </section>
     </section>
 
     <p

@@ -91,6 +91,19 @@ describe('explicit sharing and stable step contexts', () => {
     ).toBe(2)
   })
 
+  it('deduplicates scanned step tags and gives explicit base sharing priority over stale local values', () => {
+    const { category, contexts } = fixture()
+    const all = contexts()
+    const shared = sharedFieldNames(category, all)
+    const f = all.find((context) => context.stepId === 'f')!
+    expect(localFieldNames([f, f], shared)).toEqual(['Y', '未映射'])
+    const scoped = { [scopeKey(f)]: { X: 'stale local X', Y: 'local Y' } }
+    expect(contextValues(f, shared, { X: 'base X', Y: 'stray global Y' }, scoped)).toMatchObject({
+      X: 'base X',
+      Y: 'local Y',
+    })
+  })
+
   it('omits unselected modules from fields, validation and generation; selection is per context', () => {
     const { category, contexts } = fixture()
     const onlyM = contexts(['m'])
