@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { fieldMappingIssues } from '@/workbench/fieldMapping'
 import StepFields from '@/components/StepFields.vue'
 import {
   contextKey,
@@ -102,6 +103,14 @@ function fieldPlaceholder(name: string) {
 
 const contexts = computed(() =>
   generationContexts(visibleSteps.value, [], (id) => templates.byId(id)),
+)
+const mappingIssues = computed(() =>
+  category.value
+    ? fieldMappingIssues(
+        category.value.fields ?? [],
+        generationContexts(category.value.steps, [], (id) => templates.byId(id)),
+      )
+    : [],
 )
 const fieldNames = computed(() =>
   category.value ? sharedFieldNames(category.value, contexts.value) : [],
@@ -534,7 +543,7 @@ onUnmounted(clearDraft)
       <label
         v-for="variant in category.modules"
         :key="variant.id"
-        class="cursor-pointer rounded-full border border-edge px-4 py-2 text-sm"
+        class="scenario-choice cursor-pointer rounded-full border border-edge px-4 py-2 text-sm"
         :class="
           selectedVariants.includes(variant.id) ? 'bg-accent-soft text-accent-ink' : 'bg-surface'
         "
@@ -542,6 +551,9 @@ onUnmounted(clearDraft)
         <input v-model="selectedVariants" type="checkbox" :value="variant.id" /> {{ variant.name }}
       </label>
     </div>
+    <p v-for="issue in mappingIssues" :key="issue" role="alert" class="mb-3 text-tone-danger-ink">
+      {{ issue }}
+    </p>
     <div class="workbench-layout">
       <aside class="workbench-library self-start rounded-2xl border border-edge bg-surface p-4">
         <h2 class="font-semibold">全部範本</h2>

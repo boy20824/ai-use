@@ -9,6 +9,7 @@ import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { displayFileName } from '@/utils/fileName'
+import { fieldMappingIssues } from '@/workbench/fieldMapping'
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
@@ -16,7 +17,10 @@ const fieldKeyHint = '{{欄位鍵}}'
 const copiedPlaceholder = ref('')
 const copyError = ref('')
 function fieldKey(field: FieldDef) {
-  return (field.name ?? field.key).trim()
+  return (field.key || field.name || '')
+    .trim()
+    .replace(/^\{\{(.*)\}\}$/u, '$1')
+    .trim()
 }
 function fieldPlaceholder(field: FieldDef) {
   return `{{${fieldKey(field)}}}`
@@ -80,6 +84,8 @@ const fields = ref<FieldDef[]>([])
 const summary = ref('')
 const steps = ref<DraftStep[]>([])
 const populated = ref(false)
+let loadedCategoryId = ''
+let loadedFields = '[]'
 const saving = ref(false)
 const formError = ref('')
 const formNotice = ref('')
@@ -110,7 +116,12 @@ function fillFrom(category: CaseCategory) {
   name.value = category.name
   group.value = category.group ?? 'criminal'
   variants.value = (category.variants ?? []).map((v) => ({ ...v }))
-  fields.value = (category.fields ?? []).map((f) => ({ ...f, name: f.name ?? f.key }))
+  const incomingFields = (category.fields ?? []).map((f) => ({ ...f, name: f.name ?? f.key }))
+  // Step/module saves reload the same category while manual definitions are still unsaved.
+  if (loadedCategoryId !== category.id || JSON.stringify(fields.value) === loadedFields)
+    fields.value = incomingFields
+  loadedCategoryId = category.id
+  loadedFields = JSON.stringify(incomingFields)
   summary.value = category.summary
   steps.value = category.steps.map((step) => ({
     key: step.id,
@@ -293,14 +304,26 @@ async function submit() {
     formError.value = '請填寫每個步驟的內容，或移除空白步驟。'
     return
   }
+  const mappedFields = fields.value.map((field) => ({
+    ...field,
+    name: field.name?.trim(),
+    key: fieldKey(field),
+  }))
+  const linkedTemplates = [...new Set(prepared.flatMap((step) => step.templateIds))].flatMap(
+    (id) => {
+      const template = templates.byId(id)
+      return template ? [template] : []
+    },
+  )
+  const issues = fieldMappingIssues(mappedFields, linkedTemplates)
+  if (issues.length) {
+    formError.value = issues.join('\n')
+    return
+  }
   const input = {
     name: name.value.trim(),
     group: group.value,
-    fields: fields.value.map((field) => ({
-      ...field,
-      name: field.name?.trim(),
-      key: fieldKey(field),
-    })),
+    fields: mappedFields,
     summary: summary.value.trim(),
     steps: prepared,
   }
@@ -619,7 +642,10 @@ async function submit() {
           {{ copyError }}
         </p>
         <p class="mt-2 text-xs text-ink-muted">
-          範本欄位寫法：{{ fieldKeyHint }}。只儲存欄位定義。
+          範本欄位寫法：{{
+            fieldKeyHint
+          }}。已儲存的欄位鍵固定，修改名稱只改顯示文字。專屬欄位依關聯範本顯示在步驟內；只有基本 SOP
+          使用的明確欄位鍵才共用。只儲存欄位定義。
         </p>
       </fieldset>
     </section>
