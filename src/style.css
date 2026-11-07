@@ -819,6 +819,10 @@
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+  padding-left: 1.5rem;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .case-workbench .scenario-choice > input[type='checkbox'] {
   flex: none;

@@ -43,8 +43,8 @@ vi.mock('@/utils/download', () => ({
 }))
 let app: App | undefined
 let host: HTMLDivElement
-// The requested /workspace/evidence is read-only in this executor. Override in a writable executor.
-const evidence = process.env.STEP_FIELDS_EVIDENCE_DIR || '/workspace/ai-use/evidence/step-fields'
+// Mock evidence is written locally; the coordinator copies it to /workspace/evidence/scenario-auto.
+const evidence = '/workspace/ai-use/evidence/scenario-auto'
 function snapshot(name: string) {
   mkdirSync(evidence, { recursive: true })
   const clone = host.cloneNode(true) as HTMLElement
@@ -75,6 +75,9 @@ function assertScenarioAlignment() {
   try {
     const labels = host.querySelectorAll('[aria-label="情境模組選擇"] > label')
     expect(labels).toHaveLength(2)
+    expect(host.querySelector('[aria-label="情境模組選擇"]')?.classList.contains('flex-wrap')).toBe(
+      true,
+    )
     const checks = [...labels].map((label) => {
       const checkbox = label.querySelector('input')!
       expect(checkbox.type).toBe('checkbox')
@@ -84,6 +87,10 @@ function assertScenarioAlignment() {
       expect(labelStyle.display).toBe('inline-flex')
       expect(labelStyle.alignItems).toBe('center')
       expect(labelStyle.gap).toBe('0.5rem')
+      expect(labelStyle.paddingLeft).toBe('24px')
+      expect(labelStyle.maxWidth).toBe('100%')
+      expect(labelStyle.minWidth).toBe('0')
+      expect(labelStyle.overflowWrap).toBe('anywhere')
       expect(checkboxStyle.flexGrow).toBe('0')
       expect(checkboxStyle.flexShrink).toBe('0')
       expect(checkboxStyle.margin).toBe('0px')
@@ -94,6 +101,9 @@ function assertScenarioAlignment() {
         display: labelStyle.display,
         alignItems: labelStyle.alignItems,
         gap: labelStyle.gap,
+        paddingLeft: labelStyle.paddingLeft,
+        maxWidth: labelStyle.maxWidth,
+        overflowWrap: labelStyle.overflowWrap,
         flexGrow: checkboxStyle.flexGrow,
         flexShrink: checkboxStyle.flexShrink,
         margin: checkboxStyle.margin,
@@ -163,7 +173,7 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
     summary: '',
     updatedAt: '',
     templateCount: 3,
-    fields: [],
+    fields: [{ id: 'legacy-y', key: 'Y', name: 'Mock Y label', type: 'number' }],
     steps: [
       { id: 'base', body: 'Base Mock', templateIds: ['base'] },
       { id: 'd', body: 'D Mock', templateIds: [] },
@@ -214,6 +224,7 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
     routes: [
       { path: '/categories/:id/edit', name: 'category-edit', component: CategoryFormView },
       { path: '/categories/:id', component: CategoryView },
+      { path: '/categories', component: { render: () => h('div') } },
     ],
   })
   await router.push('/categories/mock/edit')
@@ -227,7 +238,7 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
   await nextTick()
   await submit()
   await submit()
-  for (const name of ['X', 'Y', 'Z']) {
+  for (const name of ['X']) {
     await click('新增欄位')
     await input(
       [...host.querySelectorAll('[aria-label="欄位名稱"]')].at(-1)!,
@@ -237,6 +248,14 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
   expect(host.querySelector('code')?.textContent).toBe('{{X}}')
   await input(host.querySelector('[aria-label="欄位名稱"]')!, 'X')
   await click('M')
+  expect(
+    [...host.querySelectorAll('button')].some(
+      (button) => button.textContent?.trim() === '新增欄位',
+    ),
+  ).toBe(false)
+  expect(host.querySelector('[aria-label="基本 SOP 細項欄位"]')).toBeNull()
+  expect(host.querySelector('[aria-label="既有欄位定義（保留）"]')?.textContent).toContain('{{Y}}')
+  snapshot('maintainer-scenario-auto-only')
   const panel = [...host.querySelectorAll('section')].find(
     (s) => s.querySelector('h3')?.textContent === 'M',
   )!
@@ -251,35 +270,38 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
     templateIds: ['same'],
     canRunInParallel: true,
   })
-  // Saving a step reloads the category; unsaved manual definitions must survive.
-  expect(host.querySelectorAll('[aria-label="欄位名稱"]')).toHaveLength(3)
-  const type = host.querySelectorAll('[aria-label="欄位型別"]')[1] as HTMLSelectElement
-  type.value = 'number'
-  type.dispatchEvent(new Event('change', { bubbles: true }))
-  // A manual name that does not match scanned Y must give an actionable error.
-  await input(host.querySelectorAll('[aria-label="欄位名稱"]')[1]!, 'WrongY')
+  // Saving a step reloads the category; unsaved base definitions survive.
+  expect(host.querySelectorAll('[aria-label="欄位名稱"]')).toHaveLength(0)
+  await click('維護基本 SOP')
+  expect(host.querySelectorAll('[aria-label="欄位名稱"]')).toHaveLength(1)
+  // New definitions must match base output, even if a tag exists in a scenario.
+  await input(host.querySelector('[aria-label="欄位名稱"]')!, 'Y')
   await submit()
   expect(router.currentRoute.value.path).toBe('/categories/mock/edit')
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{WrongY}}')
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{Y}}')
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('重新上傳')
-  snapshot('maintainer-mapping-error')
-  await input(host.querySelectorAll('[aria-label="欄位名稱"]')[1]!, 'Y')
+  snapshot('maintainer-base-mapping-error')
+  await input(host.querySelector('[aria-label="欄位名稱"]')!, 'X')
   await submit()
   await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/mock'))
   await router.push('/categories/mock/edit')
   await settle()
   await submit()
   await submit()
-  expect([...host.querySelectorAll('code')].map((c) => c.textContent)).toEqual([
-    '{{X}}',
-    '{{Y}}',
-    '{{Z}}',
-  ])
-  await input(host.querySelectorAll('[aria-label="欄位名稱"]')[1]!, 'Mock Y label')
-  expect(host.querySelectorAll('code')[1]?.textContent).toBe('{{Y}}')
+  expect([...host.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['{{X}}', '{{Y}}'])
+  expect(host.querySelectorAll('[aria-label="欄位名稱"]')).toHaveLength(1)
+  await input(host.querySelector('[aria-label="欄位名稱"]')!, 'Mock X label')
+  expect(host.querySelector('code')?.textContent).toBe('{{X}}')
+  // The exact X mapping is used by both base and scenario documents.
+  expect(button('移除欄位').disabled).toBe(true)
   snapshot('maintainer-reopened')
   await submit()
-  expect(saved.fields?.[1]).toMatchObject({ key: 'Y', name: 'Mock Y label', type: 'number' })
+  expect(saved.fields?.find((field) => field.id === 'legacy-y')).toEqual({
+    id: 'legacy-y',
+    key: 'Y',
+    name: 'Mock Y label',
+    type: 'number',
+  })
   await settle()
   expect(host.querySelector('.basic-data-row')?.textContent).toContain('X')
   expect(host.querySelector('.basic-data-row')?.textContent).not.toContain('Mock Y label')
@@ -289,7 +311,7 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
   expect(row('D Mock').querySelector('input[type="number"]')).not.toBeNull()
   expect(host.querySelector('#step-f-0')).toBeNull()
   await field(host.querySelector('.basic-data-row')!, '姓名', 'Mock Person')
-  await field(host.querySelector('.basic-data-row')!, 'X', 'Mock Shared X')
+  await field(host.querySelector('.basic-data-row')!, 'Mock X label', 'Mock Shared X')
   const dates = host.querySelectorAll('.basic-data-row select')
   for (const [i, value] of ['115', '11', '7'].entries()) {
     ;(dates[i] as HTMLSelectElement).value = value
@@ -310,6 +332,7 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
   writeFileSync(`${evidence}/d-text.txt`, xml.replace(/<[^>]+>/g, ''))
   await check(host.querySelector('[aria-label="情境模組選擇"] input[value="n"]')!, true)
   await field(row('F Mock'), 'Mock Y label', '99.25')
+  expect(saved.fields?.some((field) => field.key === 'Z')).toBe(false)
   await field(row('F Mock'), 'Z', 'Mock Only N')
   saved.combinationOrders = [{ moduleIds: ['m', 'n'], stepIds: ['f', 'base', 'd'] }]
   await categories.reload()
@@ -335,6 +358,7 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
   expect(xmls.some((x) => x.includes('Mock Shared X/99.25/'))).toBe(true)
   expect(xmls.some((x) => x.includes('Mock Only N'))).toBe(true)
   expect(Object.keys(zip.files)).toHaveLength(4)
+  expect(xmls.every((xml) => !xml.includes('{{') && !xml.includes('}}'))).toBe(true)
   await click('範本步驟')
   await check(host.querySelector('[aria-label="情境模組選擇"] input[value="n"]')!, false)
   await check(host.querySelector('[aria-label="情境模組選擇"] input[value="m"]')!, false)
@@ -361,11 +385,23 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
   expect(indexedDbOpen).not.toHaveBeenCalled()
   storageWrite.mockRestore()
   // Legacy settings with broken keys are diagnosed, never guessed from a label.
-  saved.fields![1]!.key = 'LegacyY'
+  saved.fields!.find((field) => field.id === 'legacy-y')!.key = 'LegacyY'
   await categories.reload()
   await settle()
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{LegacyY}}')
   snapshot('workbench-legacy-mapping-error')
+  writeFileSync(
+    `${evidence}/unmatched-legacy.json`,
+    JSON.stringify(
+      {
+        source: 'mock fixtures only; no production categories, cases or accounts inspected',
+        unmatched: saved.fields!.filter((field) => field.key === 'LegacyY'),
+        preserved: true,
+      },
+      null,
+      2,
+    ),
+  )
 })
 
 it('reports manual keys with no output instead of silently ignoring their definitions', async () => {
@@ -374,23 +410,29 @@ it('reports manual keys with no output instead of silently ignoring their defini
     expect(fieldMappingIssues([field], templates)[0]).toContain('{{Orphan}}')
     expect(fieldMappingIssues([field], templates)[0]).toContain('偵測到的欄位：無')
   }
-  mocks.request.mockImplementation(async () =>
-    Response.json({
+  let retained: CaseCategory | undefined
+  mocks.request.mockImplementation(async (_url: string, init?: RequestInit) => {
+    if (init?.method === 'PATCH') {
+      retained = { ...retained!, ...JSON.parse(String(init.body)) }
+      return Response.json({ category: retained })
+    }
+    return Response.json({
       categories: [
-        {
-          id: 'empty',
-          name: 'Mock no output',
-          summary: '',
-          updatedAt: '',
-          templateCount: 0,
-          fields: [field],
-          steps: [],
-          baseSteps: [],
-          modules: [],
-        },
+        retained ??
+          (retained = {
+            id: 'empty',
+            name: 'Mock no output',
+            summary: '',
+            updatedAt: '',
+            templateCount: 0,
+            fields: [field],
+            steps: [],
+            baseSteps: [],
+            modules: [],
+          }),
       ],
-    }),
-  )
+    })
+  })
   const pinia = createPinia()
   await useCategoryStore(pinia).load()
   const router = createRouter({
@@ -398,6 +440,7 @@ it('reports manual keys with no output instead of silently ignoring their defini
     routes: [
       { path: '/categories/:id/edit', name: 'category-edit', component: CategoryFormView },
       { path: '/categories/:id', component: CategoryView },
+      { path: '/categories', component: { render: () => h('div') } },
     ],
   })
   await router.push('/categories/empty/edit')
@@ -413,8 +456,28 @@ it('reports manual keys with no output instead of silently ignoring their defini
   await submit()
   await submit()
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{Orphan}}')
-  expect(mocks.request.mock.calls.every(([, init]) => !init?.method)).toBe(true)
-  snapshot('maintainer-no-output-error')
+  expect(retained?.fields).toEqual([field])
+  snapshot('workbench-retained-no-output')
+  await router.push('/categories/empty/edit')
+  await settle()
+  await submit()
+  await submit()
+  expect(host.querySelector('[aria-label="既有欄位定義（保留）"]')?.textContent).toContain(
+    '{{Orphan}}',
+  )
+  snapshot('maintainer-retained-no-output')
+  writeFileSync(
+    `${evidence}/unmatched-orphan.json`,
+    JSON.stringify(
+      {
+        source: 'mock fixture only',
+        unmatched: retained?.fields,
+        preservedAfterSave: true,
+      },
+      null,
+      2,
+    ),
+  )
   await router.push('/categories/empty')
   await settle()
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{Orphan}}')

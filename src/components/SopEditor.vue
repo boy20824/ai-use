@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { apiRequest, apiErrorMessage } from '@/services/api'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
@@ -15,6 +15,8 @@ const templates = useTemplateStore()
 const error = ref('')
 const busy = ref(false)
 const scope = ref('base')
+const emit = defineEmits<{ scopeChange: [scope: string] }>()
+watch(scope, (value) => emit('scopeChange', value), { immediate: true })
 const editing = ref<CategoryStep | null>(null)
 const title = ref('')
 const items = ref('')
