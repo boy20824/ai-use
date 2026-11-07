@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createPreviewRenderer, type PreviewTarget } from './preview'
-import { bandRows } from './core'
+
 const source = () => ({ file: new File(['synthetic'], 'fake.png'), width: 17, height: 50001 })
 const target = (start = 0, end = 50001): PreviewTarget => ({
   canvas: document.createElement('canvas'),
@@ -37,16 +37,18 @@ describe('cropped local preview', () => {
       crossing = target(16000, 18000)
     renderer.update(image, [full, crossing])
     await vi.waitFor(() => expect(report).toHaveBeenLastCalledWith('ready', expect.any(String)))
-    expect(decode.mock.calls.map((call) => call.slice(1))).toEqual([
-      [0, 0, 17, 16384],
-      [0, 16384, 17, 16384],
-      [0, 32768, 17, 16384],
-      [0, 49152, 17, 849],
-    ])
+    expect(decode.mock.calls.map((call) => call.slice(1))).toEqual(
+      Array.from({ length: Math.ceil(50001 / 2048) }, (_, i) => [
+        0,
+        i * 2048,
+        17,
+        Math.min(2048, 50001 - i * 2048),
+      ]),
+    )
     expect(full.canvas.height).toBe(2048)
-    expect(draw.mock.calls.some((call) => call[2] === 16000 && call[4] === 384)).toBe(true)
+    expect(draw.mock.calls.some((call) => call[2] === 1664 && call[4] === 384)).toBe(true)
     expect(draw.mock.calls.some((call) => call[2] === 0 && call[4] === 1616)).toBe(true)
-    expect(closed).toHaveBeenCalledTimes(4)
+    expect(closed).toHaveBeenCalledTimes(25)
     renderer.dispose()
     expect(full.canvas.width).toBe(0)
     expect(crossing.canvas.height).toBe(0)
@@ -99,15 +101,15 @@ describe('cropped local preview', () => {
       b = source(),
       canvas = target()
     renderer.update(a, [canvas])
-    renderer.update(b, [target()])
     await vi.waitFor(() => expect(decode).toHaveBeenCalledTimes(1))
-    resolve({ width: 17, height: bandRows(17), close } as unknown as ImageBitmap)
+    renderer.update(b, [target()])
+    resolve({ width: 17, height: 2048, close } as unknown as ImageBitmap)
     await vi.waitFor(() => expect(decode).toHaveBeenCalledTimes(2))
     expect(draw).not.toHaveBeenCalled()
     expect(close).toHaveBeenCalledTimes(1)
     renderer.dispose()
     report.mockClear()
-    resolve({ width: 17, height: bandRows(17), close } as unknown as ImageBitmap)
+    resolve({ width: 17, height: 2048, close } as unknown as ImageBitmap)
     await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(2))
     expect(report).not.toHaveBeenCalled()
     expect(canvas.canvas.width).toBe(0)
