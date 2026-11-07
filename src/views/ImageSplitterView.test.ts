@@ -84,6 +84,7 @@ beforeEach(() => {
   closed = vi.fn()
   revoked = vi.fn()
   vi.stubGlobal('Blob', NodeBlob)
+  vi.stubGlobal('IntersectionObserver', undefined)
   vi.stubGlobal(
     'fetch',
     vi.fn(() => {
@@ -101,7 +102,15 @@ beforeEach(() => {
   ) {
     clicks.push(this.download)
   })
-  decodeBitmap = vi.fn(async (file: File) => ({ ...synthetic.get(file)!, close: closed }))
+  decodeBitmap = vi.fn(async (file: File, _x: number, y: number, width: number, height: number) => {
+    const src = synthetic.get(file)!
+    return {
+      width,
+      height,
+      pixels: src.pixels.subarray(y * width * 4, (y + height) * width * 4),
+      close: closed,
+    }
+  })
   vi.stubGlobal('createImageBitmap', decodeBitmap)
   let drawn: { pixels: Uint8Array } | undefined
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(
@@ -170,7 +179,7 @@ describe('local multi-image splitter DOM', () => {
     await idle()
     expect(clicks.at(-1)).toBe('002-001.png')
     expect(fetch).not.toHaveBeenCalled()
-    const evidence = 'evidence/splitter/'
+    const evidence = 'evidence/splitter-long/'
     mkdirSync(evidence, { recursive: true })
     writeFileSync(
       evidence + 'synthetic-dom.html',
@@ -189,7 +198,7 @@ describe('local multi-image splitter DOM', () => {
     app!.unmount()
     app = undefined
     expect(new Set(revoked.mock.calls.map(([url]) => url))).toEqual(new Set(blobs.keys()))
-    expect(closed).toHaveBeenCalledTimes(decodeBitmap.mock.calls.length)
+    await vi.waitFor(() => expect(closed).toHaveBeenCalledTimes(decodeBitmap.mock.calls.length))
   })
   it('renders full and slice canvases with the actual self-only imgSrc policy and no image URLs', async () => {
     const server = readFileSync('server/src/app.ts', 'utf8')
@@ -219,13 +228,13 @@ describe('local multi-image splitter DOM', () => {
     ])
     await click('移除 fake-csp.png')
     expect(canvases.every((canvas) => canvas.width === 0 && canvas.height === 0)).toBe(true)
-    expect(closed).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => expect(closed).toHaveBeenCalledTimes(decodeBitmap.mock.calls.length))
     expect(fetch).not.toHaveBeenCalled()
     expect(URL.createObjectURL).not.toHaveBeenCalled()
     expect(host.querySelectorAll('canvas')).toHaveLength(0)
   })
   it('supports keyboard and touch/mouse pointer clamps with no empty slices', async () => {
-    await upload([fixture('fake-tall.png', 8, 6000)])
+    await upload([fixture('fake-tall.png', 8, 50003)])
     const cut = () => host.querySelector<HTMLElement>('[role=slider]')!
     cut().dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))
     await nextTick()
@@ -269,7 +278,11 @@ describe('local multi-image splitter DOM', () => {
       }),
     )
     cut().dispatchEvent(
-      new PointerEvent('pointermove', { pointerId: 6, clientY: 300, bubbles: true }),
+      new PointerEvent('pointermove', {
+        pointerId: 6,
+        clientY: 100 + (2000 * 600) / 50003,
+        bubbles: true,
+      }),
     )
     await nextTick()
     expect(cut().getAttribute('aria-valuenow')).toBe('2000')
@@ -286,9 +299,9 @@ describe('local multi-image splitter DOM', () => {
     expect(host.querySelector('[role=alert]')?.textContent).toContain('僅支援')
     expect(decodeBitmap).not.toHaveBeenCalled()
     await upload(Array.from({ length: 13 }, () => fixture('fake.png', 1, 1)))
-    expect(host.querySelector('[role=alert]')?.textContent).toContain('12 張')
+    expect(host.querySelectorAll('[data-source]')).toHaveLength(13)
     await upload([fixture('fake-valid.png', 1, 1)])
-    expect(host.querySelectorAll('[data-source]').length).toBe(1)
+    expect(host.querySelectorAll('[data-source]').length).toBe(14)
   })
   it('closes a bitmap resolved after unmount without creating URLs or stale UI', async () => {
     let resolve!: (bitmap: { width: number; height: number; close: () => void }) => void
@@ -310,29 +323,17 @@ describe('local multi-image splitter DOM', () => {
     expect(closed).toHaveBeenCalledTimes(1)
     expect(blobs.size).toBe(0)
   })
-  it('enforces file byte and aggregate pixel limits before decoding', async () => {
+  it('enforces only the 200 MiB per-file cap and accepts aggregate bytes and pixels', async () => {
     const big = fixture('fake-big.png', 1, 1)
-    Object.defineProperty(big, 'size', { value: 21 * 1024 ** 2 })
+    Object.defineProperty(big, 'size', { value: 200 * 1024 ** 2 + 1 })
     await upload([big])
-    expect(host.querySelector('[role=alert]')?.textContent).toContain('20 MiB')
+    expect(host.querySelector('[role=alert]')?.textContent).toContain('200 MiB')
     expect(decodeBitmap).not.toHaveBeenCalled()
     const files = Array.from({ length: 3 }, (_, i) => fixture(`fake-${i}.png`, 1, 1))
-    for (const file of files) Object.defineProperty(file, 'size', { value: 15 * 1024 ** 2 })
+    for (const file of files) Object.defineProperty(file, 'size', { value: 200 * 1024 ** 2 })
     await upload(files)
-    expect(host.querySelector('[role=alert]')?.textContent).toContain('40 MiB')
-    expect(decodeBitmap).not.toHaveBeenCalled()
-    const headerOnly = fixture('fake-over-pixels.png', 1, 1)
-    const header = encodeSlice(new Uint8Array(4), 1, 1, { start: 0, end: 1 })
-    const view = new DataView(header.buffer)
-    view.setUint32(16, 4000)
-    view.setUint32(20, 4000)
-    Object.defineProperty(headerOnly, 'arrayBuffer', {
-      configurable: true,
-      value: async () => header.buffer,
-    })
-    await upload([headerOnly])
-    expect(host.querySelector('[role=alert]')?.textContent).toContain('1200 萬像素')
-    expect(decodeBitmap).not.toHaveBeenCalled()
+    expect(host.querySelectorAll('[data-source]')).toHaveLength(3)
+    expect(host.querySelector('[role=alert]')).toBeNull()
   })
   it('does not download a pending export after unmount and closes its bitmap', async () => {
     await upload([fixture('fake-export.png')])
@@ -356,8 +357,21 @@ describe('local multi-image splitter DOM', () => {
     resolve({ width: 8, height: 3584, pixels: new Uint8Array(8 * 3584 * 4), close: closed })
     await new Promise((done) => setTimeout(done, 20))
     expect(clicks).toEqual([])
-    expect(closed).toHaveBeenCalledTimes(3)
+    await vi.waitFor(() => expect(closed).toHaveBeenCalledTimes(decodeBitmap.mock.calls.length))
     expect(revoked).not.toHaveBeenCalled()
+  })
+  it('reports cropped decode failure, clears downloads and allows retry without stale output', async () => {
+    await upload([fixture('fake-fail-export.png')])
+    decodeBitmap.mockRejectedValueOnce(new Error('synthetic allocation failure'))
+    await click('依序下載 ZIP')
+    await vi.waitFor(() =>
+      expect(host.querySelector('section')?.getAttribute('aria-busy')).toBe('false'),
+    )
+    expect(host.querySelector('[role=alert]')?.textContent).toContain('轉存 PNG')
+    expect(clicks).toEqual([])
+    await click('依序下載 ZIP')
+    await idle()
+    expect(clicks).toEqual(['詐騙訊息切割截圖.zip'])
   })
   it('adds the sidebar route under the existing auth guard', async () => {
     expect(mainNav.find((item) => item.to === '/image-splitter')?.label).toBe('詐騙訊息切割截圖')

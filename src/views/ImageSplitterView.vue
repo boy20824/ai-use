@@ -4,13 +4,11 @@ import {
   batch,
   checkDimensions,
   defaultCuts,
-  dimensions,
-  encodeSlice,
+  readDimensions,
   LIMITS,
   makeZip,
   moveCut,
   pad,
-  readPixels,
   reorder,
   slices,
   type Source,
@@ -76,40 +74,16 @@ onBeforeUnmount(() => {
 async function addFiles(files: File[]) {
   if (busy.value || !alive) return
   busy.value = true
+  releaseDownloads()
   error.value = ''
   const token = ++generation
   try {
-    if (images.value.length + files.length > LIMITS.images)
-      throw new Error('最多加入 12 張圖片，請減少選取數量。')
-    if (
-      images.value.reduce((sum, image) => sum + image.file.size, 0) +
-        files.reduce((sum, file) => sum + file.size, 0) >
-      LIMITS.totalBytes
-    )
-      throw new Error('全部檔案合計不得超過 40 MiB。')
     for (const file of files) {
       if (!alive || token !== generation) return
       try {
-        if (file.size > LIMITS.fileBytes) throw new Error('單檔不得超過 20 MiB。')
-        const bytes = new Uint8Array(await file.arrayBuffer())
-        if (!alive || token !== generation) return
-        const size = dimensions(bytes)
-        checkDimensions(size.width, size.height)
-        if (
-          images.value.reduce((sum, image) => sum + image.width * image.height, 0) +
-            size.width * size.height >
-          LIMITS.pixels
-        )
-          throw new Error('全部圖片合計不得超過 1200 萬像素；請移除圖片後再加入。')
-        const bitmap = await createImageBitmap(file)
-        let width: number, height: number
-        try {
-          width = bitmap.width
-          height = bitmap.height
-          checkDimensions(width, height)
-        } finally {
-          bitmap.close()
-        }
+        if (file.size > LIMITS.fileBytes) throw new Error('單檔不得超過 200 MiB。')
+        const { width, height } = await readDimensions(file)
+        checkDimensions(width, height)
         if (!alive || token !== generation) return
         const image: Source = {
           id: ++serial,
@@ -162,6 +136,7 @@ function adjust(index: number, value: number) {
 }
 function reset() {
   if (!current.value || busy.value) return
+  releaseDownloads()
   const id = current.value.id
   images.value = images.value.map((item) =>
     item.id === id ? { ...item, cuts: defaultCuts(item.height) } : item,
@@ -202,9 +177,9 @@ function keyCut(event: KeyboardEvent, index: number) {
     adjust(index, values[event.key])
   }
 }
-function save(bytes: Uint8Array<ArrayBuffer>, name: string, type: string) {
+function save(bytes: Uint8Array<ArrayBuffer> | Blob, name: string, type: string) {
   if (!alive) return
-  const url = URL.createObjectURL(new Blob([bytes], { type }))
+  const url = URL.createObjectURL(bytes instanceof Blob ? bytes : new Blob([bytes], { type }))
   downloadUrls.add(url)
   const link = document.createElement('a')
   link.href = url
@@ -239,19 +214,23 @@ async function exportImages(mode: 'zip' | 'all' | number) {
         if (active()) save(png, path.replace('/', '-'), 'image/png')
       })
     } else {
-      const image = snapshot[chosen]
-      const rgba = await readPixels(image)
-      if (active())
-        save(
-          encodeSlice(rgba, image.width, image.height, slices(image.height, image.cuts)[mode]),
-          `${pad(chosen)}-${pad(mode)}.png`,
-          'image/png',
-        )
+      await batch(
+        snapshot,
+        active,
+        async (path, png) => {
+          if (active()) save(png, path.replace('/', '-'), 'image/png')
+        },
+        undefined,
+        { imageIndex: chosen, sliceIndex: mode },
+      )
     }
     if (active()) status.value = '已產生下載。若瀏覽器阻擋多檔下載，請下載 ZIP 或逐片點選。'
   } catch (cause) {
-    if (active())
-      error.value = cause instanceof Error ? cause.message : '產生失敗，請減少圖片數量後再試。'
+    releaseDownloads()
+    if (active()) {
+      status.value = '產生失敗，已清除暫存下載連結。'
+      error.value = `產生失敗，可能記憶體不足；請改用逐片 PNG、減少本次圖片，或將來源轉存為 PNG 後重試。${cause instanceof Error ? cause.message : ''}`
+    }
   } finally {
     if (active()) busy.value = false
   }
@@ -282,8 +261,10 @@ async function exportImages(mode: 'zip' | 'all' | number) {
       />
       <p>或將多張 PNG／JPEG 拖放到這裡；新增圖片會接在清單末尾。</p>
       <small
-        >最多 12 張、單檔 20 MiB、合計 40 MiB／1200 萬像素；每張寬 ≤8192、高 ≤24000px。匯出無壓縮
-        PNG，較大批次可能需要數百 MiB 記憶體；不足時請減少圖片。</small
+        >單檔上限 200
+        MiB；不限制圖片張數、合計容量或像素。逐張裁切處理，但瀏覽器解碼器可能仍在內部解碼整張圖片。
+        PNG 為無壓縮輸出；ZIP 會保留全部編碼結果並在記憶體組合封存，可能耗盡記憶體。大圖建議逐片下載
+        PNG。</small
       >
     </div>
     <p role="status" class="splitter-status">{{ status }}</p>
@@ -498,6 +479,7 @@ async function exportImages(mode: 'zip' | 'all' | number) {
   position: relative;
   width: 100%;
   max-width: 600px;
+  max-height: 8192px;
   margin: 24px auto;
   background: white;
 }
@@ -556,6 +538,7 @@ async function exportImages(mode: 'zip' | 'all' | number) {
 }
 .splitter-thumbnail {
   width: 100px;
+  max-height: 320px;
   overflow: hidden;
   position: relative;
   background: var(--color-canvas);
