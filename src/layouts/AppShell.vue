@@ -40,7 +40,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="flex min-h-dvh items-stretch bg-canvas text-ink">
+  <div class="app-shell flex min-h-dvh items-stretch bg-canvas text-ink">
     <aside class="desktop-sidebar hidden shrink-0 bg-nav md:block">
       <div class="sticky top-0 flex h-dvh flex-col">
         <SideNav id="desktop-nav" @logout="logout" />

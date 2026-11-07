@@ -53,7 +53,7 @@ const selectClass = 'field w-full'
 </script>
 
 <template>
-  <div>
+  <div :class="{ 'field-error': invalid }">
     <div class="mt-2 grid grid-cols-3 gap-2">
       <label class="block">
         <span class="sr-only">民國年</span>

@@ -88,6 +88,7 @@ async function submit() {
               autocomplete="username"
               required
               class="field mt-2 w-full"
+              :class="{ 'field-error-input': failed }"
             />
           </div>
           <div>
@@ -100,6 +101,7 @@ async function submit() {
               autocomplete="current-password"
               required
               class="field mt-2 w-full"
+              :class="{ 'field-error-input': failed }"
             />
           </div>
           <p v-if="failed" class="text-sm text-tone-danger-ink" role="alert">帳號或密碼不正確。</p>
