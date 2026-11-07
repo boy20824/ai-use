@@ -600,6 +600,14 @@ describe('security controls', () => {
     const policy = String(response.headers['content-security-policy'])
     expect(policy).toContain("default-src 'none'")
     expect(policy).toContain("script-src 'self'")
+    // Local splitter previews must work with the deployed policy, without broadening it.
+    expect(
+      policy
+        .split(';')
+        .find((directive) => directive.trim().startsWith('img-src'))
+        ?.trim(),
+    ).toBe("img-src 'self'")
+    expect(policy).not.toMatch(/blob:|data:/)
     expect(policy).not.toContain('unsafe-inline')
     const evil = await app.inject({
       method: 'GET',
