@@ -297,6 +297,8 @@ function publicCategory(category: CategoryRecord) {
     id: category.id,
     group: category.group,
     variants: category.variants,
+    baseSteps: category.baseSteps,
+    modules: category.modules,
     fields: category.fields,
     name: category.name,
     summary: category.summary,
@@ -927,6 +929,201 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     return reply.code(204).send()
   })
 
+  app.put('/api/categories/:id/order/:scope', async (request, reply) => {
+    const actor = requireCategoryManager(request, reply, 'category_update', {})
+    if (!actor) return
+    const params = z
+      .object({ id: categoryIdSchema, scope: z.string().min(1).max(160) })
+      .safeParse(request.params)
+    const body = z
+      .object({
+        ids: z
+          .array(stepIdSchema)
+          .max(10000)
+          .refine((ids) => new Set(ids).size === ids.length),
+      })
+      .strict()
+      .safeParse(request.body)
+    if (!params.success || !body.success)
+      return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+    const { id, scope } = params.data
+    return db.transaction(() => {
+      const category = queries.getCategory(id)
+      if (!category) return fail(reply, 404, 'not-found', '找不到勤務流程。')
+      const moduleId = scope.startsWith('module:') ? scope.slice(7) : scope
+      const current =
+        scope === 'modules'
+          ? category.modules?.map((m) => m.id)
+          : scope === 'base'
+            ? category.baseSteps?.map((r) => r.stepId)
+            : category.modules?.find((m) => m.id === moduleId)?.steps.map((r) => r.stepId)
+      if (
+        !current ||
+        current.length !== body.data.ids.length ||
+        current.some((id) => !body.data.ids.includes(id))
+      )
+        return fail(reply, 400, 'invalid-input', '排序須包含本處全部引用，且不可跨案類。')
+      queries.configWrite(id, actor.username, `order:${scope}`, () => {
+        for (const [order, stepId] of body.data.ids.entries()) {
+          if (scope === 'modules')
+            db.prepare(
+              'UPDATE category_modules SET sort_order = ? WHERE id = ? AND category_id = ?',
+            ).run(order, stepId, id)
+          else if (scope === 'base')
+            db.prepare(
+              'UPDATE base_step_refs SET sort_order = ? WHERE step_id = ? AND category_id = ?',
+            ).run(order, stepId, id)
+          else
+            db.prepare(
+              'UPDATE module_step_refs SET sort_order = ? WHERE step_id = ? AND module_id = ?',
+            ).run(order, stepId, moduleId)
+        }
+      })
+      return { category: publicCategory(queries.getCategory(id)!) }
+    })()
+  })
+  const moduleSchema = z
+    .object({
+      name: z.string().trim().min(1).max(80),
+      sortOrder: z.number().int().min(0).max(10000),
+    })
+    .strict()
+  const refSchema = z
+    .object({ stepId: stepIdSchema, sortOrder: z.number().int().min(0).max(10000) })
+    .strict()
+  // Configuration only: no case values or current workbench selection reach these routes.
+  app.route({
+    method: ['POST', 'PATCH', 'DELETE'],
+    url: '/api/categories/:id/modules/:moduleId',
+    handler: async (request, reply) => {
+      const actor =
+        request.method === 'DELETE'
+          ? requireSysadmin(request, reply, 'category_update', '只有系統管理員可以刪除模組。')
+          : requireCategoryManager(request, reply, 'category_update', {})
+      if (!actor) return
+      const params = z
+        .object({ id: categoryIdSchema, moduleId: stepIdSchema })
+        .safeParse(request.params)
+      if (!params.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+      const { id, moduleId } = params.data
+      if (!queries.getCategory(id)) return fail(reply, 404, 'not-found', '找不到勤務流程。')
+      const current = db
+        .prepare('SELECT category_id FROM category_modules WHERE id = ?')
+        .get(moduleId) as { category_id: string } | undefined
+      if (current && current.category_id !== id)
+        return fail(reply, 400, 'invalid-input', '不可跨案類。')
+      if (request.method !== 'POST' && !current)
+        return fail(reply, 404, 'not-found', '找不到模組。')
+      if (request.method === 'POST' && current) return fail(reply, 409, 'conflict', '模組已存在。')
+      if (request.method === 'DELETE') {
+        const confirmation = z
+          .object({ confirm: z.literal(true) })
+          .strict()
+          .safeParse(request.body)
+        const impact = db
+          .prepare(
+            'SELECT step_id AS stepId FROM module_step_refs WHERE module_id = ? ORDER BY sort_order, step_id',
+          )
+          .all(moduleId)
+        if (!confirmation.success)
+          return reply
+            .code(409)
+            .send({ message: '請確認刪除模組及其引用；共用步驟與文件會保留。', impact })
+        queries.configWrite(id, actor.username, `module_delete:${moduleId}`, () => {
+          db.prepare('DELETE FROM category_modules WHERE id = ? AND category_id = ?').run(
+            moduleId,
+            id,
+          )
+        })
+      } else {
+        const body = moduleSchema.safeParse(request.body)
+        if (!body.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+        queries.configWrite(id, actor.username, `module_save:${moduleId}`, () => {
+          if (request.method === 'POST')
+            db.prepare(
+              'INSERT INTO category_modules(id, category_id, name, sort_order) VALUES (?, ?, ?, ?)',
+            ).run(moduleId, id, body.data.name, body.data.sortOrder)
+          else
+            db.prepare(
+              'UPDATE category_modules SET name = ?, sort_order = ? WHERE id = ? AND category_id = ?',
+            ).run(body.data.name, body.data.sortOrder, moduleId, id)
+        })
+      }
+      return { category: publicCategory(queries.getCategory(id)!) }
+    },
+  })
+  app.route({
+    method: ['PUT', 'DELETE'],
+    url: '/api/categories/:id/refs/:scope/:stepId',
+    handler: async (request, reply) => {
+      const actor = requireCategoryManager(request, reply, 'category_update', {})
+      if (!actor) return
+      const params = z
+        .object({
+          id: categoryIdSchema,
+          scope: z
+            .string()
+            .min(1)
+            .max(160)
+            .refine(
+              (s) =>
+                s === 'base' ||
+                stepIdSchema.safeParse(s.startsWith('module:') ? s.slice(7) : s).success,
+            ),
+          stepId: stepIdSchema,
+        })
+        .safeParse(request.params)
+      if (!params.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+      const { id, scope, stepId } = params.data
+      const moduleId = scope.startsWith('module:') ? scope.slice(7) : scope
+      const body = request.method === 'PUT' ? refSchema.safeParse(request.body) : null
+      if (body && (!body.success || body.data.stepId !== stepId))
+        return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+      // Removal is intentionally independent of aggregate category updates.
+      let valid = false
+      queries.configWrite(
+        id,
+        actor.username,
+        `ref_${request.method === 'DELETE' ? 'remove' : 'save'}:${scope}:${stepId}`,
+        () => {
+          if (queries.getStep(stepId)?.categoryId !== id) return false
+          if (
+            scope !== 'base' &&
+            !db
+              .prepare('SELECT 1 FROM category_modules WHERE id = ? AND category_id = ?')
+              .get(moduleId, id)
+          )
+            return false
+          valid = true
+          const table = scope === 'base' ? 'base_step_refs' : 'module_step_refs'
+          const owner = scope === 'base' ? 'category_id' : 'module_id'
+          const ownerId = scope === 'base' ? id : moduleId
+          if (request.method === 'DELETE')
+            db.prepare(`DELETE FROM ${table} WHERE ${owner} = ? AND step_id = ?`).run(
+              ownerId,
+              stepId,
+            )
+          else if (body?.success)
+            db.prepare(
+              `INSERT INTO ${table} (${owner}, step_id, sort_order) VALUES (?, ?, ?) ON CONFLICT(${owner}, step_id) DO UPDATE SET sort_order = excluded.sort_order`,
+            ).run(ownerId, stepId, body.data.sortOrder)
+        },
+      )
+      if (!valid) return fail(reply, 400, 'invalid-input', '不可跨案類引用。')
+      return { category: publicCategory(queries.getCategory(id)!) }
+    },
+  })
+  app.get('/api/categories/:id/steps/:stepId/impact', async (request, reply) => {
+    if (!requireCategoryManager(request, reply, 'category_update', {})) return
+    const params = z
+      .object({ id: categoryIdSchema, stepId: stepIdSchema })
+      .safeParse(request.params)
+    if (!params.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+    if (queries.getStep(params.data.stepId)?.categoryId !== params.data.id)
+      return fail(reply, 404, 'not-found', '找不到步驟。')
+    return { impact: queries.stepImpact(params.data.stepId) }
+  })
+
   for (const resource of ['variants', 'fields', 'steps'] as const) {
     const base = `/api/categories/:id/${resource}`
     app.get(base, async (request, reply) => {
@@ -942,7 +1139,10 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     })
     app.post(base, mutateChild)
     async function mutateChild(request: FastifyRequest, reply: FastifyReply) {
-      const actor = requireCategoryManager(request, reply, 'category_update', {})
+      const actor =
+        request.method === 'DELETE' && resource !== 'fields'
+          ? requireSysadmin(request, reply, 'category_update', '只有系統管理員可以刪除實體。')
+          : requireCategoryManager(request, reply, 'category_update', {})
       if (!actor) return
       const params = request.params as { id: string; childId?: string }
       const category = queries.getCategory(params.id)
@@ -953,6 +1153,26 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       const current = category[resource] as { id: string }[]
       if (request.method !== 'POST' && !current.some((v) => v.id === childId))
         return fail(reply, 404, 'not-found', '找不到項目。')
+      if (request.method === 'DELETE' && resource === 'steps') {
+        return db.transaction(() => {
+          const impact = queries.stepImpact(childId)
+          if (impact.base.length || impact.modules.length)
+            return reply.code(409).send({ message: '步驟仍被引用，請先移除引用。', impact })
+          const confirmed = z
+            .object({ confirm: z.literal(true) })
+            .strict()
+            .safeParse(request.body)
+          if (!confirmed.success)
+            return reply.code(409).send({ message: '請確認刪除步驟及文件關聯。', impact })
+          queries.configWrite(category.id, actor.username, `step_delete:${childId}`, () => {
+            db.prepare('DELETE FROM category_steps WHERE id = ? AND category_id = ?').run(
+              childId,
+              category.id,
+            )
+          })
+          return reply.code(204).send()
+        })()
+      }
       const incoming = request.body && typeof request.body === 'object' ? request.body : {}
       const body = { ...current.find((v) => v.id === childId), ...incoming }
       if (resource === 'fields' && 'name' in incoming && !('key' in incoming))
@@ -976,10 +1196,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
         [resource]: next,
       }
       if (resource === 'variants' && request.method === 'DELETE')
-        draft.steps = category.steps.map((step) => ({
-          ...step,
-          variantIds: (step.variantIds ?? []).filter((id) => id !== childId),
-        }))
+        return fail(reply, 409, 'conflict', '舊樣態資料保留；請使用情境模組管理。')
       const parsed = categoryBodySchema.safeParse(draft)
       if (!parsed.success)
         return fail(reply, 400, 'invalid-input', categoryInputMessage(parsed.error))

@@ -27,6 +27,19 @@ jobs:
       - name: Set up flyctl
         uses: superfly/flyctl-actions/setup-flyctl@1.6
 
+      - name: Snapshot volumes
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "FLY_API_TOKEN is not set; skipping snapshots."
+            exit 0
+          fi
+          volume_ids=$(flyctl volumes list -a ai-use --json | jq -r '.[].id')
+          for volume_id in $volume_ids; do
+            flyctl volumes snapshots create "$volume_id" || exit 1
+          done
+
       - name: Deploy
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

@@ -292,15 +292,18 @@ describe('v1.3 workflow spec', () => {
         })
       ).statusCode,
     ).toBe(400)
-    for (const [resource, id] of [
-      ['variants', variantId],
-      ['fields', fieldId],
-      ['steps', stepId],
-    ]) {
-      expect((await request(app, auth, 'GET', `${base}/${resource}`)).statusCode).toBe(200)
-      expect((await request(app, auth, 'DELETE', `${base}/${resource}/${id}`)).statusCode).toBe(204)
-      expect((await request(app, auth, 'GET', `${base}/${resource}`)).json()[resource]).toEqual([])
-    }
+    expect((await request(app, auth, 'DELETE', `${base}/fields/${fieldId}`)).statusCode).toBe(204)
+    // Legacy variant JSON is retained; entity deletion requires explicit reference handling.
+    expect((await request(app, auth, 'DELETE', `${base}/variants/${variantId}`)).statusCode).toBe(
+      409,
+    )
+    expect((await request(app, auth, 'DELETE', `${base}/steps/${stepId}`)).statusCode).toBe(409)
+    expect(
+      (await request(app, auth, 'DELETE', `${base}/refs/${variantId}/${stepId}`)).statusCode,
+    ).toBe(200)
+    expect(
+      (await request(app, auth, 'DELETE', `${base}/steps/${stepId}`, { confirm: true })).statusCode,
+    ).toBe(204)
     expect(JSON.stringify(db.prepare('SELECT * FROM category_fields').all())).not.toContain('0.35')
     expect(db.pragma('foreign_key_check')).toEqual([])
   })
@@ -376,7 +379,15 @@ describe('v1.3 workflow spec', () => {
       steps: [{ title: '需同時符合', variantIds: ['stop', 'crash'] }],
     })
     expect(combined.statusCode).toBe(200)
-    expect(combined.json().category.steps[0].variantIds).toEqual(['stop', 'crash'])
+    expect(
+      combined.json().category.steps.find((s: { title: string }) => s.title === '需同時符合')
+        .variantIds,
+    ).toEqual(['stop', 'crash'])
+    expect(
+      combined
+        .json()
+        .category.modules.every((m: { steps: { stepId: string }[] }) => m.steps.length === 1),
+    ).toBe(true)
   })
 
   it('updates groups, ignores legacy user codes, and rolls back an invalid aggregate update', async () => {
@@ -564,5 +575,251 @@ describe('v1.3 workflow spec', () => {
     expect(notes.statusCode).toBe(200)
     expect(notes.json().items.length).toBeGreaterThanOrEqual(3)
     expect(notes.json().items.length).toBeLessThanOrEqual(5)
+  })
+
+  it('enforces module/ref permissions, preserves shared steps on remove-ref and aggregate omission, and audits configuration only', async () => {
+    const { app, db } = await setup()
+    db.prepare('UPDATE users SET can_manage_categories = 1 WHERE username = ?').run('clerk')
+    const admin = await login(app)
+    const manager = await login(app, 'clerk')
+    const normal = await login(app, 'viewer')
+    const c = await category(app, admin, 'Mock modules')
+    const base = `/api/categories/${c.id}`
+    const created = await request(app, manager, 'POST', `${base}/steps`, { title: 'Shared Mock' })
+    expect(created.statusCode).toBe(201)
+    const stepId = created.json().step.id as string
+    const moduleId = 'mock-module'
+    expect(
+      (
+        await request(app, manager, 'POST', `${base}/modules/${moduleId}`, {
+          name: 'Mock module',
+          sortOrder: 0,
+        })
+      ).statusCode,
+    ).toBe(200)
+    const writes = [
+      ['POST', `${base}/modules/another`, { name: 'Mock', sortOrder: 0 }],
+      ['PATCH', `${base}/modules/${moduleId}`, { name: 'Changed', sortOrder: 1 }],
+      ['PUT', `${base}/refs/${moduleId}/${stepId}`, { stepId, sortOrder: 0 }],
+      ['DELETE', `${base}/refs/base/${stepId}`],
+      ['POST', `${base}/steps`, { title: 'Denied' }],
+      ['PATCH', `${base}/steps/${stepId}`, { title: 'Denied' }],
+      ['PUT', `${base}/order/modules`, { ids: [moduleId] }],
+      ['PUT', `${base}/order/base`, { ids: [stepId] }],
+    ] as const
+    for (const [method, url, payload] of writes)
+      expect((await request(app, normal, method, url, payload)).statusCode).toBe(403)
+    for (const actor of [normal, manager]) {
+      expect(
+        (await request(app, actor, 'DELETE', `${base}/modules/${moduleId}`, { confirm: true }))
+          .statusCode,
+      ).toBe(403)
+      expect(
+        (await request(app, actor, 'DELETE', `${base}/steps/${stepId}`, { confirm: true }))
+          .statusCode,
+      ).toBe(403)
+      expect((await request(app, actor, 'DELETE', base)).statusCode).toBe(403)
+    }
+    expect(
+      (
+        await request(app, manager, 'PUT', `${base}/refs/${moduleId}/${stepId}`, {
+          stepId,
+          sortOrder: 7,
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(
+      (
+        await request(app, manager, 'PUT', `${base}/refs/${moduleId}/${stepId}`, {
+          stepId,
+          sortOrder: 7,
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(
+      db.prepare('SELECT COUNT(*) AS n FROM module_step_refs WHERE module_id = ?').get(moduleId),
+    ).toEqual({ n: 1 })
+    const blocked = await request(app, admin, 'DELETE', `${base}/steps/${stepId}`, {
+      confirm: true,
+    })
+    expect(blocked.statusCode).toBe(409)
+    expect(blocked.json().impact.base).toHaveLength(1)
+    expect(blocked.json().impact.modules).toEqual([
+      expect.objectContaining({ id: moduleId, name: 'Mock module' }),
+    ])
+    expect((await request(app, manager, 'GET', `${base}/steps/${stepId}/impact`)).statusCode).toBe(
+      200,
+    )
+    expect((await request(app, normal, 'GET', `${base}/steps/${stepId}/impact`)).statusCode).toBe(
+      403,
+    )
+    expect(
+      (await request(app, manager, 'PATCH', base, { name: 'Mock modules', steps: [] })).statusCode,
+    ).toBe(200)
+    expect(db.prepare('SELECT id FROM category_steps WHERE id = ?').get(stepId)).toEqual({
+      id: stepId,
+    })
+    const oldDetails = db.prepare('SELECT details FROM category_steps WHERE id = ?').get(stepId)
+    expect((await request(app, manager, 'DELETE', `${base}/refs/base/${stepId}`)).statusCode).toBe(
+      200,
+    )
+    expect(
+      (await request(app, manager, 'DELETE', `${base}/refs/${moduleId}/${stepId}`)).statusCode,
+    ).toBe(200)
+    expect(db.prepare('SELECT details FROM category_steps WHERE id = ?').get(stepId)).toEqual(
+      oldDetails,
+    )
+    expect(
+      db
+        .prepare(
+          'SELECT detail FROM audit_log WHERE actor_username = ? AND detail LIKE ? ORDER BY id',
+        )
+        .all('clerk', 'ref_remove:%'),
+    ).toEqual([
+      { detail: `ref_remove:base:${stepId}` },
+      { detail: `ref_remove:${moduleId}:${stepId}` },
+    ])
+    // Omission cannot be used as a second entity-delete endpoint, even after dereferencing.
+    expect(
+      (await request(app, manager, 'PATCH', base, { name: 'Mock modules', steps: [] })).statusCode,
+    ).toBe(200)
+    expect(db.prepare('SELECT id FROM category_steps WHERE id = ?').get(stepId)).toEqual({
+      id: stepId,
+    })
+    expect((await request(app, admin, 'DELETE', `${base}/steps/${stepId}`)).statusCode).toBe(409)
+    expect(
+      (await request(app, admin, 'DELETE', `${base}/steps/${stepId}`, { confirm: true }))
+        .statusCode,
+    ).toBe(204)
+    expect((await request(app, admin, 'DELETE', `${base}/modules/${moduleId}`)).statusCode).toBe(
+      409,
+    )
+    expect(
+      (await request(app, admin, 'DELETE', `${base}/modules/${moduleId}`, { confirm: true }))
+        .statusCode,
+    ).toBe(200)
+  })
+
+  it('rejects cross-category refs, malformed configuration, and foreign modules without writing rows', async () => {
+    const { app, db } = await setup()
+    const auth = await login(app)
+    const a = await category(app, auth, 'Mock A')
+    const b = await category(app, auth, 'Mock B')
+    const step = (
+      await request(app, auth, 'POST', `/api/categories/${b.id}/steps`, { title: 'Foreign' })
+    ).json().step.id
+    expect(
+      (
+        await request(app, auth, 'POST', `/api/categories/${a.id}/modules/mock-a`, {
+          name: 'Mock A',
+          sortOrder: 0,
+        })
+      ).statusCode,
+    ).toBe(200)
+    expect(
+      (
+        await request(app, auth, 'PUT', `/api/categories/${a.id}/refs/mock-a/${step}`, {
+          stepId: step,
+          sortOrder: 0,
+        })
+      ).statusCode,
+    ).toBe(400)
+    expect(
+      (
+        await request(app, auth, 'PUT', `/api/categories/${b.id}/refs/mock-a/${step}`, {
+          stepId: step,
+          sortOrder: 0,
+        })
+      ).statusCode,
+    ).toBe(400)
+    expect(
+      (await request(app, auth, 'DELETE', `/api/categories/${a.id}/refs/base/${step}`)).statusCode,
+    ).toBe(400)
+    expect(
+      (
+        await request(app, auth, 'PATCH', `/api/categories/${b.id}/modules/mock-a`, {
+          name: 'Stolen',
+          sortOrder: 0,
+        })
+      ).statusCode,
+    ).toBe(400)
+    expect(
+      (
+        await request(app, auth, 'POST', `/api/categories/${a.id}/modules/invalid`, {
+          name: '',
+          sortOrder: -1,
+        })
+      ).statusCode,
+    ).toBe(400)
+    expect(
+      (
+        await request(app, auth, 'PUT', `/api/categories/${b.id}/refs/base/${step}`, {
+          stepId: step,
+          sortOrder: '1',
+        })
+      ).statusCode,
+    ).toBe(400)
+    expect(db.prepare('SELECT * FROM module_step_refs').all()).toEqual([])
+    expect(db.prepare('SELECT COUNT(*) AS n FROM category_modules').get()).toEqual({ n: 1 })
+  })
+  it('keeps shared templates and legacy JSON when deleting modules, and never resurrects deleted legacy modules', async () => {
+    const { app, db } = await setup()
+    const auth = await login(app)
+    const response = await request(app, auth, 'POST', '/api/categories', {
+      name: 'Legacy Mock',
+      variants: [{ id: 'legacy', name: 'Legacy module' }],
+      steps: [{ title: 'Shared Mock', variantIds: ['legacy'] }],
+    })
+    const category = response.json().category
+    const base = `/api/categories/${category.id}`
+    const stepId = category.steps[0].id
+    const details = db.prepare('SELECT details FROM category_steps WHERE id = ?').get(stepId)
+    expect(
+      (await request(app, auth, 'DELETE', `${base}/modules/legacy`, { confirm: true })).statusCode,
+    ).toBe(200)
+    expect(db.prepare('SELECT details FROM category_steps WHERE id = ?').get(stepId)).toEqual(
+      details,
+    )
+    expect(db.prepare('SELECT id FROM category_variants WHERE id = ?').get('legacy')).toEqual({
+      id: 'legacy',
+    })
+    expect((await request(app, auth, 'PATCH', base, { name: 'Legacy Mock' })).statusCode).toBe(200)
+    migrate(db)
+    expect(db.prepare('SELECT id FROM category_modules WHERE id = ?').get('legacy')).toBeUndefined()
+    expect(db.prepare('SELECT id FROM category_steps WHERE id = ?').get(stepId)).toEqual({
+      id: stepId,
+    })
+  })
+
+  it('rolls back reference removal when its audit fails and validates complete reorder sets', async () => {
+    const { app, db } = await setup()
+    const auth = await login(app)
+    const c = await category(app, auth, 'Atomic Mock')
+    const base = `/api/categories/${c.id}`
+    const stepId = (
+      await request(app, auth, 'POST', `${base}/steps`, { title: 'Atomic Mock Step' })
+    ).json().step.id
+    db.exec(
+      "CREATE TRIGGER fail_ref_audit BEFORE INSERT ON audit_log WHEN NEW.detail LIKE 'ref_remove:%' BEGIN SELECT RAISE(ABORT, 'Mock audit failure'); END;",
+    )
+    expect((await request(app, auth, 'DELETE', `${base}/refs/base/${stepId}`)).statusCode).toBe(500)
+    expect(db.prepare('SELECT step_id FROM base_step_refs WHERE step_id = ?').get(stepId)).toEqual({
+      step_id: stepId,
+    })
+    db.exec('DROP TRIGGER fail_ref_audit')
+    const before = db.prepare('SELECT * FROM base_step_refs').all()
+    expect((await request(app, auth, 'PUT', `${base}/order/base`, { ids: [] })).statusCode).toBe(
+      400,
+    )
+    expect(
+      (await request(app, auth, 'PUT', `${base}/order/base`, { ids: [stepId, stepId] })).statusCode,
+    ).toBe(400)
+    expect(db.prepare('SELECT * FROM base_step_refs').all()).toEqual(before)
+    expect(
+      (await request(app, auth, 'PUT', `${base}/order/base`, { ids: [stepId] })).statusCode,
+    ).toBe(200)
+    expect(
+      db.prepare('SELECT sort_order FROM base_step_refs WHERE step_id = ?').get(stepId),
+    ).toEqual({ sort_order: 0 })
   })
 })

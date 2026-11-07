@@ -1,5 +1,5 @@
+import { migrateModules } from './modules.ts'
 import Database from 'better-sqlite3'
-import { randomBytes } from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 
@@ -29,8 +29,8 @@ const auditActionsSql = `'upload', 'delete', 'category_create', 'category_update
 export type AuditResult = 'allowed' | 'denied'
 
 /**
- * Ids of the removed built-in categories. Migration deletes only these rows.
- * User-created categories use generated ids and are left in place.
+ * Historical built-in IDs retained for compatibility.
+ * Migration preserves these rows, including any content users added.
  */
 export const seededCategoryIds = [
   'general-assist',
@@ -129,7 +129,21 @@ export interface TemplateUsage {
   sortOrder: number
 }
 
+export interface StepRef {
+  stepId: string
+  sortOrder: number
+}
+export interface ModuleRecord {
+  id: string
+  categoryId: string
+  name: string
+  sortOrder: number
+  steps: StepRef[]
+}
+
 export interface CategoryRecord {
+  baseSteps?: StepRef[]
+  modules?: ModuleRecord[]
   group: CategoryGroup
   variants: VariantRecord[]
   fields: FieldDefRecord[]
@@ -234,12 +248,6 @@ interface UsageRow {
   step_id: string
   step_body: string
   sort_order: number
-}
-
-interface OwnerRow {
-  id: string
-  category_id: string
-  added_at: string
 }
 
 function mapUser(row: UserRow): UserRecord {
@@ -468,227 +476,8 @@ function createCurrentSchema(db: AppDatabase) {
   db.exec(categoryTable + stepTable + templateTable + linkTable + auditTable)
 }
 
-function readLegacyOwners(
-  db: AppDatabase,
-): { categoryId: string; templateId: string; sortOrder: number }[] {
-  if (!columnNames(db, 'templates').includes('category_id')) return []
-  const rows = db.prepare('SELECT id, category_id, added_at FROM templates').all() as OwnerRow[]
-  const groups = new Map<string, OwnerRow[]>()
-  for (const row of rows) {
-    const list = groups.get(row.category_id) ?? []
-    list.push(row)
-    groups.set(row.category_id, list)
-  }
-  const owners: { categoryId: string; templateId: string; sortOrder: number }[] = []
-  for (const [categoryId, list] of groups) {
-    list.sort(
-      (left, right) =>
-        left.added_at.localeCompare(right.added_at) || left.id.localeCompare(right.id),
-    )
-    list.forEach((row, index) => {
-      owners.push({ categoryId, templateId: row.id, sortOrder: index })
-    })
-  }
-  return owners
-}
-
-function upgradeLegacySchema(db: AppDatabase) {
-  const owners = readLegacyOwners(db)
-  db.pragma('foreign_keys = OFF')
-  try {
-    const apply = db.transaction(() => {
-      db.exec(`
-        CREATE TABLE templates_next (
-          id TEXT PRIMARY KEY,
-          file_name TEXT NOT NULL,
-          mime_type TEXT NOT NULL,
-          size_bytes INTEGER NOT NULL,
-          added_at TEXT NOT NULL,
-          placeholders TEXT NOT NULL,
-          origin TEXT NOT NULL CHECK (origin IN ('sample', 'upload')),
-          data BLOB NOT NULL
-        );
-        INSERT INTO templates_next (
-          id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data
-        )
-        SELECT id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data
-        FROM templates;
-        DROP TABLE templates;
-        ALTER TABLE templates_next RENAME TO templates;
-
-        CREATE TABLE categories_next (
-          id TEXT PRIMARY KEY,
-          code TEXT NOT NULL DEFAULT '',
-          name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-          summary TEXT NOT NULL DEFAULT '',
-          updated_at TEXT NOT NULL
-        );
-        INSERT INTO categories_next (id, code, name, summary, updated_at)
-        SELECT id, code, name, summary, updated_at FROM categories;
-        DROP TABLE categories;
-        ALTER TABLE categories_next RENAME TO categories;
-
-        CREATE TABLE category_steps (
-          category_id TEXT NOT NULL,
-          sort_order INTEGER NOT NULL,
-          body TEXT NOT NULL,
-          PRIMARY KEY (category_id, sort_order)
-        );
-        CREATE TABLE category_templates (
-          category_id TEXT NOT NULL,
-          template_id TEXT NOT NULL,
-          sort_order INTEGER NOT NULL,
-          PRIMARY KEY (category_id, template_id)
-        );
-
-        CREATE TABLE audit_log_next (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          created_at TEXT NOT NULL,
-          actor_username TEXT NOT NULL,
-          action TEXT NOT NULL CHECK (action IN (
-            'upload', 'delete', 'category_create', 'category_update', 'category_delete'
-          )),
-          template_id TEXT NOT NULL DEFAULT '',
-          file_name TEXT NOT NULL DEFAULT '',
-          category_id TEXT NOT NULL DEFAULT '',
-          detail TEXT NOT NULL DEFAULT '',
-          result TEXT NOT NULL DEFAULT 'allowed'
-        );
-        INSERT INTO audit_log_next (
-          id, created_at, actor_username, action, template_id, file_name, category_id, detail
-        )
-        SELECT id, created_at, actor_username, action, template_id, file_name, category_id, ''
-        FROM audit_log;
-        DROP TABLE audit_log;
-        ALTER TABLE audit_log_next RENAME TO audit_log;
-      `)
-
-      const categoryExists = db.prepare('SELECT 1 AS ok FROM categories WHERE id = ?')
-      const templateExists = db.prepare('SELECT 1 AS ok FROM templates WHERE id = ?')
-      const insertLink = db.prepare(
-        'INSERT INTO category_templates (category_id, template_id, sort_order) VALUES (?, ?, ?)',
-      )
-      for (const owner of owners) {
-        if (!categoryExists.get(owner.categoryId)) continue
-        if (!templateExists.get(owner.templateId)) continue
-        insertLink.run(owner.categoryId, owner.templateId, owner.sortOrder)
-      }
-    })
-    apply()
-  } finally {
-    db.pragma('foreign_keys = ON')
-  }
-}
-
 function needsStepLinkMigration(db: AppDatabase): boolean {
-  if (tableExists(db, 'category_templates')) return true
   return tableExists(db, 'category_steps') && !columnNames(db, 'category_steps').includes('id')
-}
-
-function upgradeStepLinks(db: AppDatabase) {
-  const stepsHaveId = columnNames(db, 'category_steps').includes('id')
-  const oldSteps = (
-    tableExists(db, 'category_steps')
-      ? stepsHaveId
-        ? db
-            .prepare(
-              'SELECT id, category_id, sort_order, body FROM category_steps ORDER BY category_id, sort_order, id',
-            )
-            .all()
-        : db
-            .prepare(
-              'SELECT category_id, sort_order, body FROM category_steps ORDER BY category_id, sort_order',
-            )
-            .all()
-      : []
-  ) as { id?: string; category_id: string; sort_order: number; body: string }[]
-  const oldLinks = (
-    tableExists(db, 'category_templates')
-      ? db
-          .prepare(
-            'SELECT category_id, template_id, sort_order FROM category_templates ORDER BY category_id, sort_order, template_id',
-          )
-          .all()
-      : []
-  ) as { category_id: string; template_id: string; sort_order: number }[]
-
-  db.pragma('foreign_keys = OFF')
-  try {
-    const apply = db.transaction(() => {
-      if (!stepsHaveId) {
-        db.exec(`
-          CREATE TABLE category_steps_next (
-            id TEXT PRIMARY KEY,
-            category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-            sort_order INTEGER NOT NULL,
-            body TEXT NOT NULL
-          );
-        `)
-        const insertStep = db.prepare(
-          'INSERT INTO category_steps_next (id, category_id, sort_order, body) VALUES (?, ?, ?, ?)',
-        )
-        for (const step of oldSteps) {
-          insertStep.run(
-            randomBytes(16).toString('hex'),
-            step.category_id,
-            step.sort_order,
-            step.body,
-          )
-        }
-        db.exec(`
-          DROP TABLE IF EXISTS category_steps;
-          ALTER TABLE category_steps_next RENAME TO category_steps;
-          CREATE INDEX IF NOT EXISTS category_steps_by_category ON category_steps(category_id, sort_order);
-        `)
-      }
-
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS step_templates (
-          step_id TEXT NOT NULL REFERENCES category_steps(id) ON DELETE CASCADE,
-          template_id TEXT NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
-          sort_order INTEGER NOT NULL,
-          PRIMARY KEY (step_id, template_id)
-        );
-        CREATE INDEX IF NOT EXISTS step_templates_by_template ON step_templates(template_id);
-      `)
-
-      const firstStep = db.prepare(
-        'SELECT id FROM category_steps WHERE category_id = ? ORDER BY sort_order ASC, id ASC LIMIT 1',
-      )
-      const insertStep = db.prepare(
-        'INSERT INTO category_steps (id, category_id, sort_order, body) VALUES (?, ?, ?, ?)',
-      )
-      const insertLink = db.prepare(
-        'INSERT OR IGNORE INTO step_templates (step_id, template_id, sort_order) VALUES (?, ?, ?)',
-      )
-      const grouped = new Map<string, { template_id: string; sort_order: number }[]>()
-      for (const link of oldLinks) {
-        const list = grouped.get(link.category_id) ?? []
-        list.push({ template_id: link.template_id, sort_order: link.sort_order })
-        grouped.set(link.category_id, list)
-      }
-      for (const [categoryId, links] of grouped) {
-        let step = firstStep.get(categoryId) as { id: string } | undefined
-        if (!step) {
-          const id = randomBytes(16).toString('hex')
-          insertStep.run(id, categoryId, 0, '產生文件')
-          step = { id }
-        }
-        const stepId = step.id
-        links
-          .sort(
-            (left, right) =>
-              left.sort_order - right.sort_order ||
-              left.template_id.localeCompare(right.template_id),
-          )
-          .forEach((link, index) => insertLink.run(stepId, link.template_id, index))
-      }
-      db.exec('DROP TABLE IF EXISTS category_templates')
-    })
-    apply()
-  } finally {
-    db.pragma('foreign_keys = ON')
-  }
 }
 
 function tableSql(db: AppDatabase, table: string): string {
@@ -698,79 +487,14 @@ function tableSql(db: AppDatabase, table: string): string {
   return row?.sql ?? ''
 }
 
-function mappedRole(username: string, role: string): Role {
-  if (username.toLowerCase() === 'boy20824') return 'sysadmin'
-  if (role === 'admin' || role === 'sysadmin') return 'sysadmin'
-  return 'user'
-}
-
 function needsAccountUpgrade(db: AppDatabase): boolean {
   if (!tableExists(db, 'users')) return false
   const sql = tableSql(db, 'users')
-  if (!sql.includes("'sysadmin'")) return true
+  if (/CHECK\s*\(\s*role\s+IN/i.test(sql) && !sql.includes("'sysadmin'")) return true
   const names = new Set(columnNames(db, 'users'))
   return ['nickname', 'can_manage_categories', 'active', 'created_at'].some(
     (name) => !names.has(name),
   )
-}
-
-function upgradeAccounts(db: AppDatabase) {
-  if (!needsAccountUpgrade(db)) return
-  const names = new Set(columnNames(db, 'users'))
-  const rows = db.prepare('SELECT * FROM users').all() as Record<string, unknown>[]
-  const createdAt = new Date().toISOString()
-  db.pragma('foreign_keys = OFF')
-  try {
-    const apply = db.transaction(() => {
-      db.exec(`
-        CREATE TABLE users_next (
-          id TEXT PRIMARY KEY,
-          username TEXT NOT NULL COLLATE NOCASE UNIQUE,
-          password_hash TEXT NOT NULL,
-          display_name TEXT NOT NULL,
-          nickname TEXT NOT NULL,
-          role TEXT NOT NULL CHECK (role IN ('sysadmin', 'user')),
-          can_manage_categories INTEGER NOT NULL DEFAULT 0 CHECK (can_manage_categories IN (0, 1)),
-          active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-          created_at TEXT NOT NULL
-        );
-      `)
-      const insert = db.prepare(`
-        INSERT INTO users_next (
-          id, username, password_hash, display_name, nickname, role,
-          can_manage_categories, active, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      for (const row of rows) {
-        const username = String(row.username ?? '')
-        const displayName = String(row.display_name ?? username)
-        const nicknameRaw = names.has('nickname') ? String(row.nickname ?? '').trim() : ''
-        const canManage =
-          names.has('can_manage_categories') && Number(row.can_manage_categories) === 1 ? 1 : 0
-        const active = names.has('active') && Number(row.active) === 0 ? 0 : 1
-        const created =
-          names.has('created_at') && String(row.created_at ?? '').length > 0
-            ? String(row.created_at)
-            : createdAt
-        insert.run(
-          row.id,
-          username,
-          row.password_hash,
-          displayName,
-          nicknameRaw || displayName,
-          mappedRole(username, String(row.role ?? '')),
-          canManage,
-          active,
-          created,
-        )
-      }
-      db.exec('DROP TABLE users')
-      db.exec('ALTER TABLE users_next RENAME TO users')
-    })
-    apply()
-  } finally {
-    db.pragma('foreign_keys = ON')
-  }
 }
 
 function needsAuditUpgrade(db: AppDatabase): boolean {
@@ -786,93 +510,54 @@ function ensureAuditSchema(db: AppDatabase) {
     return
   }
   if (!needsAuditUpgrade(db)) return
+  if (
+    /CHECK\s*\(\s*action\s+IN/i.test(tableSql(db, 'audit_log')) &&
+    !tableSql(db, 'audit_log').includes("'breach_check_unavailable'")
+  )
+    throw new Error('Historical audit constraints require a separate upgrade; no data changed')
   const names = new Set(columnNames(db, 'audit_log'))
-  const rows = db.prepare('SELECT * FROM audit_log').all() as Record<string, unknown>[]
-  const apply = db.transaction(() => {
-    db.exec(`
-      CREATE TABLE audit_log_next (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        created_at TEXT NOT NULL,
-        actor_username TEXT NOT NULL,
-        action TEXT NOT NULL CHECK (action IN (${auditActionsSql})),
-        template_id TEXT NOT NULL DEFAULT '',
-        file_name TEXT NOT NULL DEFAULT '',
-        category_id TEXT NOT NULL DEFAULT '',
-        detail TEXT NOT NULL DEFAULT '',
-        result TEXT NOT NULL DEFAULT 'allowed',
-        target_username TEXT NOT NULL DEFAULT ''
-      );
-    `)
-    const insert = db.prepare(`
-      INSERT INTO audit_log_next (
-        id, created_at, actor_username, action, template_id, file_name, category_id, detail, result,
-        target_username
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `)
-    for (const row of rows) {
-      insert.run(
-        row.id,
-        row.created_at,
-        row.actor_username,
-        row.action,
-        row.template_id ?? '',
-        names.has('file_name') ? (row.file_name ?? '') : '',
-        row.category_id ?? '',
-        names.has('detail') ? (row.detail ?? '') : '',
-        names.has('result') && row.result ? row.result : 'allowed',
-        names.has('target_username') ? (row.target_username ?? '') : '',
+  for (const name of ['detail', 'result', 'target_username']) {
+    if (!names.has(name))
+      db.exec(
+        `ALTER TABLE audit_log ADD COLUMN ${name} TEXT NOT NULL DEFAULT '${name === 'result' ? 'allowed' : ''}'`,
       )
-    }
-    db.exec('DROP TABLE audit_log')
-    db.exec('ALTER TABLE audit_log_next RENAME TO audit_log')
-  })
-  apply()
-}
-
-function deleteSeededCategories(db: AppDatabase) {
-  const removeStepLinks = db.prepare(`
-    DELETE FROM step_templates
-    WHERE step_id IN (SELECT id FROM category_steps WHERE category_id = ?)
-  `)
-  const removeSteps = db.prepare('DELETE FROM category_steps WHERE category_id = ?')
-  const removeCategory = db.prepare('DELETE FROM categories WHERE id = ?')
-  const apply = db.transaction(() => {
-    for (const id of seededCategoryIds) {
-      removeStepLinks.run(id)
-      removeSteps.run(id)
-      removeCategory.run(id)
-    }
-  })
-  apply()
+  }
 }
 
 export function migrate(db: AppDatabase) {
-  db.exec(accountTables)
-  if (!tableExists(db, 'categories')) {
-    createCurrentSchema(db)
-  } else {
-    if (isLegacySchema(db)) upgradeLegacySchema(db)
-    if (needsStepLinkMigration(db)) upgradeStepLinks(db)
-    db.exec(stepTable + linkTable)
-    deleteSeededCategories(db)
-  }
-  ensureAuditSchema(db)
-  upgradeAccounts(db)
-  db.exec(feedbackTable + registerEventsTable)
   db.transaction(() => {
-    if (!columnNames(db, 'categories').includes('group_name'))
-      db.exec(
-        "ALTER TABLE categories ADD COLUMN group_name TEXT NOT NULL DEFAULT 'criminal' CHECK(group_name IN ('criminal','admin','internal'))",
-      )
-    if (!columnNames(db, 'category_steps').includes('details'))
-      db.exec("ALTER TABLE category_steps ADD COLUMN details TEXT NOT NULL DEFAULT '{}'")
-    db.exec(`CREATE TABLE IF NOT EXISTS category_variants (
+    db.exec(accountTables)
+    if (!tableExists(db, 'categories')) {
+      createCurrentSchema(db)
+    } else {
+      if (isLegacySchema(db))
+        throw new Error(
+          'Unsupported historical schema: restore a backup and upgrade separately; no data changed',
+        )
+      if (needsStepLinkMigration(db))
+        throw new Error('Historical step IDs require an explicit mapping; no data changed')
+      db.exec(stepTable + linkTable)
+      // Built-in IDs may contain user content: never remove rows during migration.
+    }
+    ensureAuditSchema(db)
+    if (needsAccountUpgrade(db)) throw new Error('Historical accounts require a separate upgrade')
+    db.exec(feedbackTable + registerEventsTable)
+    db.transaction(() => {
+      if (!columnNames(db, 'categories').includes('group_name'))
+        db.exec(
+          "ALTER TABLE categories ADD COLUMN group_name TEXT NOT NULL DEFAULT 'criminal' CHECK(group_name IN ('criminal','admin','internal'))",
+        )
+      if (!columnNames(db, 'category_steps').includes('details'))
+        db.exec("ALTER TABLE category_steps ADD COLUMN details TEXT NOT NULL DEFAULT '{}'")
+      db.exec(`CREATE TABLE IF NOT EXISTS category_variants (
       id TEXT PRIMARY KEY, category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
       name TEXT NOT NULL, UNIQUE(category_id, name));
       CREATE TABLE IF NOT EXISTS category_fields (
       id TEXT PRIMARY KEY, category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
       name TEXT NOT NULL, key TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('text','number')),
       UNIQUE(category_id, key));`)
+    })()
+    migrateModules(db)
   })()
 }
 
@@ -975,7 +660,6 @@ export function createQueries(db: AppDatabase) {
   const updateCategory = db.prepare(
     'UPDATE categories SET code = ?, name = ?, summary = ?, updated_at = ? WHERE id = ?',
   )
-  const deleteStep = db.prepare('DELETE FROM category_steps WHERE id = ?')
   const upsertStep = db.prepare(`
     INSERT INTO category_steps (id, category_id, sort_order, body) VALUES (?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
@@ -1138,16 +822,20 @@ export function createQueries(db: AppDatabase) {
   }
 
   function writeSteps(categoryId: string, steps: StepInput[]) {
-    const existing = new Set((listStepIds.all(categoryId) as { id: string }[]).map((row) => row.id))
-    const keep = new Set(steps.map((step) => step.id))
-    for (const id of existing) {
-      if (!keep.has(id)) deleteStep.run(id)
-    }
+    const created: string[] = []
     steps.forEach((step, index) => {
+      const isNew = !getStepRow.get(step.id)
       upsertStep.run(step.id, categoryId, index, step.body)
+      if (isNew) {
+        created.push(step.id)
+        db.prepare(
+          'INSERT INTO base_step_refs(category_id, step_id, sort_order) VALUES (?, ?, ?)',
+        ).run(categoryId, step.id, step.order ?? index)
+      }
       deleteStepLinks.run(step.id)
       step.templateIds.forEach((templateId, order) => insertLink.run(step.id, templateId, order))
     })
+    return created
   }
 
   function writeAudit(
@@ -1208,14 +896,40 @@ export function createQueries(db: AppDatabase) {
         }
       })
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    category.baseSteps = db
+      .prepare(
+        'SELECT step_id AS stepId, sort_order AS sortOrder FROM base_step_refs WHERE category_id = ? ORDER BY sort_order, step_id',
+      )
+      .all(row.id) as StepRef[]
+    category.modules = (
+      db
+        .prepare(
+          'SELECT id, category_id AS categoryId, name, sort_order AS sortOrder FROM category_modules WHERE category_id = ? ORDER BY sort_order, id',
+        )
+        .all(row.id) as ModuleRecord[]
+    ).map((m) => ({
+      ...m,
+      steps: db
+        .prepare(
+          'SELECT step_id AS stepId, sort_order AS sortOrder FROM module_step_refs WHERE module_id = ? ORDER BY sort_order, step_id',
+        )
+        .all(m.id) as StepRef[],
+    }))
     return category
   }
-  function writeDetails(input: CategoryInput) {
+  function writeDetails(input: CategoryInput, created: string[]) {
     db.prepare('UPDATE categories SET group_name = ? WHERE id = ?').run(
       input.group ?? 'criminal',
       input.id,
     )
     if (input.variants) {
+      const previous = new Set(
+        (
+          db.prepare('SELECT id FROM category_variants WHERE category_id = ?').all(input.id) as {
+            id: string
+          }[]
+        ).map((v) => v.id),
+      )
       db.prepare('DELETE FROM category_variants WHERE category_id = ?').run(input.id)
       for (const v of input.variants)
         db.prepare('INSERT INTO category_variants(id, category_id, name) VALUES (?, ?, ?)').run(
@@ -1223,6 +937,15 @@ export function createQueries(db: AppDatabase) {
           input.id,
           v.name,
         )
+      for (const [index, v] of input.variants.entries()) {
+        if (
+          !previous.has(v.id) &&
+          !db.prepare('SELECT 1 FROM category_modules WHERE id = ?').get(v.id)
+        )
+          db.prepare(
+            'INSERT INTO category_modules(id, category_id, name, sort_order) VALUES (?, ?, ?, ?)',
+          ).run(v.id, input.id, v.name, index)
+      }
     }
     if (input.fields) {
       db.prepare('DELETE FROM category_fields WHERE category_id = ?').run(input.id)
@@ -1230,6 +953,18 @@ export function createQueries(db: AppDatabase) {
         db.prepare(
           'INSERT INTO category_fields(id, category_id, name, key, type) VALUES (?, ?, ?, ?, ?)',
         ).run(f.id, input.id, f.name, f.key, f.type)
+    }
+    for (const step of input.steps.filter((s) => created.includes(s.id) && s.variantIds?.length)) {
+      db.prepare('DELETE FROM base_step_refs WHERE category_id = ? AND step_id = ?').run(
+        input.id,
+        step.id,
+      )
+      for (const id of new Set(step.variantIds))
+        db.prepare('INSERT INTO module_step_refs VALUES (?, ?, ?)').run(
+          id,
+          step.id,
+          step.order ?? input.steps.indexOf(step),
+        )
     }
     input.steps.forEach((step, index) =>
       db.prepare('UPDATE category_steps SET details = ? WHERE id = ?').run(
@@ -1245,6 +980,29 @@ export function createQueries(db: AppDatabase) {
     )
   }
   return {
+    stepImpact(stepId: string) {
+      return {
+        base: db
+          .prepare('SELECT category_id AS categoryId FROM base_step_refs WHERE step_id = ?')
+          .all(stepId),
+        modules: db
+          .prepare(
+            'SELECT m.id, m.name, m.category_id AS categoryId FROM module_step_refs r JOIN category_modules m ON m.id = r.module_id WHERE r.step_id = ? ORDER BY m.sort_order, m.id',
+          )
+          .all(stepId),
+        templates: db
+          .prepare(
+            'SELECT template_id AS templateId FROM step_templates WHERE step_id = ? ORDER BY sort_order, template_id',
+          )
+          .all(stepId),
+      }
+    },
+    configWrite(categoryId: string, actor: string, detail: string, apply: () => void | boolean) {
+      db.transaction(() => {
+        if (apply() === false) return
+        writeAudit(actor, 'category_update', '', '', categoryId, detail)
+      })()
+    },
     deleteMember(id: string) {
       db.transaction(() => {
         const user = findUserById.get(id) as UserRow | undefined
@@ -1445,8 +1203,8 @@ export function createQueries(db: AppDatabase) {
     createCategory(input: CategoryInput, actorUsername: string) {
       const apply = db.transaction(() => {
         insertCategory.run(input.id, input.code, input.name, input.summary, input.updatedAt)
-        writeSteps(input.id, input.steps)
-        writeDetails(input)
+        const created = writeSteps(input.id, input.steps)
+        writeDetails(input, created)
         writeAudit(actorUsername, 'category_create', '', '', input.id, input.name)
       })
       try {
@@ -1467,8 +1225,8 @@ export function createQueries(db: AppDatabase) {
           input.id,
         )
         if (result.changes === 0) return false
-        writeSteps(input.id, input.steps)
-        writeDetails(input)
+        const created = writeSteps(input.id, input.steps)
+        writeDetails(input, created)
         writeAudit(actorUsername, 'category_update', '', '', input.id, input.name)
         return true
       })

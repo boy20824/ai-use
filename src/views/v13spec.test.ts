@@ -15,6 +15,21 @@ const mocks = vi.hoisted(() => {
       { id: 'stop', name: '攔查' },
       { id: 'crash', name: '肇事' },
     ],
+    get baseSteps() {
+      return this.steps
+        .filter((s) => !s.variantIds.length)
+        .map((s) => ({ stepId: s.id, sortOrder: s.order }))
+    },
+    get modules() {
+      return this.variants.map((v, i) => ({
+        ...v,
+        categoryId: this.id,
+        sortOrder: i,
+        steps: this.steps
+          .filter((s) => s.variantIds.includes(v.id))
+          .map((s) => ({ stepId: s.id, sortOrder: s.order })),
+      }))
+    },
     fields: [{ id: 'alcohol', name: '酒測值', key: '酒測值', type: 'number' }],
     steps: [
       {
@@ -135,7 +150,7 @@ describe('workflow acceptance UI', () => {
     expect(host.textContent).toContain('主動攔查')
   })
 
-  it('requires all step variants and updates when either selection is removed', async () => {
+  it('shows a shared step when either module is selected and dedupes their union', async () => {
     const combined = {
       ...mocks.category.steps[0]!,
       id: 'combined',
@@ -147,15 +162,20 @@ describe('workflow acceptance UI', () => {
       await mount()
       expect(host.textContent).not.toContain('同時符合步驟')
       await check(input('攔查'), true)
-      expect(host.textContent).not.toContain('同時符合步驟')
+      expect(host.textContent).toContain('同時符合步驟')
       await check(input('肇事'), true)
       expect(host.textContent).toContain('同時符合步驟')
       expect(host.textContent).toContain('攔查專屬')
       expect(host.textContent).toContain('肇事專屬')
+      expect(
+        [...host.querySelectorAll('h3')].filter((h) => h.textContent?.trim() === '同時符合步驟'),
+      ).toHaveLength(1)
       await check(input('攔查'), false)
-      expect(host.textContent).not.toContain('同時符合步驟')
+      expect(host.textContent).toContain('同時符合步驟')
       await check(input('攔查'), true)
       await check(input('肇事'), false)
+      expect(host.textContent).toContain('同時符合步驟')
+      await check(input('攔查'), false)
       expect(host.textContent).not.toContain('同時符合步驟')
     } finally {
       mocks.category.steps.pop()
@@ -169,7 +189,7 @@ describe('workflow acceptance UI', () => {
     mocks.category.steps = steps.map((step) => ({ ...step, variantIds: [] }))
     try {
       await mount()
-      expect(host.querySelector('[aria-label="樣態選擇"]')).toBeNull()
+      expect(host.querySelector('[aria-label="情境模組選擇"]')).toBeNull()
       for (const step of steps) expect(host.textContent).toContain(step.title)
     } finally {
       mocks.category.variants = variants
@@ -189,6 +209,7 @@ describe('workflow acceptance UI', () => {
     await check(completed, false)
     expect(host.querySelector('.fixed-step')?.classList.contains('bg-tone-ok')).toBe(false)
     await check(completed, true)
+    await check(input('攔查'), true)
     const field = host.querySelector('input[type="number"]') as HTMLInputElement
     expect(field).not.toBeNull()
     field.value = '0.35'
@@ -198,6 +219,8 @@ describe('workflow acceptance UI', () => {
     await nextTick()
     expect((host.querySelector('input[type="number"]') as HTMLInputElement).value).toBe('')
     expect(input('已完成').checked).toBe(false)
+    expect(input('攔查').checked).toBe(false)
+    expect(host.textContent).not.toContain('攔查專屬')
     await router.push('/categories/mock-flow')
     expect(input('已完成').checked).toBe(false)
     expect(host.querySelector('progress')).toBeNull()
