@@ -31,7 +31,21 @@ export interface CategoryStep extends StepDetails {
   templateIds: string[]
 }
 
+export interface StepRef {
+  stepId: string
+  sortOrder: number
+}
+export interface CategoryModule {
+  id: string
+  categoryId: string
+  name: string
+  sortOrder: number
+  steps: StepRef[]
+}
+
 export interface CaseCategory {
+  baseSteps?: StepRef[]
+  modules?: CategoryModule[]
   group?: CategoryGroup
   variants?: Variant[]
   fields?: FieldDef[]

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { categoryGroups } from '@/config/app'
 import type { CaseCategory, CategoryGroup, Variant, FieldDef } from '@/types/domain'
+import SopEditor from '@/components/SopEditor.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import FileDropzone from '@/components/FileDropzone.vue'
 import PageIntro from '@/components/PageIntro.vue'
@@ -75,8 +76,6 @@ const group = ref<CategoryGroup>('criminal')
 const wizard = ref(1)
 const variants = ref<Variant[]>([])
 const fields = ref<FieldDef[]>([])
-const copySource = ref('')
-const copyTarget = ref('')
 const summary = ref('')
 const steps = ref<DraftStep[]>([])
 const populated = ref(false)
@@ -128,7 +127,7 @@ function fillFrom(category: CaseCategory) {
 watch(
   existing,
   (category) => {
-    if (!isEdit.value || !category || populated.value) return
+    if (!isEdit.value || !category) return
     fillFrom(category)
   },
   { immediate: true },
@@ -262,37 +261,11 @@ async function onUpload(index: number, files: File[]) {
 
 const newId = () => crypto.randomUUID()
 
-function removeVariant(id: string) {
-  variants.value = variants.value.filter((v) => v.id !== id)
-  steps.value = steps.value.map((s) => ({ ...s, variantIds: s.variantIds.filter((v) => v !== id) }))
-}
-function copyVariant() {
-  if (!copySource.value || !copyTarget.value || copySource.value === copyTarget.value) return
-  const copies = steps.value
-    .filter((s) => s.variantIds.includes(copySource.value))
-    .map((s) => ({
-      ...s,
-      key: crypto.randomUUID(),
-      id: undefined,
-      templateIds: [...s.templateIds],
-      variantIds: [copyTarget.value],
-    }))
-  if (steps.value.length + copies.length > 30) {
-    formError.value = '最多可建立 30 個步驟。'
-    return
-  }
-  steps.value = [...steps.value, ...copies]
-}
-
 async function submit() {
   formError.value = ''
   if (!name.value.trim()) {
     wizard.value = 1
     formError.value = '請填寫流程名稱。'
-    return
-  }
-  if (wizard.value === 2 && variants.value.some((v) => !v.name.trim())) {
-    formError.value = '請填寫每個樣態的名稱。'
     return
   }
   if (wizard.value < 3) {
@@ -319,7 +292,6 @@ async function submit() {
   const input = {
     name: name.value.trim(),
     group: group.value,
-    variants: variants.value,
     fields: fields.value.map((field) => ({
       ...field,
       name: field.name?.trim(),
@@ -341,7 +313,7 @@ async function submit() {
       return
     }
     const created = await categories.create(input)
-    await router.push(`/categories/${created.id}`)
+    await router.push(`/categories/${created.id}/edit`)
   } catch (cause) {
     formError.value = cause instanceof Error ? cause.message : '無法儲存案件範本。'
   } finally {
@@ -390,7 +362,7 @@ async function submit() {
   >
     <ol class="mb-6 flex gap-3 text-sm" aria-label="編輯進度">
       <li
-        v-for="(label, i) in ['命名與分類', '建立樣態', '步驟與範本']"
+        v-for="(label, i) in ['命名與分類', '情境模組', '步驟與範本']"
         :key="label"
         :class="wizard === i + 1 ? 'font-semibold text-accent-ink' : 'text-ink-muted'"
       >
@@ -433,49 +405,16 @@ async function submit() {
         ></textarea>
       </div>
     </section>
-    <section v-show="wizard === 2" aria-label="樣態設定">
-      <h2 class="font-semibold">建立樣態（選填）</h2>
-      <p class="mt-2 text-sm text-ink-muted">不需要區分樣態時，可直接跳過。</p>
-      <div v-for="variant in variants" :key="variant.id" class="mt-3 flex gap-3">
-        <input
-          v-model="variant.name"
-          :aria-label="'樣態名稱'"
-          maxlength="80"
-          class="field w-full"
-        />
-        <button
-          type="button"
-          class="btn-ghost shrink-0 text-sm text-tone-danger-ink"
-          @click="removeVariant(variant.id)"
-        >
-          移除樣態
-        </button>
-      </div>
-      <button
-        type="button"
-        class="btn-secondary mt-4 py-2"
-        :disabled="variants.length >= 30"
-        @click="variants.push({ id: newId(), name: '' })"
-      >
-        新增樣態
-      </button>
+    <section v-show="wizard === 2" aria-label="情境模組設定">
+      <h2 class="font-semibold">情境模組</h2>
+      <p class="mt-2 text-sm">
+        儲存案類後，可新增、引用及排序模組步驟。基本 SOP 固定先加入，再依模組順序合成。
+      </p>
     </section>
     <section v-show="wizard === 3">
-      <div v-if="variants.length > 1" class="mt-4 flex flex-wrap gap-3">
-        <select v-model="copySource" aria-label="複製來源樣態" class="field">
-          <option value="">來源樣態</option>
-          <option v-for="v in variants" :key="v.id" :value="v.id">{{ v.name }}</option>
-        </select>
-        <select v-model="copyTarget" aria-label="複製目標樣態" class="field">
-          <option value="">目標樣態</option>
-          <option v-for="v in variants" :key="v.id" :value="v.id">{{ v.name }}</option>
-        </select>
-        <button type="button" class="btn-ghost text-sm text-accent-ink" @click="copyVariant">
-          複製步驟與範本
-        </button>
-      </div>
-      <fieldset class="mt-6">
-        <legend class="text-sm font-medium text-stone-800">填寫步驟</legend>
+      <SopEditor v-if="isEdit && existing" :category="existing" />
+      <fieldset v-if="!isEdit" class="mt-6">
+        <legend class="text-sm font-medium text-stone-800">基本 SOP</legend>
         <p class="mt-1 text-sm leading-6 text-stone-600">
           每個步驟可以附上零份或多份範本。上傳會先存進範本庫，並連結到該步驟。
         </p>
@@ -507,15 +446,6 @@ async function submit() {
                 class="field mt-2 w-full"
               />
             </label>
-            <p class="mt-3 text-xs text-ink-muted">
-              需同時符合的樣態：未勾選即為共同步驟；勾選多個時須全部符合。
-            </p>
-            <div class="mt-2 flex flex-wrap gap-3">
-              <label v-for="v in variants" :key="v.id" class="text-sm"
-                ><input v-model="step.variantIds" type="checkbox" :value="v.id" />
-                {{ v.name }}</label
-              >
-            </div>
             <div class="mt-2 flex flex-wrap gap-3">
               <button
                 type="button"
@@ -700,7 +630,7 @@ async function submit() {
       <button type="submit" class="btn-primary" :disabled="saving">
         {{
           wizard === 2 && !variants.length
-            ? '跳過樣態'
+            ? '繼續設定步驟'
             : wizard < 3
               ? '下一步'
               : isEdit

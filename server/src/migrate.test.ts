@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { createQueries, migrate, openDatabase, seededCategoryIds } from './db.ts'
+import { createQueries, migrate, openDatabase, seededCategoryIds, type AppDatabase } from './db.ts'
+
+function assertRejectedWithoutChanges(db: AppDatabase) {
+  const snapshot = () => {
+    const schema = db
+      .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .all() as { name: string; sql: string }[]
+    return schema.map((table) => ({
+      ...table,
+      rows: db.prepare(`SELECT * FROM "${table.name.replaceAll('"', '""')}"`).all(),
+    }))
+  }
+  const before = snapshot()
+  for (let attempt = 0; attempt < 2; attempt++) {
+    expect(() => migrate(db)).toThrow(/Historical|historical/)
+    expect(snapshot()).toEqual(before)
+  }
+}
 
 const legacySchema = `
   CREATE TABLE categories (
@@ -35,7 +52,7 @@ const legacySchema = `
 `
 
 describe('category migration', () => {
-  it('upgrades the password-change audit schema and preserves existing events', () => {
+  it('preserves historical audit constraints and events, rejecting destructive upgrades', () => {
     const db = openDatabase(':memory:')
     try {
       migrate(db)
@@ -55,23 +72,14 @@ describe('category migration', () => {
         'test-user',
       )
       const original = db.prepare('SELECT * FROM audit_log').all()
-      migrate(db)
-      migrate(db)
+      assertRejectedWithoutChanges(db)
       expect(db.prepare('SELECT * FROM audit_log').all()).toEqual(original)
-      createQueries(db).insertAudit('test-user', 'breach_check_unavailable', '', '', '', '')
-      expect(
-        db
-          .prepare(
-            "SELECT COUNT(*) AS count FROM audit_log WHERE action = 'breach_check_unavailable'",
-          )
-          .get(),
-      ).toEqual({ count: 1 })
     } finally {
       db.close()
     }
   })
 
-  it('deletes only the fixed seeded categories and keeps template files', () => {
+  it('preserves every legacy category, column, template and audit row on rejected upgrade', () => {
     expect([...seededCategoryIds]).toEqual([
       'general-assist',
       'doc-summary',
@@ -134,60 +142,11 @@ describe('category migration', () => {
       'user-keep',
     )
 
-    migrate(db)
-    migrate(db)
-
-    const queries = createQueries(db)
-    const ids = queries
-      .listCategories()
-      .map((item) => item.id)
-      .sort()
-    for (const id of seededCategoryIds) expect(ids).not.toContain(id)
-    expect(ids).toEqual(['general-assist-extra', 'user-keep'])
-
-    const userTemplate = queries.getTemplateFile('user-template')
-    const seededTemplate = queries.getTemplateFile('sample-field-note')
-    expect(userTemplate?.data?.toString()).toBe('USER-FILE')
-    expect(userTemplate?.usages).toEqual([
-      expect.objectContaining({
-        categoryId: 'user-keep',
-        stepBody: '產生文件',
-      }),
-    ])
-    expect(seededTemplate?.data?.toString()).toBe('SEEDED-FILE')
-    expect(seededTemplate?.usages).toEqual([])
-    expect(queries.listTemplates('user-keep').map((item) => item.id)).toEqual(['user-template'])
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
-      name: string
-    }[]
-    expect(tables.map((table) => table.name)).not.toContain('category_templates')
-    expect(tables.map((table) => table.name)).toContain('step_templates')
-
-    const columns = db.prepare("SELECT name FROM pragma_table_info('categories')").all() as {
-      name: string
-    }[]
-    expect(columns.map((column) => column.name)).not.toContain('audience')
-    expect(columns.map((column) => column.name)).not.toContain('category_id')
-    const templateColumns = db.prepare("SELECT name FROM pragma_table_info('templates')").all() as {
-      name: string
-    }[]
-    expect(templateColumns.map((column) => column.name)).not.toContain('category_id')
-
-    const audit = db.prepare('SELECT action, template_id, result FROM audit_log').all() as {
-      action: string
-      template_id: string
-      result: string
-    }[]
-    expect(audit).toEqual([{ action: 'upload', template_id: 'user-template', result: 'allowed' }])
-
-    const removed = queries.deleteCategory('user-keep', 'admin', '使用者自建類別')
-    expect(removed).toBe(true)
-    expect(queries.getTemplateFile('user-template')?.data?.toString()).toBe('USER-FILE')
-    expect(queries.getTemplateFile('user-template')?.usages).toEqual([])
+    assertRejectedWithoutChanges(db)
     db.close()
   })
 
-  it('moves category template links onto the first step', () => {
+  it('preserves historical step rows and category template links when IDs cannot be safely mapped', () => {
     const db = openDatabase(':memory:')
     db.exec(`
       CREATE TABLE categories (
@@ -279,24 +238,11 @@ describe('category migration', () => {
       'INSERT INTO category_templates (category_id, template_id, sort_order) VALUES (?, ?, ?)',
     ).run('case-empty', 'tpl-a', 0)
 
-    migrate(db)
-    const queries = createQueries(db)
-    const kept = queries.getCategory('case-keep')
-    expect(kept?.steps.map((step) => step.body)).toEqual(['製作筆錄', '通知事主'])
-    expect(kept?.steps[0]?.templateIds).toEqual(['tpl-b', 'tpl-a'])
-    expect(kept?.steps[1]?.templateIds).toEqual([])
-    const empty = queries.getCategory('case-empty')
-    expect(empty?.steps.map((step) => step.body)).toEqual(['產生文件'])
-    expect(empty?.steps[0]?.templateIds).toEqual(['tpl-a'])
-    expect(queries.getTemplateFile('tpl-a')?.data?.toString()).toBe('A')
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
-      name: string
-    }[]
-    expect(tables.map((table) => table.name)).not.toContain('category_templates')
+    assertRejectedWithoutChanges(db)
     db.close()
   })
 
-  it('maps legacy roles, promotes boy20824, and keeps the migration idempotent', () => {
+  it('rejects historical role conversion without changing accounts, sessions or permissions', () => {
     const db = openDatabase(':memory:')
     db.exec(`
       CREATE TABLE users (
@@ -373,53 +319,7 @@ describe('category migration', () => {
       'allowed',
     )
 
-    migrate(db)
-    const queries = createQueries(db)
-    const firstStamp = queries.findUserByUsername('boy20824')?.createdAt
-    migrate(db)
-
-    expect(queries.findUserByUsername('admin')).toMatchObject({
-      role: 'sysadmin',
-      canManageCategories: false,
-      active: true,
-      passwordHash: 'hash-admin',
-    })
-    expect(queries.findUserByUsername('clerk')).toMatchObject({ role: 'user', active: true })
-    expect(queries.findUserByUsername('viewer')).toMatchObject({ role: 'user', active: true })
-    expect(queries.findUserByUsername('kept')).toMatchObject({
-      role: 'user',
-      canManageCategories: false,
-      passwordHash: 'hash-kept',
-    })
-    expect(queries.findUserByUsername('BOY20824')).toMatchObject({
-      id: 'u-boy',
-      role: 'sysadmin',
-      canManageCategories: false,
-      active: true,
-      passwordHash: 'hash-boy',
-      nickname: '伯洋',
-      createdAt: firstStamp,
-    })
-    expect(queries.findSession('sess-boy')?.id).toBe('u-boy')
-    expect(queries.getCategory('case-1')?.name).toBe('竊盜案')
-    const roles = db.prepare('SELECT role FROM users').all() as { role: string }[]
-    expect(roles.every((row) => row.role === 'sysadmin' || row.role === 'user')).toBe(true)
-    const audit = db
-      .prepare('SELECT action, detail, result, target_username FROM audit_log')
-      .all() as { action: string; detail: string; result: string; target_username: string }[]
-    expect(audit).toEqual([
-      {
-        action: 'category_create',
-        detail: '竊盜案',
-        result: 'allowed',
-        target_username: '',
-      },
-    ])
-    expect(() => insertUser.run('u-old', 'legacy', 'hash', '舊', 'admin')).toThrow()
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as {
-      name: string
-    }[]
-    expect(tables.map((table) => table.name)).toContain('feedback_posts')
+    assertRejectedWithoutChanges(db)
     db.close()
   })
 

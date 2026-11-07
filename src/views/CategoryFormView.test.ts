@@ -51,7 +51,7 @@ async function mountFields() {
     history: createMemoryHistory(),
     routes: [
       { path: '/categories/new', name: 'category-new', component: CategoryFormView },
-      { path: '/categories/:id', component: { render: () => h('div') } },
+      { path: '/categories/:id/edit', component: { render: () => h('div') } },
       { path: '/categories', component: { render: () => h('div') } },
     ],
   })
@@ -62,7 +62,7 @@ async function mountFields() {
   await nextTick()
   await type('#category-name', '公共危險')
   await submit()
-  expect(button('跳過樣態')).toBeDefined()
+  expect(button('繼續設定步驟')).toBeDefined()
   await submit()
   button('新增欄位').click()
   await nextTick()
@@ -81,7 +81,6 @@ it('skips optional variants, derives the key from the trimmed name and copies it
   await submit()
   expect(mocks.create).toHaveBeenCalledWith(
     expect.objectContaining({
-      variants: [],
       fields: [expect.objectContaining({ name: '酒測值', key: '酒測值', type: 'text' })],
     }),
   )

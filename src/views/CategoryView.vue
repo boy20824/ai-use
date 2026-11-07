@@ -12,6 +12,7 @@ import type { CategoryStep } from '@/types/domain'
 import { downloadBlob, downloadBytes } from '@/utils/download'
 import { displayFileName } from '@/utils/fileName'
 import { applyRocDateFields, parseRocDate } from '@/utils/rocDate'
+import { composeSteps } from '@/workbench/compose'
 import { initialDraftValues } from '@/workbench/draft'
 import {
   checkedTemplates,
@@ -60,17 +61,7 @@ const categoryId = computed(() => {
 const category = computed(() => categories.byId(categoryId.value))
 const selectedVariants = ref<string[]>([])
 const visibleSteps = computed(() =>
-  (category.value?.steps ?? [])
-    .filter(
-      (step) =>
-        !step.variantIds?.length ||
-        step.variantIds.every((id) => selectedVariants.value.includes(id)),
-    )
-    .sort(
-      (a, b) =>
-        Number(Boolean(a.variantIds?.length)) - Number(Boolean(b.variantIds?.length)) ||
-        (a.order ?? 0) - (b.order ?? 0),
-    ),
+  category.value ? composeSteps(category.value, selectedVariants.value) : [],
 )
 const printStep = ref<CategoryStep | null>(null)
 async function printSop(step: CategoryStep) {
@@ -87,7 +78,7 @@ function fieldLabel(key: string) {
 }
 
 const linkedTemplates = computed(() => {
-  const ids = category.value?.steps.flatMap((step) => step.templateIds) ?? []
+  const ids = visibleSteps.value.flatMap((step) => step.templateIds)
   const seen = new Set<string>()
   return ids
     .filter((id) => {
@@ -281,7 +272,7 @@ async function produceStep(stepId: string, templateIds: string[], index: number)
   }
 }
 
-const categoryTemplateIds = computed(() => dedupedIds(category.value?.steps ?? []))
+const categoryTemplateIds = computed(() => dedupedIds(visibleSteps.value))
 
 const overviewList = computed(() =>
   overviewCatalog(categoryTemplateIds.value, temporaryIds.value, (id) => {
@@ -450,7 +441,7 @@ onUnmounted(clearDraft)
         案件範本
       </li>
       <li class="rounded-full bg-surface px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
-        {{ category.steps.length }} 個範本步驟
+        {{ visibleSteps.length }} 個範本步驟
       </li>
       <li class="rounded-full bg-surface px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
         {{ category.templateCount }} 份範本
@@ -495,9 +486,13 @@ onUnmounted(clearDraft)
       </div>
     </div>
 
-    <div v-if="category.variants?.length" class="mb-5 flex flex-wrap gap-2" aria-label="樣態選擇">
+    <div
+      v-if="category.modules?.length"
+      class="mb-5 flex flex-wrap gap-2"
+      aria-label="情境模組選擇"
+    >
       <label
-        v-for="variant in category.variants"
+        v-for="variant in category.modules"
         :key="variant.id"
         class="cursor-pointer rounded-full border border-edge px-4 py-2 text-sm"
         :class="
@@ -612,7 +607,7 @@ onUnmounted(clearDraft)
               </details>
             </li>
 
-            <li v-if="category.steps.length === 0" class="py-5 text-sm text-ink-muted">
+            <li v-if="visibleSteps.length === 0" class="py-5 text-sm text-ink-muted">
               尚未設定範本步驟。
             </li>
 
@@ -629,7 +624,7 @@ onUnmounted(clearDraft)
                   {{ String(index + 1).padStart(2, '0') }}
                 </span>
                 <span
-                  v-if="index < category.steps.length - 1"
+                  v-if="index < visibleSteps.length - 1"
                   class="my-2 w-px flex-1 bg-stone-200"
                   aria-hidden="true"
                 ></span>
