@@ -162,3 +162,42 @@ it.each(['{"variantIds":["missing"]}', '{broken', '{"order":"1"}', '{"variantIds
     }
   },
 )
+
+it('adds default-false parallel settings without rewriting legacy details and preserves explicit settings on repeated migration', () => {
+  const db = openDatabase(':memory:')
+  try {
+    migrate(db)
+    db.exec('DROP TABLE step_parallel_settings')
+    db.prepare('INSERT INTO categories(id, name, updated_at) VALUES (?, ?, ?)').run(
+      'c',
+      'Mock',
+      'old',
+    )
+    const details = '{"note":"Legacy note","extra":"preserve"}'
+    db.prepare('INSERT INTO category_steps VALUES (?, ?, ?, ?, ?)').run(
+      's',
+      'c',
+      0,
+      'Legacy',
+      details,
+    )
+    const before = db.prepare('SELECT * FROM category_steps').all()
+    migrate(db)
+    migrate(db)
+    expect(db.prepare('SELECT * FROM category_steps').all()).toEqual(before)
+    expect(db.prepare('SELECT * FROM step_parallel_settings').all()).toEqual([
+      { step_id: 's', can_run_in_parallel: 0 },
+    ])
+    db.prepare('UPDATE step_parallel_settings SET can_run_in_parallel = 1 WHERE step_id = ?').run(
+      's',
+    )
+    migrate(db)
+    expect(db.prepare('SELECT * FROM step_parallel_settings').all()).toEqual([
+      { step_id: 's', can_run_in_parallel: 1 },
+    ])
+    expect(db.prepare('SELECT * FROM category_steps').all()).toEqual(before)
+    expect(db.pragma('foreign_key_check')).toEqual([])
+  } finally {
+    db.close()
+  }
+})

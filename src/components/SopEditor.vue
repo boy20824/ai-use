@@ -19,6 +19,7 @@ const editing = ref<CategoryStep | null>(null)
 const title = ref('')
 const items = ref('')
 const note = ref('')
+const canRunInParallel = ref(false)
 const templateIds = ref<string[]>([])
 const locations = ref('')
 const moduleName = ref('')
@@ -137,6 +138,7 @@ async function edit(step?: CategoryStep) {
   title.value = step?.title ?? step?.body ?? ''
   items.value = (step?.items ?? []).join('\n')
   note.value = step?.note ?? ''
+  canRunInParallel.value = step?.canRunInParallel ?? false
   templateIds.value = [...(step?.templateIds ?? [])]
   locations.value = ''
   if (step)
@@ -157,6 +159,7 @@ function saveStep() {
         .map((s) => s.trim())
         .filter(Boolean),
       note: note.value,
+      canRunInParallel: canRunInParallel.value,
       templateIds: templateIds.value,
     }
     const result = await request(
@@ -248,6 +251,9 @@ async function upload(files: File[]) {
             class="rounded-control bg-surface-muted p-3"
           >
             <p>{{ stepFor(r.stepId)?.title ?? stepFor(r.stepId)?.body }}</p>
+            <p v-if="stepFor(r.stepId)?.canRunInParallel" class="text-sm">
+              此步驟可請其他人同步進行
+            </p>
             <p class="text-xs">
               {{
                 stepFor(r.stepId)
@@ -289,6 +295,9 @@ async function upload(files: File[]) {
         <label class="block"
           >特別註記<textarea v-model="note" maxlength="2000" class="field w-full" />
         </label>
+        <label class="block"
+          ><input v-model="canRunInParallel" type="checkbox" /> 此步驟可請其他人同步進行</label
+        >
         <fieldset>
           <legend>關聯文件（沿用範本庫）</legend>
           <label v-for="t in templates.items" :key="t.id" class="block"

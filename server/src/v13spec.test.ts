@@ -992,3 +992,103 @@ it('persists isolated combination defaults, validates exact ownership/sets, reco
     },
   ])
 })
+
+it('defaults parallel hints off, authorizes maintenance, rejects non-booleans/foreign resources, and audits atomically', async () => {
+  const { app, db } = await setup()
+  const admin = await login(app)
+  const normal = await login(app, 'viewer')
+  db.prepare('UPDATE users SET can_manage_categories = 1 WHERE username = ?').run('clerk')
+  const manager = await login(app, 'clerk')
+  const c = await category(app, admin, 'Parallel Mock')
+  const other = await category(app, admin, 'Other Parallel Mock')
+  const base = `/api/categories/${c.id}`
+  const created = await request(app, manager, 'POST', `${base}/steps`, { title: 'D' })
+  expect(created.statusCode).toBe(201)
+  const step = created.json().step
+  expect(step.canRunInParallel).toBe(false)
+  const url = `${base}/steps/${step.id}`
+  expect((await request(app, normal, 'PATCH', url, { canRunInParallel: true })).statusCode).toBe(
+    403,
+  )
+  expect(
+    (
+      await request(app, normal, 'POST', `${base}/steps`, {
+        title: 'Denied',
+        canRunInParallel: true,
+      })
+    ).statusCode,
+  ).toBe(403)
+  expect(
+    (
+      await request(app, normal, 'PUT', base, {
+        name: 'Denied',
+        steps: [{ ...step, canRunInParallel: true }],
+      })
+    ).statusCode,
+  ).toBe(403)
+  for (const invalid of ['true', 'false', 0, 1, null, [], {}]) {
+    expect(
+      (await request(app, manager, 'PATCH', url, { canRunInParallel: invalid })).statusCode,
+    ).toBe(400)
+    expect(
+      (
+        await request(app, manager, 'POST', `${base}/steps`, {
+          title: 'Invalid',
+          canRunInParallel: invalid,
+        })
+      ).statusCode,
+    ).toBe(400)
+  }
+  expect(
+    (
+      await request(app, manager, 'PATCH', `/api/categories/${other.id}/steps/${step.id}`, {
+        canRunInParallel: true,
+      })
+    ).statusCode,
+  ).toBe(404)
+  expect(
+    (await request(app, manager, 'PATCH', url, { categoryId: other.id, canRunInParallel: true }))
+      .statusCode,
+  ).toBe(400)
+  const updated = await request(app, manager, 'PATCH', url, { canRunInParallel: true })
+  expect(updated.statusCode).toBe(200)
+  expect(updated.json().step.canRunInParallel).toBe(true)
+  expect(
+    (await request(app, manager, 'PATCH', url, { note: 'Keep setting' })).json().step
+      .canRunInParallel,
+  ).toBe(true)
+  expect((await request(app, normal, 'GET', base)).json().category.steps[0].canRunInParallel).toBe(
+    true,
+  )
+  expect(
+    db
+      .prepare(
+        "SELECT actor_username, category_id, detail FROM audit_log WHERE detail LIKE 'step_parallel:%'",
+      )
+      .all(),
+  ).toEqual([
+    { actor_username: 'clerk', category_id: c.id, detail: `step_parallel:${step.id}:true` },
+  ])
+  db.exec(
+    "CREATE TRIGGER fail_parallel_audit BEFORE INSERT ON audit_log WHEN NEW.detail LIKE 'step_parallel:%' BEGIN SELECT RAISE(ABORT, 'Mock audit failure'); END;",
+  )
+  expect((await request(app, manager, 'PATCH', url, { canRunInParallel: false })).statusCode).toBe(
+    500,
+  )
+  expect((await request(app, normal, 'GET', base)).json().category.steps[0].canRunInParallel).toBe(
+    true,
+  )
+  db.exec('DROP TRIGGER fail_parallel_audit')
+  expect(
+    (await request(app, manager, 'PATCH', url, { canRunInParallel: false })).json().step
+      .canRunInParallel,
+  ).toBe(false)
+  expect(
+    db
+      .prepare("SELECT detail FROM audit_log WHERE detail LIKE 'step_parallel:%' ORDER BY id")
+      .all(),
+  ).toEqual([
+    { detail: `step_parallel:${step.id}:true` },
+    { detail: `step_parallel:${step.id}:false` },
+  ])
+})

@@ -194,3 +194,28 @@ it('preserves dirty state on failed saves, supports base-only and warns on stale
     body: JSON.stringify({ moduleIds: [], stepIds: [...'ACB'] }),
   })
 })
+
+it('retains the exact parallel hint when reopening the saved combination preview', async () => {
+  const config = fixture()
+  config.steps.find((step) => step.id === 'D')!.canRunInParallel = true
+  config.combinationOrders = [{ moduleIds: ['alcohol'], stepIds: [...'DABC'] }]
+  await mount(config)
+  expect(host.textContent).not.toContain('此步驟可請其他人同步進行')
+  await toggle('酒駕')
+  expect(order()).toBe('DABC')
+  expect(host.querySelector('[data-step-id="D"]')?.textContent).toContain(
+    '此步驟可請其他人同步進行',
+  )
+  expect(host.querySelector('[data-step-id="A"]')?.textContent).not.toContain(
+    '此步驟可請其他人同步進行',
+  )
+  app?.unmount()
+  app = undefined
+  host.remove()
+  await mount(config)
+  await toggle('酒駕')
+  expect(host.querySelector('[data-step-id="D"]')?.textContent).toContain(
+    '此步驟可請其他人同步進行',
+  )
+  expect(order()).toBe('DABC')
+})

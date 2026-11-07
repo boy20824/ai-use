@@ -51,7 +51,7 @@ const mocks = vi.hoisted(() => {
         variantIds: [],
         items: ['共同細項'],
         note: '<script>mock</script>',
-        templateIds: [] as string[],
+        templateIds: ['basic-template'] as string[],
       },
       {
         id: 'crash-step',
@@ -65,21 +65,34 @@ const mocks = vi.hoisted(() => {
       },
     ],
   }
-  return { category, bytesFor: vi.fn(), download: vi.fn() }
+  return {
+    category,
+    library: [] as { id: string; fileName: string; placeholders: string[] }[],
+    bytesFor: vi.fn(),
+    download: vi.fn(),
+    render: vi.fn(() => new Uint8Array()),
+    zip: vi.fn(async () => new Blob()),
+  }
 })
 vi.mock('@/stores/categories', () => ({
   useCategoryStore: () => ({ byId: () => mocks.category, ready: true }),
 }))
 vi.mock('@/stores/templates', () => ({
   useTemplateStore: () => ({
-    items: [],
+    get items() {
+      return mocks.library
+    },
     byId: (id: string) =>
-      id === 'test-template' ? { id, fileName: 'test.docx', placeholders: [] } : undefined,
+      mocks.library.find((item) => item.id === id) ??
+      (id === 'test-template' || id === 'basic-template'
+        ? { id, fileName: 'test.docx', placeholders: id === 'basic-template' ? ['酒測值'] : [] }
+        : undefined),
     bytesFor: mocks.bytesFor,
   }),
 }))
 vi.mock('@/services/docxTemplates', () => ({
-  renderDocx: () => new Uint8Array(),
+  renderDocx: mocks.render,
+  zipGeneratedFiles: mocks.zip,
   templateMimeType: 'test/docx',
 }))
 vi.mock('@/utils/download', () => ({ downloadBytes: mocks.download, downloadBlob: mocks.download }))
@@ -345,5 +358,193 @@ it('keeps #21 completion checkboxes functional with saved cross-source order and
     expect(sessionStorage.length).toBe(0)
   } finally {
     mocks.category.combinationOrders = []
+  }
+})
+
+it('places scenario inputs in their steps, preserves scoped values through combination ordering, and generates each selected context', async () => {
+  const original = mocks.category.steps
+  mocks.library.push(
+    { id: 'base-x', fileName: 'base.docx', placeholders: ['酒測值', '姓名', '日期'] },
+    { id: 'shared-template', fileName: 'same.docx', placeholders: ['酒測值', '專屬', '日期_民國'] },
+    { id: 'n-only', fileName: 'n.docx', placeholders: ['Z'] },
+  )
+  mocks.category.steps = original.map((step) => ({
+    ...step,
+    templateIds:
+      step.id === 'common'
+        ? ['base-x']
+        : step.id === 'stop-step'
+          ? ['shared-template']
+          : ['shared-template', 'n-only'],
+  }))
+  mocks.category.combinationOrders = [
+    { moduleIds: ['stop', 'crash'], stepIds: ['crash-step', 'common', 'stop-step'] },
+  ]
+  mocks.bytesFor.mockResolvedValue(new Uint8Array([1]))
+  mocks.render.mockClear()
+  mocks.zip.mockClear()
+  const fill = async (element: HTMLInputElement, value: string) => {
+    element.value = value
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+  }
+  const stepRow = (title: string) =>
+    [...host.querySelectorAll('.fixed-step')].find(
+      (row) => row.querySelector('h3')?.textContent?.trim() === title,
+    )!
+  try {
+    const router = await mount()
+    expect(host.querySelector('.basic-data-row')?.textContent).toContain('酒測值')
+    expect(host.querySelector('.basic-data-row')?.textContent).not.toContain('專屬')
+    await fill(host.querySelector('#draft-0')!, 'Mock name')
+    await fill(host.querySelector('input[type="number"]')!, '0.35')
+    await check(input('攔查'), true)
+    expect(host.textContent).not.toContain('n.docx')
+    expect(host.querySelector('#step-stop-step-0')).not.toBeNull()
+    await fill(host.querySelector('#step-stop-step-0')!, 'D-value')
+    expect(stepRow('攔查專屬').querySelector('input[type="number"]')).toBeNull()
+    const generateD = [...stepRow('攔查專屬').querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === '產生',
+    )!
+    expect(generateD.disabled).toBe(false)
+    await check(input('肇事'), true)
+    expect([...host.querySelectorAll('.fixed-step h3')].map((h) => h.textContent?.trim())).toEqual([
+      '肇事專屬',
+      '共同步驟',
+      '攔查專屬',
+    ])
+    expect((host.querySelector('#step-stop-step-0') as HTMLInputElement).value).toBe('D-value')
+    expect((host.querySelector('#step-crash-step-0') as HTMLInputElement).value).toBe('')
+    expect(generateD.disabled).toBe(false) // Missing N fields cannot block D.
+    await fill(host.querySelector('#step-crash-step-0')!, 'F-value')
+    await fill(host.querySelector('#step-crash-step-1')!, 'Z-value')
+    generateD.click()
+    await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledOnce())
+    expect(mocks.render).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ 酒測值: '0.35', 專屬: 'D-value' }),
+    )
+    host.querySelector<HTMLButtonElement>('#tab-overview')!.click()
+    await nextTick()
+    const documentList = [...host.querySelectorAll('#panel-overview li')].filter((li) =>
+      li.querySelector('input[type="checkbox"]'),
+    )
+    expect(documentList).toHaveLength(4)
+    expect(documentList.filter((li) => li.textContent?.includes('same.docx'))).toHaveLength(2)
+    const baseRow = documentList.find((li) => li.textContent?.includes('base.docx'))!
+    const zRow = documentList.find((li) => li.textContent?.includes('n.docx'))!
+    await check(baseRow.querySelector('input')!, false)
+    await check(zRow.querySelector('input')!, false)
+    const stopRow = documentList.find((li) => li.textContent?.includes('攔查專屬'))!
+    await check(stopRow.querySelector('input')!, false)
+    mocks.render.mockClear()
+    const generateChecked = [...host.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === '產生勾選文件',
+    )!
+    generateChecked.click()
+    await vi.waitFor(() => expect(mocks.zip).toHaveBeenCalledOnce())
+    expect(mocks.render).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      expect.objectContaining({ 酒測值: '0.35', 專屬: 'F-value' }),
+    )
+    expect(mocks.zip).toHaveBeenLastCalledWith([
+      expect.objectContaining({ name: '產生-same.docx' }),
+    ])
+    await vi.waitFor(() => expect(generateChecked.disabled).toBe(false))
+    await check(stopRow.querySelector('input')!, true)
+    mocks.render.mockClear()
+    generateChecked.click()
+    await vi.waitFor(() => expect(mocks.zip).toHaveBeenCalledTimes(2))
+    expect(mocks.render).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.objectContaining({ 專屬: 'F-value' }),
+    )
+    expect(mocks.render).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({ 專屬: 'D-value' }),
+    )
+    expect(mocks.zip).toHaveBeenLastCalledWith([
+      expect.objectContaining({ name: '產生-same.docx' }),
+      expect.objectContaining({ name: '產生-same.docx' }),
+    ])
+    await router.push('/categories/another-mock')
+    await check(input('攔查'), true)
+    expect((host.querySelector('#step-stop-step-0') as HTMLInputElement).value).toBe('')
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+  } finally {
+    mocks.category.steps = original
+    mocks.category.combinationOrders = []
+    mocks.library.splice(0)
+  }
+})
+
+it('shows the exact parallel hint in steps and full overview only when enabled', async () => {
+  const original = mocks.category.steps
+  mocks.category.steps = original.map((step) => ({
+    ...step,
+    canRunInParallel: step.id === 'common',
+  }))
+  try {
+    await mount()
+    expect(host.querySelectorAll('.fixed-step')).toHaveLength(1)
+    expect(host.querySelector('.fixed-step')?.textContent).toContain('此步驟可請其他人同步進行')
+    await check(input('攔查'), true)
+    const stop = [...host.querySelectorAll('.fixed-step')].find((row) =>
+      row.querySelector('h3')?.textContent?.includes('攔查專屬'),
+    )!
+    expect(stop.textContent).not.toContain('此步驟可請其他人同步進行')
+    host.querySelector<HTMLButtonElement>('#tab-overview')!.click()
+    await nextTick()
+    const overview = host.querySelector('[aria-label="完整流程總覽"]')!
+    expect(overview.textContent).toContain('此步驟可請其他人同步進行')
+    expect(
+      [...overview.querySelectorAll('li')].filter((li) =>
+        li.textContent?.includes('此步驟可請其他人同步進行'),
+      ),
+    ).toHaveLength(1)
+  } finally {
+    mocks.category.steps = original
+  }
+})
+
+it('keeps temporary document selection and fields isolated and resets its checkmark when re-added', async () => {
+  mocks.library.push({ id: 'temporary', fileName: 'temporary.docx', placeholders: ['臨時欄位'] })
+  try {
+    await mount()
+    host.querySelector<HTMLButtonElement>('#tab-overview')!.click()
+    await nextTick()
+    const picker = [...host.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === '從範本庫選取',
+    )!
+    picker.click()
+    await nextTick()
+    const temporaryPicker = [...host.querySelectorAll('label')]
+      .find((label) => label.textContent?.trim() === 'temporary.docx')!
+      .querySelector('input')!
+    await check(temporaryPicker, true)
+    const documentRow = () =>
+      [...host.querySelectorAll('#panel-overview li')].find((row) =>
+        row.textContent?.includes('本次暫加'),
+      )!
+    expect(documentRow().querySelector('input')!.checked).toBe(true)
+    const field = host.querySelector('[aria-label="本次暫加"] input') as HTMLInputElement
+    field.value = 'transient'
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    await check(documentRow().querySelector('input')!, false)
+    expect(host.querySelector('[aria-label="本次暫加"]')).toBeNull()
+    await check(temporaryPicker, false)
+    await check(temporaryPicker, true)
+    expect(documentRow().querySelector('input')!.checked).toBe(true)
+    expect((host.querySelector('[aria-label="本次暫加"] input') as HTMLInputElement).value).toBe(
+      'transient',
+    )
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+  } finally {
+    mocks.library.splice(0)
   }
 })
