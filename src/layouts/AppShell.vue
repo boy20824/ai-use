@@ -103,7 +103,9 @@ onUnmounted(() => {
           :key="item.to"
           :to="item.to"
           :class="{ active: item.to === '/' ? route.path === '/' : route.path.startsWith(item.to) }"
-          ><AppIcon :name="item.mark" /><span>{{ item.label }}</span></RouterLink
+          ><AppIcon :name="item.mark" /><span>{{
+            item.mobileLabel ?? item.label
+          }}</span></RouterLink
         ><button type="button" @click="menuOpen = true">
           <AppIcon name="members" /><span>我的</span>
         </button>

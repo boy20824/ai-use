@@ -77,6 +77,12 @@ export const router = createRouter({
           redirect: (to) => ({ name: 'templates', query: to.query }),
         },
         {
+          path: 'image-splitter',
+          name: 'image-splitter',
+          component: () => import('@/views/ImageSplitterView.vue'),
+          meta: { title: '詐騙訊息切割截圖' },
+        },
+        {
           path: 'feedback',
           name: 'feedback',
           component: () => import('@/views/FeedbackView.vue'),
