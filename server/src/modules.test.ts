@@ -201,3 +201,33 @@ it('adds default-false parallel settings without rewriting legacy details and pr
     db.close()
   }
 })
+
+it('adds nullable base scope to historical fields without reclassifying or altering mappings', () => {
+  const db = openDatabase(':memory:')
+  try {
+    migrate(db)
+    db.exec('ALTER TABLE category_fields DROP COLUMN scope')
+    db.prepare('INSERT INTO categories(id, name, updated_at) VALUES (?, ?, ?)').run(
+      'mock',
+      'Mock',
+      'old',
+    )
+    db.prepare('INSERT INTO category_fields VALUES (?, ?, ?, ?, ?)').run(
+      'scenario',
+      'mock',
+      'Legacy scenario',
+      'LegacyKey',
+      'number',
+    )
+    const before = db.prepare('SELECT rowid, * FROM category_fields').all()
+    migrate(db)
+    migrate(db)
+    expect(
+      db.prepare('SELECT rowid, id, category_id, name, key, type FROM category_fields').all(),
+    ).toEqual(before)
+    expect(db.prepare('SELECT scope FROM category_fields').get()).toEqual({ scope: null })
+    expect(db.pragma('foreign_key_check')).toEqual([])
+  } finally {
+    db.close()
+  }
+})

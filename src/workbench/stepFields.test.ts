@@ -171,3 +171,26 @@ describe('explicit sharing and stable step contexts', () => {
     expect(filledContext(basic, shared, { 日期: '115/2/30' }, {})).toBeNull()
   })
 })
+
+it('shares standalone base definitions in later scenario tags without base output, preserving legacy locality', () => {
+  const { category, contexts } = fixture()
+  category.fields!.push({
+    id: 'standalone',
+    key: 'Y',
+    name: 'Standalone',
+    type: 'text',
+    scope: 'base',
+  })
+  category.steps[0]!.templateIds = []
+  const all = contexts()
+  const shared = sharedFieldNames(category, all)
+  expect(shared).toEqual(['姓名', '日期', 'Y'])
+  expect(shared).not.toContain('X') // historical X cannot be reclassified after losing base mapping
+  expect(shared).not.toContain('Z') // historical scenario-only definition stays local
+  const f = all.find((c) => c.stepId === 'f')!
+  expect(
+    contextValues(f, shared, { Y: 'shared' }, { [scopeKey(f)]: { Y: 'stale', X: 'local' } }),
+  ).toMatchObject({ Y: 'shared', X: 'local' })
+  category.fields![2]!.key = 'Unused'
+  expect(sharedFieldNames(category, [])).toEqual(['姓名', '日期', 'Unused'])
+})

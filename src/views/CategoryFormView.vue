@@ -83,8 +83,8 @@ const wizard = ref(1)
 const variants = ref<Variant[]>([])
 const fields = ref<FieldDef[]>([])
 const sopScope = ref('base')
-// Definitions have category-wide keys, not module ownership. Classify only by
-// exact tags on attached base templates; never guess from editable labels.
+// Explicit base definitions survive without templates. Legacy definitions retain
+// their exact base-template classification; never infer ownership from labels.
 function attachedTemplates(stepIds?: Set<string>) {
   return steps.value
     .filter((step) => !stepIds || (step.id && stepIds.has(step.id)))
@@ -104,6 +104,7 @@ const baseTemplateFields = computed(() =>
 const legacyFields = computed(() =>
   fields.value.filter(
     (field) =>
+      field.scope !== 'base' &&
       existing.value?.fields?.some((saved) => saved.id === field.id) &&
       !baseTemplateFields.value.includes(field.key),
   ),
@@ -358,18 +359,6 @@ async function submit() {
       ? { ...field }
       : { ...field, name: field.name?.trim(), key: fieldKey(field) },
   )
-  // New/manual base definitions must map to base output. Unmatched retained
-  // legacy entries are reported without preventing unrelated maintenance.
-  const issues = fieldMappingIssues(
-    mappedFields.filter((field) => !legacyFields.value.some((legacy) => legacy.id === field.id)),
-    attachedTemplates(
-      isEdit.value ? new Set(existing.value?.baseSteps?.map((ref) => ref.stepId) ?? []) : undefined,
-    ),
-  )
-  if (issues.length) {
-    formError.value = issues.join('\n')
-    return
-  }
   const input = {
     name: name.value.trim(),
     group: group.value,
@@ -690,7 +679,7 @@ async function submit() {
           type="button"
           class="btn-secondary mt-3 py-2"
           :disabled="fields.length >= 50"
-          @click="fields.push({ id: newId(), name: '', key: '', type: 'text' })"
+          @click="fields.push({ id: newId(), name: '', key: '', type: 'text', scope: 'base' })"
         >
           新增欄位
         </button>
@@ -704,7 +693,7 @@ async function submit() {
           範本欄位寫法：{{
             fieldKeyHint
           }}。已儲存的欄位鍵固定，修改名稱只改顯示文字。手動新增只用於基本 SOP；基本 SOP
-          使用的明確欄位鍵才共用。與情境共用的既有定義保留，不提供移除。只儲存欄位定義。
+          手動欄位不需先關聯範本，相同欄位鍵共用基本值。與情境共用的既有定義保留，不提供移除。只儲存欄位定義。
         </p>
       </fieldset>
       <p v-if="sopScope !== 'base'" class="mt-4 text-sm text-ink-muted">

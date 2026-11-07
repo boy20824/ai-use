@@ -1092,3 +1092,71 @@ it('defaults parallel hints off, authorizes maintenance, rejects non-booleans/fo
     { detail: `step_parallel:${step.id}:false` },
   ])
 })
+
+it('persists standalone base ownership without output, preserves legacy ownership and rejects invalid or unauthorized writes', async () => {
+  const { app, db } = await setup()
+  const admin = await login(app)
+  await request(app, admin, 'PATCH', '/api/members/user-clerk', { canManageCategories: true })
+  const auth = await login(app, 'clerk')
+  const c = await category(app, auth, 'Mock standalone base')
+  const base = `/api/categories/${c.id}`
+  const fields = [
+    { id: 'standalone', key: '身分證', name: 'Mock ID', type: 'text', scope: 'base' },
+    { id: 'legacy', key: 'LegacyScenario', name: 'Mock legacy', type: 'number' },
+  ]
+  const result = await request(app, auth, 'PATCH', base, { name: 'Mock standalone base', fields })
+  expect(result.statusCode).toBe(200)
+  expect(result.json().category.fields).toEqual(fields.map((f) => ({ ...f, categoryId: c.id })))
+  migrate(db)
+  expect(createQueries(db).getCategory(c.id)!.fields).toEqual(result.json().category.fields)
+  // A round trip from an older client must not erase newly persisted base ownership.
+  const oldClientFields = fields.map((field) => {
+    const copy = { ...field }
+    delete copy.scope
+    return copy
+  })
+  expect(
+    (
+      await request(app, auth, 'PATCH', base, {
+        name: 'Mock standalone base',
+        fields: oldClientFields,
+      })
+    ).statusCode,
+  ).toBe(200)
+  expect((await request(app, auth, 'GET', `${base}/fields`)).json().fields).toEqual(
+    result.json().category.fields,
+  )
+  const before = db.prepare('SELECT * FROM category_fields ORDER BY id').all()
+  for (const field of [
+    { ...fields[0], key: '__proto__' },
+    { ...fields[0], key: 'bad key' },
+    { ...fields[0], name: '' },
+    { ...fields[0], name: 'a'.repeat(81) },
+    { ...fields[0], type: 'date' },
+    { ...fields[0], scope: 'scenario' },
+    { ...fields[0], value: 'Mock forbidden persistence' },
+  ]) {
+    expect(
+      (await request(app, auth, 'PATCH', base, { name: 'Mock standalone base', fields: [field] }))
+        .statusCode,
+    ).toBe(400)
+  }
+  const viewer = await login(app, 'viewer')
+  expect(
+    (await request(app, viewer, 'PATCH', base, { name: 'Mock denied', fields })).statusCode,
+  ).toBe(403)
+  expect(
+    (await app.inject({ method: 'PATCH', url: base, payload: { name: 'Mock denied', fields } }))
+      .statusCode,
+  ).toBeGreaterThanOrEqual(400)
+  const other = await category(app, auth, 'Mock other')
+  expect(
+    (
+      await request(app, auth, 'PATCH', `/api/categories/${other.id}`, {
+        name: 'Mock other',
+        fields,
+      })
+    ).statusCode,
+  ).toBe(400)
+  expect(db.prepare('SELECT * FROM category_fields ORDER BY id').all()).toEqual(before)
+})

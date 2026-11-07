@@ -10,6 +10,8 @@ export interface Variant {
   name: string
 }
 export interface FieldDef {
+  /** Explicit standalone base definition; absent means legacy mapping rules. */
+  scope?: 'base'
   id: string
   categoryId?: string
   name?: string

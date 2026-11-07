@@ -40,7 +40,8 @@ export function generationContexts(
   return result
 }
 
-/** Only exact, explicitly defined category keys used by the base SOP are shared.
+/** Standalone base definitions are shared independently of template usage.
+ * Legacy definitions share only when used by the base SOP.
  * The built-in name/date mapping is the existing application contract.
  * Undeclared identical tags remain independent even between basic steps.
  */
@@ -53,7 +54,14 @@ export function sharedFieldNames(category: CaseCategory, contexts: GenerationCon
   return [
     '姓名',
     '日期',
-    ...used.filter((key) => declared.has(key) && key !== '姓名' && key !== '日期'),
+    ...new Set(
+      [
+        ...(category.fields ?? [])
+          .filter((field) => field.scope === 'base')
+          .map((field) => field.key),
+        ...used.filter((key) => declared.has(key)),
+      ].filter((key) => key !== '姓名' && key !== '日期'),
+    ),
   ]
 }
 export const localFieldNames = (contexts: GenerationContext[], shared: string[]) =>

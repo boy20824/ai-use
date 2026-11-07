@@ -43,8 +43,8 @@ vi.mock('@/utils/download', () => ({
 }))
 let app: App | undefined
 let host: HTMLDivElement
-// Mock evidence is written locally; the coordinator copies it to /workspace/evidence/scenario-auto.
-const evidence = '/workspace/ai-use/evidence/scenario-auto'
+// Mock evidence is written locally; the coordinator copies it to /workspace/evidence/base-fields.
+const evidence = '/workspace/ai-use/evidence/base-fields'
 function snapshot(name: string) {
   mkdirSync(evidence, { recursive: true })
   const clone = host.cloneNode(true) as HTMLElement
@@ -274,14 +274,6 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
   expect(host.querySelectorAll('[aria-label="欄位名稱"]')).toHaveLength(0)
   await click('維護基本 SOP')
   expect(host.querySelectorAll('[aria-label="欄位名稱"]')).toHaveLength(1)
-  // New definitions must match base output, even if a tag exists in a scenario.
-  await input(host.querySelector('[aria-label="欄位名稱"]')!, 'Y')
-  await submit()
-  expect(router.currentRoute.value.path).toBe('/categories/mock/edit')
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{Y}}')
-  expect(host.querySelector('[role="alert"]')?.textContent).toContain('重新上傳')
-  snapshot('maintainer-base-mapping-error')
-  await input(host.querySelector('[aria-label="欄位名稱"]')!, 'X')
   await submit()
   await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/mock'))
   await router.push('/categories/mock/edit')
@@ -482,4 +474,150 @@ it('reports manual keys with no output instead of silently ignoring their defini
   await settle()
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{Orphan}}')
   snapshot('workbench-no-output-error')
+})
+
+it('saves a base field without templates, reopens it, and later consumes the exact tag through production generation', async () => {
+  let saved: CaseCategory = {
+    id: 'standalone',
+    name: 'Mock standalone',
+    summary: '',
+    updatedAt: '',
+    templateCount: 0,
+    fields: [{ id: 'legacy', key: 'LegacyScenario', name: 'Legacy label', type: 'number' }],
+    steps: [
+      { id: 'base', body: 'Mock base', templateIds: [] },
+      {
+        id: 'unused',
+        body: 'Mock retained unreferenced',
+        title: 'Mock retained unreferenced',
+        items: ['Mock item'],
+        note: 'Mock note',
+        order: 1,
+        variantIds: [],
+        canRunInParallel: true,
+        templateIds: [],
+      },
+    ],
+    baseSteps: [{ stepId: 'base', sortOrder: 0 }],
+    modules: [],
+  }
+  const untouched = structuredClone(saved.steps[1])
+  mocks.library = []
+  mocks.request.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url === '/api/categories') return Response.json({ categories: [saved] })
+    if (url.endsWith('/impact')) return Response.json({ impact: { base: ['base'], modules: [] } })
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined
+    if (url === '/api/categories/standalone' && init?.method === 'PATCH') {
+      saved = { ...saved, ...body }
+      return Response.json({ category: saved })
+    }
+    if (url === '/api/categories/standalone/steps/base' && init?.method === 'PATCH') {
+      saved.steps[0] = { ...saved.steps[0]!, ...body }
+      return Response.json({ step: saved.steps[0] })
+    }
+    throw new Error(`Unexpected request ${url}`)
+  })
+  const storageWrite = vi.spyOn(Storage.prototype, 'setItem')
+  const indexedDbOpen = vi.fn(() => {
+    throw new Error('No persistent case values')
+  })
+  vi.stubGlobal('indexedDB', { open: indexedDbOpen })
+  const pinia = createPinia()
+  await useCategoryStore(pinia).load()
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/categories/:id/edit', name: 'category-edit', component: CategoryFormView },
+      { path: '/categories/:id', component: CategoryView },
+      { path: '/categories', component: { render: () => h('div') } },
+    ],
+  })
+  await router.push('/categories/standalone/edit')
+  await router.isReady()
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp({ render: () => h(RouterView) })
+    .use(pinia)
+    .use(router)
+  app.mount(host)
+  await nextTick()
+  await submit()
+  await submit()
+  expect(host.textContent).not.toContain('共用步驟實體（含未引用步驟）')
+  await click('新增欄位')
+  await input(host.querySelector('[aria-label="欄位名稱"]')!, '身分證')
+  snapshot('base-no-template-before-save')
+  await submit()
+  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/standalone'))
+  expect(saved.fields).toEqual([
+    { id: 'legacy', key: 'LegacyScenario', name: 'Legacy label', type: 'number' },
+    expect.objectContaining({ key: '身分證', name: '身分證', scope: 'base' }),
+  ])
+  expect(host.querySelector('.basic-data-row')?.textContent).toContain('身分證')
+  const savedField = structuredClone(saved.fields![1])
+  await router.push('/categories/standalone/edit')
+  await settle()
+  await submit()
+  await submit()
+  expect((host.querySelector('[aria-label="欄位名稱"]') as HTMLInputElement).value).toBe('身分證')
+  expect(host.querySelector('[aria-label="既有欄位定義（保留）"]')?.textContent).toContain(
+    'Legacy label',
+  )
+  snapshot('base-reopened-without-template')
+  // Attach a real mock DOCX through the mounted normal step editor, without a matching tag.
+  const data = buildDocx({ document: wordDocument(paragraph(run(kaiBoldRPr, '{{Other}}'))) })
+  mocks.library = [
+    { id: 'late', fileName: 'mock-late.docx', placeholders: listPlaceholders(data), data },
+  ]
+  await router.push('/categories/standalone')
+  await router.push('/categories/standalone/edit')
+  await settle()
+  await submit()
+  await submit()
+  await click('編輯共用步驟')
+  await check(host.querySelector('input[value="late"]')!, true)
+  await click('儲存共用步驟')
+  await submit()
+  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/standalone'))
+  expect(saved.fields![1]).toEqual(savedField)
+  snapshot('base-unmatched-template-save-success')
+  // Later attach a second mock DOCX containing the exact tag through the normal step editor.
+  const exact = buildDocx({ document: wordDocument(paragraph(run(kaiBoldRPr, '{{身分證}}'))) })
+  mocks.library.push({
+    id: 'exact',
+    fileName: 'mock-exact.docx',
+    placeholders: listPlaceholders(exact),
+    data: exact,
+  })
+  await router.push('/categories/standalone/edit')
+  await settle()
+  await submit()
+  await submit()
+  await click('編輯共用步驟')
+  await check(host.querySelector('input[value="late"]')!, false)
+  await check(host.querySelector('input[value="exact"]')!, true)
+  await click('儲存共用步驟')
+  await submit()
+  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/standalone'))
+  await settle()
+  await field(host.querySelector('.basic-data-row')!, '身分證', 'MOCK_SHARED_ID_26')
+  expect(row('Mock base').querySelector('#step-base-0')).toBeNull()
+  snapshot('base-exact-tag-shared-value')
+  await click('產生', row('Mock base'))
+  await vi.waitFor(() => expect(mocks.downloadBytes).toHaveBeenCalledOnce())
+  const generated = mocks.downloadBytes.mock.calls[0]![0] as Uint8Array
+  const xml = new PizZip(generated).file('word/document.xml')!.asText()
+  expect(xml).toContain('MOCK_SHARED_ID_26')
+  expect(xml).not.toContain('{{')
+  expect(saved.steps[1]).toEqual(untouched)
+  expect(saved.steps[0]!.templateIds).toEqual(['exact'])
+  expect(saved.baseSteps).toEqual([{ stepId: 'base', sortOrder: 0 }])
+  expect(saved.fields![0]).not.toHaveProperty('scope')
+  expect(JSON.stringify(mocks.request.mock.calls)).not.toContain('MOCK_SHARED_ID_26')
+  expect(storageWrite).not.toHaveBeenCalled()
+  expect(indexedDbOpen).not.toHaveBeenCalled()
+  writeFileSync(`${evidence}/base-exact-source.docx`, exact)
+  writeFileSync(`${evidence}/base-generated.docx`, generated)
+  writeFileSync(`${evidence}/base-generated-document.xml`, xml)
+  writeFileSync(`${evidence}/preserved-mock-config.json`, JSON.stringify(saved, null, 2))
 })

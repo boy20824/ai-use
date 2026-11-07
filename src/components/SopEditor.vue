@@ -178,22 +178,6 @@ function saveStep() {
     editing.value = null
   })
 }
-function deleteStep(step: CategoryStep) {
-  void run(async () => {
-    const body = await request(`/steps/${encodeURIComponent(step.id)}/impact`, 'GET')
-    if (body.impact.base.length || body.impact.modules.length)
-      throw new Error(
-        `步驟仍被引用。基本 SOP：${body.impact.base.length}；模組：${body.impact.modules.map((m: { name: string }) => m.name).join('、')}`,
-      )
-    if (
-      !window.confirm(
-        `案類：${props.category.name}\n刪除共用步驟「${step.title ?? step.body}」及文件關聯：${step.templateIds.map((id) => displayFileName(templates.byId(id)?.fileName ?? '範本')).join('、') || '無'}？`,
-      )
-    )
-      return
-    await request(`/steps/${encodeURIComponent(step.id)}`, 'DELETE', { confirm: true })
-  })
-}
 async function upload(files: File[]) {
   await run(async () => {
     const result = await templates.addFiles(files, editing.value?.id || undefined)
@@ -331,16 +315,6 @@ async function upload(files: File[]) {
         <button type="button" class="btn-secondary" @click="saveStep">儲存共用步驟</button
         ><button type="button" class="btn-ghost" @click="editing = null">取消</button>
       </section>
-      <details>
-        <summary>共用步驟實體（含未引用步驟）</summary>
-        <div v-for="s in category.steps" :key="s.id" class="mt-2 flex gap-3">
-          <span>{{ s.title ?? s.body }}</span
-          ><button type="button" class="btn-ghost" @click="edit(s)">編輯共用步驟</button
-          ><button v-if="session.isSysadmin" type="button" class="btn-ghost" @click="deleteStep(s)">
-            刪除共用步驟實體
-          </button>
-        </div>
-      </details>
       <p v-if="error" role="alert" class="text-tone-danger-ink">{{ error }}</p>
     </fieldset>
     <CombinationOrderEditor :key="category.id" :category="category" />

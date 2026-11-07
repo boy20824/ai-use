@@ -101,6 +101,8 @@ export interface VariantRecord {
   name: string
 }
 export interface FieldDefRecord {
+  /** Explicit standalone base definition; absent means legacy mapping rules. */
+  scope?: 'base'
   id: string
   categoryId: string
   name: string
@@ -559,6 +561,11 @@ export function migrate(db: AppDatabase) {
       name TEXT NOT NULL, key TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('text','number')),
       UNIQUE(category_id, key));`)
     })()
+    // NULL preserves legacy ownership; never infer shared scope for historical rows.
+    if (!columnNames(db, 'category_fields').includes('scope'))
+      db.exec(
+        "ALTER TABLE category_fields ADD COLUMN scope TEXT CHECK(scope IS NULL OR scope = 'base')",
+      )
     migrateModules(db)
     migrateCombinationOrders(db)
     // Additive settings preserve legacy step rows/details byte for byte.
@@ -884,9 +891,13 @@ export function createQueries(db: AppDatabase) {
       .all(row.id) as VariantRecord[]
     category.fields = db
       .prepare(
-        'SELECT id, category_id AS categoryId, name, key, type FROM category_fields WHERE category_id = ? ORDER BY rowid',
+        'SELECT id, category_id AS categoryId, name, key, type, scope FROM category_fields WHERE category_id = ? ORDER BY rowid',
       )
-      .all(row.id) as FieldDefRecord[]
+      .all(row.id)
+      .map((row) => {
+        const { scope, ...field } = row as Omit<FieldDefRecord, 'scope'> & { scope: 'base' | null }
+        return scope === 'base' ? { ...field, scope } : field
+      }) as FieldDefRecord[]
     category.steps = steps
       .map((step, index) => {
         const details = db
@@ -974,11 +985,19 @@ export function createQueries(db: AppDatabase) {
       }
     }
     if (input.fields) {
+      // Older clients omit scope. Preserve explicit ownership across their edits.
+      const previous = new Map(
+        (
+          db
+            .prepare('SELECT id, scope FROM category_fields WHERE category_id = ?')
+            .all(input.id) as { id: string; scope: 'base' | null }[]
+        ).map((f) => [f.id, f.scope]),
+      )
       db.prepare('DELETE FROM category_fields WHERE category_id = ?').run(input.id)
       for (const f of input.fields)
         db.prepare(
-          'INSERT INTO category_fields(id, category_id, name, key, type) VALUES (?, ?, ?, ?, ?)',
-        ).run(f.id, input.id, f.name, f.key, f.type)
+          'INSERT INTO category_fields(id, category_id, name, key, type, scope) VALUES (?, ?, ?, ?, ?, ?)',
+        ).run(f.id, input.id, f.name, f.key, f.type, f.scope ?? previous.get(f.id) ?? null)
     }
     for (const step of input.steps.filter((s) => created.includes(s.id) && s.variantIds?.length)) {
       db.prepare('DELETE FROM base_step_refs WHERE category_id = ? AND step_id = ?').run(
