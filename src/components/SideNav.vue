@@ -40,9 +40,9 @@ function onNavigate(
   <div class="side-nav">
     <div class="side-brand">
       <span class="brand-mark"><AppIcon name="documents" /></span>
-      <div>
-        <strong>{{ appName }}</strong
-        ><small>Workflow Assistant</small>
+      <div class="side-brand-copy">
+        <strong :aria-label="appName"><span>警務流程</span><span>輔助平台</span></strong>
+        <small>Workflow Assistant</small>
       </div>
     </div>
     <nav :id="id" aria-label="主要導覽">
