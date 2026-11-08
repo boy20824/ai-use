@@ -68,7 +68,7 @@ onUnmounted(() => {
         <div class="flex min-w-0 items-center gap-3">
           <button
             type="button"
-            class="btn-secondary h-10 w-10 items-center justify-center md:hidden"
+            class="btn-secondary h-10 w-10 shrink-0 items-center justify-center md:hidden"
             :aria-expanded="menuOpen"
             aria-controls="mobile-nav"
             @click="menuOpen = !menuOpen"
