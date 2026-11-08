@@ -535,6 +535,64 @@ onUnmounted(clearDraft)
       </div>
     </div>
 
+    <section
+      v-if="tab === 'steps'"
+      class="basic-data-row shared-fields-panel"
+      aria-label="基本共用欄位"
+    >
+      <p v-if="generateHint" class="mb-3 text-xs text-ink-muted">{{ generateHint }}</p>
+      <details open>
+        <summary class="focus-control cursor-pointer">
+          <h3 class="inline text-sm font-semibold text-ink">基本資料</h3>
+          <span class="ml-2 text-xs text-ink-muted">填寫欄位</span>
+        </summary>
+        <div class="py-4">
+          <p class="mt-1 text-sm leading-6 text-stone-600">
+            姓名與日期會套進這個流程各步驟的範本。日期預設為台北今天。
+          </p>
+          <details class="mt-3 text-xs text-ink-muted">
+            <summary class="focus-control cursor-pointer">範本欄位說明</summary>
+            <PlaceholderGuide class="mt-3" />
+          </details>
+          <div class="mt-4 grid max-w-xl gap-4">
+            <div v-for="(name, index) in fieldNames" :key="name">
+              <label class="block text-sm font-medium text-stone-800" :for="`draft-${index}`">
+                {{ fieldLabel(name) }}
+              </label>
+              <RocDateField v-if="name === '日期'" v-model="dateValue" />
+              <input
+                v-else
+                :id="`draft-${index}`"
+                :value="fieldValue(name)"
+                :type="fieldType(name)"
+                step="any"
+                autocomplete="off"
+                :placeholder="fieldPlaceholder(name)"
+                class="field mt-2 w-full"
+                @input="onFieldInput(name, $event)"
+              />
+            </div>
+          </div>
+        </div>
+        <section
+          v-for="step in basicGroups"
+          :key="step.id"
+          :aria-label="`基本資料：${step.title ?? step.body}`"
+        >
+          <p v-if="localFields(step.id).length" class="mt-3 text-sm">
+            {{ step.title ?? step.body }}
+          </p>
+          <StepFields
+            :fields="localFields(step.id)"
+            :values="stepValues(step.id)"
+            :definitions="category.fields"
+            :prefix="`base-${step.id}`"
+            @update="(key, value) => setStepValue(step.id, key, value)"
+          />
+        </section>
+      </details>
+    </section>
+
     <div
       v-if="category.modules?.length"
       class="mb-5 flex flex-wrap gap-2"
@@ -618,63 +676,6 @@ onUnmounted(clearDraft)
             基本資料的欄位只留在這個畫面。離開這個流程或登出後會清除，也不會送到服務。
           </p>
           <ol class="fixed-steps-list mt-4">
-            <li class="basic-data-row">
-              <p v-if="generateHint" class="mb-3 text-xs text-ink-muted">{{ generateHint }}</p>
-              <details>
-                <summary class="focus-control cursor-pointer">
-                  <h3 class="inline text-sm font-semibold text-ink">基本資料</h3>
-                  <span class="ml-2 text-xs text-ink-muted">填寫欄位</span>
-                </summary>
-                <div class="py-4">
-                  <p class="mt-1 text-sm leading-6 text-stone-600">
-                    姓名與日期會套進這個流程各步驟的範本。日期預設為台北今天。
-                  </p>
-                  <details class="mt-3 text-xs text-ink-muted">
-                    <summary class="focus-control cursor-pointer">範本欄位說明</summary>
-                    <PlaceholderGuide class="mt-3" />
-                  </details>
-                  <div class="mt-4 grid max-w-xl gap-4">
-                    <div v-for="(name, index) in fieldNames" :key="name">
-                      <label
-                        class="block text-sm font-medium text-stone-800"
-                        :for="`draft-${index}`"
-                      >
-                        {{ fieldLabel(name) }}
-                      </label>
-                      <RocDateField v-if="name === '日期'" v-model="dateValue" />
-                      <input
-                        v-else
-                        :id="`draft-${index}`"
-                        :value="fieldValue(name)"
-                        :type="fieldType(name)"
-                        step="any"
-                        autocomplete="off"
-                        :placeholder="fieldPlaceholder(name)"
-                        class="field mt-2 w-full"
-                        @input="onFieldInput(name, $event)"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <section
-                  v-for="step in basicGroups"
-                  :key="step.id"
-                  :aria-label="`基本資料：${step.title ?? step.body}`"
-                >
-                  <p v-if="localFields(step.id).length" class="mt-3 text-sm">
-                    {{ step.title ?? step.body }}
-                  </p>
-                  <StepFields
-                    :fields="localFields(step.id)"
-                    :values="stepValues(step.id)"
-                    :definitions="category.fields"
-                    :prefix="`base-${step.id}`"
-                    @update="(key, value) => setStepValue(step.id, key, value)"
-                  />
-                </section>
-              </details>
-            </li>
-
             <li v-if="visibleSteps.length === 0" class="py-5 text-sm text-ink-muted">
               尚未設定範本步驟。
             </li>

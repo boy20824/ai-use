@@ -1,25 +1,25 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-canvas: #f6f5f1;
+  --color-canvas: #f3f5f5;
   --color-surface: #ffffff;
-  --color-surface-muted: #e6efeb;
-  --color-ink: #172c38;
-  --color-ink-strong: #172c38;
-  --color-ink-muted: #5b6d76;
-  --color-ink-disabled: #5b6d76;
+  --color-surface-muted: #e8eef1;
+  --color-ink: #192d3b;
+  --color-ink-strong: #192d3b;
+  --color-ink-muted: #526976;
+  --color-ink-disabled: #526976;
   --color-ink-subtle: #a8a29e;
-  --color-edge: #d5dddc;
-  --color-edge-strong: #a6b9b3;
-  --color-nav: #172c38;
-  --color-nav-end: #172c38;
+  --color-edge: #d2dde2;
+  --color-edge-strong: #7d909a;
+  --color-nav: #192d3b;
+  --color-nav-end: #192d3b;
   --color-nav-hover: rgb(255 255 255 / 0.05);
-  --color-nav-active: #22665e;
-  --color-accent: #22665e;
+  --color-nav-active: #315f79;
+  --color-accent: #315f79;
   --color-focus: #0066ff;
-  --color-accent-ink: #194f49;
-  --color-accent-soft: #e6efeb;
-  --color-accent-glow: #a6c7bc;
+  --color-accent-ink: #23495f;
+  --color-accent-soft: #e8eef1;
+  --color-accent-glow: #b4c9d5;
   --color-tone-ok: #ecfdf5;
   --color-tone-ok-ink: #022c22;
   --color-tone-warn: #fffbeb;
@@ -35,7 +35,7 @@
 
   --radius-control: 0.375rem;
   --radius-card: 0.5rem;
-  --radius-panel: 0.5rem;
+  --radius-panel: 0.625rem;
   --radius-pill: 9999px;
 
   --shadow-card: 0 1px 2px rgb(15 28 38 / 0.02);
@@ -49,12 +49,12 @@
   --text-2xl: 1.75rem;
   --text-3xl: 2.75rem;
   --text-4xl: 2.75rem;
-  --color-stone-200: #d5dddc;
-  --color-stone-500: #5b6d76;
-  --color-stone-600: #5b6d76;
-  --color-stone-700: #172c38;
-  --color-stone-800: #172c38;
-  --color-stone-900: #172c38;
+  --color-stone-200: #d2dde2;
+  --color-stone-500: #526976;
+  --color-stone-600: #526976;
+  --color-stone-700: #192d3b;
+  --color-stone-800: #192d3b;
+  --color-stone-900: #192d3b;
 
   --font-sans: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', 'Segoe UI', sans-serif;
   --text-page-title: 1.75rem;
@@ -63,8 +63,8 @@
   --text-caption: 0.75rem;
   --leading-body: 1.625;
 
-  --spacing-page-x: 3rem;
-  --spacing-page-y: 2rem;
+  --spacing-page-x: 2rem;
+  --spacing-page-y: 1.75rem;
   --spacing-section: 2rem;
   --spacing-stack: 1rem;
 }
@@ -355,7 +355,7 @@
   flex-direction: column;
   height: 100%;
   padding: 24px 16px;
-  color: #d5dddc;
+  color: #d2dde2;
 }
 .side-brand {
   display: flex;
@@ -371,7 +371,7 @@
 .side-brand small,
 .nav-caption {
   font-size: 12px;
-  color: #b8cac6;
+  color: #aebfca;
 }
 .nav-caption {
   margin: 0 8px 8px;
@@ -404,7 +404,7 @@
 .side-account {
   margin-top: auto;
   padding-top: 16px;
-  border-top: 1px solid #5b6d76;
+  border-top: 1px solid #526976;
 }
 .account-identity {
   display: flex;
@@ -416,7 +416,7 @@
 }
 .account-identity small {
   font-size: 12px;
-  color: #b8cac6;
+  color: #aebfca;
 }
 .account-avatar {
   display: grid;
@@ -455,58 +455,22 @@
   display: none;
 }
 @media (min-width: 768px) {
-  .app-shell {
-    flex-direction: column;
-  }
   .desktop-sidebar {
-    width: 100%;
-    position: sticky;
-    top: 0;
-    z-index: 30;
+    width: 216px;
   }
-  .desktop-sidebar > div {
-    position: static;
-    height: auto;
+  .side-nav {
+    padding: 28px 16px 20px;
   }
-  .desktop-sidebar .side-nav {
-    flex-flow: row wrap;
-    align-items: center;
-    gap: 8px 24px;
-    padding: 8px 32px;
+  .side-brand {
+    padding-bottom: 36px;
   }
-  .desktop-sidebar .side-brand {
-    padding: 8px 0;
-    margin-right: auto;
+  .nav-link {
+    min-height: 44px;
+    padding: 12px;
+    margin: 4px 0;
   }
-  .desktop-sidebar nav,
-  .desktop-sidebar .side-account {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .desktop-sidebar .nav-caption {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-  .desktop-sidebar .nav-link {
-    width: auto;
-    white-space: nowrap;
-    padding: 16px 8px;
-    margin: 0;
-  }
-  .desktop-sidebar .side-account {
-    padding: 0;
-    margin: 0;
-    border: 0;
-  }
-  .desktop-sidebar .account-identity {
-    padding: 0;
-  }
-  .app-header {
-    position: static;
+  .app-main {
+    padding: 28px 32px 48px;
   }
 }
 @media (max-width: 767px) {
@@ -680,7 +644,7 @@
   grid-template-columns: 1.1fr 0.65fr 2.2fr;
   gap: 12px;
   padding: 10px 18px;
-  background: #e6efeb;
+  background: #e8eef1;
   color: var(--color-ink-muted);
   font-size: 12px;
 }
@@ -770,15 +734,26 @@
 }
 .case-select-row {
   display: flex;
-  width: 100%;
+  width: calc(100% - 24px);
+  margin: 0 12px 10px;
+  border: 1px solid var(--color-edge);
+  border-radius: 10px;
+  background: var(--color-surface);
+  transition:
+    border-color 150ms,
+    background-color 150ms;
   align-items: center;
   gap: 12px;
   padding: 16px;
-  border-top: 1px solid var(--color-edge);
   text-align: left;
   font-size: 14px;
 }
+.case-select-row:hover {
+  border-color: var(--color-accent);
+  background: var(--color-surface-muted);
+}
 .case-select-row.selected {
+  border-color: var(--color-accent);
   background: var(--color-accent-soft);
 }
 .case-select-row svg {
@@ -807,7 +782,9 @@
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  padding-left: 1.5rem;
+  min-height: 44px;
+  border-radius: 6px;
+  padding: 10px 14px 10px 24px;
   max-width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
@@ -1252,7 +1229,7 @@
 }
 @media (max-width: 767px) {
   .app-header button {
-    width: 36px;
+    width: 44px;
   }
 }
 
@@ -1280,10 +1257,7 @@
   .templates-page > .page-intro {
     padding-right: 0;
   }
-  .templates-page > .page-intro,
-  .case-browser + .page-intro {
-    display: none;
-  }
+
   .overview-intro h1,
   .overview-intro > div:last-child:not(:first-child) {
     display: none;
@@ -1312,11 +1286,11 @@
   color: var(--color-tone-danger-ink);
 }
 .group-tabs {
-  background: transparent;
+  background: #e8edee;
 }
 .group-tabs [aria-selected='true'] {
-  background: var(--color-accent);
-  color: white;
+  background: white;
+  color: var(--color-ink);
   box-shadow: none;
 }
 .case-select-row.selected {
@@ -1361,4 +1335,192 @@ label:has(> input[type='file']:focus-visible) {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
   box-shadow: none;
+}
+
+/* Quiet workspace surfaces and controls retain the existing view structure. */
+.app-shell :where(button, summary, .header-library, .btn-ghost) {
+  min-height: 44px;
+}
+.app-shell :where(button, a, summary) {
+  overflow-wrap: anywhere;
+}
+.app-shell :where(input[type='checkbox'], input[type='radio']) {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.app-shell label:has(> input[type='checkbox']) {
+  min-height: 44px;
+  align-items: center;
+}
+.app-shell .field {
+  border-color: var(--color-edge-strong);
+}
+.header-library {
+  padding: 8px;
+}
+.side-nav {
+  overflow-y: auto;
+}
+.nav-link.active,
+.nav-link[aria-current='page'] {
+  background: #304c60;
+  box-shadow: inset 3px 0 #b4c9d5;
+}
+.page-intro h1 {
+  font-size: 26px;
+  letter-spacing: -0.025em;
+}
+.group-tabs button {
+  min-height: 44px;
+}
+.case-browser {
+  grid-template-columns: 224px minmax(0, 1fr);
+  gap: 20px;
+}
+.case-workbench.embedded {
+  border-radius: 10px;
+}
+.case-workbench > [aria-label='情境模組選擇'] {
+  padding-inline: 22px;
+}
+.shared-fields-panel {
+  margin: 0 22px 20px;
+  padding: 16px;
+  border: 1px solid var(--color-edge);
+  border-top: 2px solid var(--color-accent);
+  border-radius: 6px;
+  background: var(--color-surface);
+}
+.shared-fields-panel > details > .py-4 > .grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  max-width: none;
+}
+.workbench-content > [role='tablist'] {
+  gap: 20px;
+  border-bottom: 1px solid var(--color-edge);
+  margin-bottom: 16px;
+}
+.workbench-content > [role='tablist'] button {
+  border-radius: 0;
+  padding: 10px 2px;
+  background: transparent;
+  color: var(--color-ink-muted);
+  box-shadow: none;
+}
+.workbench-content > [role='tablist'] [aria-selected='true'] {
+  color: var(--color-accent-ink);
+  box-shadow: inset 0 -2px var(--color-accent);
+}
+.step-content {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px 24px;
+}
+.step-description,
+.step-content > p,
+.step-content > [role='status'] {
+  grid-column: 1 / -1;
+}
+.step-content > .grid {
+  margin-top: 0;
+}
+.step-documents {
+  min-width: 0;
+}
+.workbench-library {
+  background: #edf1f2;
+  box-shadow: none;
+}
+.workbench-library li + li {
+  border-top: 1px solid var(--color-edge);
+  padding-top: 8px;
+}
+@media (min-width: 1280px) {
+  .case-workbench .workbench-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 190px;
+    align-items: start;
+  }
+}
+@media (max-width: 767px) {
+  .app-main {
+    padding: 24px 16px 96px;
+  }
+  .app-header {
+    min-height: 64px;
+  }
+  .case-browser {
+    display: block;
+  }
+  .case-selector,
+  .case-browser:has(.case-selector > p) .case-selector {
+    display: block;
+    max-height: 250px;
+  }
+  .mobile-case-select {
+    display: none;
+  }
+  .case-selector .panel-heading {
+    display: flex;
+  }
+  .shared-fields-panel {
+    margin-inline: 12px;
+    padding: 14px;
+  }
+  .case-workbench > [aria-label='情境模組選擇'] {
+    padding-inline: 14px;
+  }
+  .step-content {
+    display: block;
+  }
+  .step-content > .grid {
+    margin-top: 16px;
+  }
+  .template-list tr {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 18px 16px;
+    gap: 12px;
+  }
+  .template-list .template-actions {
+    grid-column: 1;
+    grid-row: auto;
+    max-width: none;
+    border-top: 1px solid var(--color-edge);
+    padding-top: 12px;
+    margin-top: 4px;
+  }
+  .template-actions > div {
+    justify-content: space-between;
+  }
+  .template-list .template-fields,
+  .template-list .template-usages {
+    margin-left: 0;
+  }
+  .template-list .template-date {
+    display: block;
+    color: var(--color-ink-muted);
+    font-size: 12px;
+  }
+}
+
+.app-shell button,
+.app-shell .btn-secondary,
+.app-shell .btn-primary {
+  min-width: 44px;
+}
+.template-usages a {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.step-content:not(:has(> .grid)) > .step-documents {
+  grid-column: 1 / -1;
+}
+.app-shell a.focus-control,
+.app-shell .panel-heading a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 44px;
 }
