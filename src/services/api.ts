@@ -36,3 +36,18 @@ export async function apiRequest(path: string, init: RequestInit = {}): Promise<
     headers,
   })
 }
+
+/** Load bounded server pages while retaining the existing complete-list UI. */
+export async function apiPagedList<T>(path: string, key: string, fallback: string): Promise<T[]> {
+  const items: T[] = []
+  for (let offset = 0; ; offset += 100) {
+    const separator = path.includes('?') ? '&' : '?'
+    const response = await apiRequest(`${path}${separator}limit=100&offset=${offset}`)
+    if (!response.ok) throw new Error(await apiErrorMessage(response, fallback))
+    const body = (await response.json()) as Record<string, T[]>
+    const page = body[key]
+    if (!Array.isArray(page) || page.length > 100) throw new Error(fallback)
+    items.push(...page)
+    if (page.length < 100) return items
+  }
+}

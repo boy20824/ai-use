@@ -41,6 +41,16 @@ export interface SeedPasswords {
 }
 
 export interface AppConfig {
+  feedbackPerAccount?: number
+  feedbackGlobal?: number
+  templatesPerAccount?: number
+  templatesGlobal?: number
+  templateBytesPerAccount?: number
+  templateBytesGlobal?: number
+  eventRetentionDays?: number
+  maintenanceIntervalMs?: number
+  auditRetentionDays?: number
+  auditArchiveDir?: string
   host: string
   port: number
   databasePath: string
@@ -228,6 +238,19 @@ export function loadConfig(): AppConfig {
   const seedDemoUsers = seedDemoUsersFromEnv(nodeEnv, process.env.SEED_DEMO_USERS)
   const passwords = seedDemoUsers ? loadSeedPasswords(nodeEnv) : undefined
   return {
+    feedbackPerAccount: numberEnv('FEEDBACK_PER_ACCOUNT', 500),
+    feedbackGlobal: numberEnv('FEEDBACK_GLOBAL', 10000),
+    templatesPerAccount: numberEnv('TEMPLATES_PER_ACCOUNT', 200),
+    templatesGlobal: numberEnv('TEMPLATES_GLOBAL', 2000),
+    templateBytesPerAccount: numberEnv('TEMPLATE_BYTES_PER_ACCOUNT', 128 * 1024 * 1024),
+    templateBytesGlobal: numberEnv('TEMPLATE_BYTES_GLOBAL', 512 * 1024 * 1024),
+    eventRetentionDays: numberEnv('EVENT_RETENTION_DAYS', 7),
+    maintenanceIntervalMs: numberEnv('MAINTENANCE_INTERVAL_MS', 60 * 60 * 1000),
+    // Unset means retain forever. Archiving requires an explicit directory.
+    auditRetentionDays: process.env.AUDIT_RETENTION_DAYS
+      ? numberEnv('AUDIT_RETENTION_DAYS', 365)
+      : undefined,
+    auditArchiveDir: process.env.AUDIT_ARCHIVE_DIR ? pathEnv('AUDIT_ARCHIVE_DIR', '') : undefined,
     host: hostFromEnv(nodeEnv),
     port: numberEnv('PORT', 3000),
     databasePath: pathEnv('DATABASE_PATH', 'data/app.sqlite'),

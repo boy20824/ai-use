@@ -32,4 +32,39 @@
 
 ## 依賴稽核
 
-`pnpm audit` 在這次變更時沒有已知漏洞。之後若出現公告，先升級能相容的套件，再把仍無法排除的項目記在這裡。
+本次 manifest 已選定 `@fastify/static@^10.1.10`，root `pnpm.overrides` 明確鎖定 `glob@14.0.4` 與 `minimatch@11.0.5`，套用所有 production／development 依賴路徑。版本與 engines 資訊由主代理在正常 Shell 查詢 registry 確認：static 10.1.10 依賴 glob `^14.0.0`；glob 14.0.4 支援 Node `18 || 20 || >=22`，minimatch 11.0.5 支援 `20 || >=22`。共同相容範圍為 Node 20 或 >=22，既有 Docker Node 22 符合；不支援以 Node 18 執行這組依賴。
+
+主代理已完成網路 fresh frozen-lockfile install；實際 `pnpm-lock.yaml` 鎖定 `@fastify/static@10.1.10`、`glob@14.0.4`、`minimatch@11.0.5`。乾淨 store 安裝後，獨立完整 Vitest 34 files、194/194 tests、`npm run typecheck`（前後端）、全專案 ESLint、Vite production build 及 `npm run check:sample` 均通過。Vite build 僅將 `envDir` 改指空目錄，避免讀取專案 `.env`。D1／D2 已完成依賴修補，升級後相容性已有上述測試驗證。
+
+實際 pnpm 鎖定圖的 `pnpm audit --json` 各級漏洞數全部為 0，exit 0；`pnpm` production audit 待主代理執行，尚無獨立結果。repo 直接執行 `npm audit` 因僅有 `pnpm-lock.yaml` 而回報 `ENOLOCK`。主代理另在 `/workspace/evidence/security-fix/npm-audit-workspace` 複製 root／server manifests，加入 npm workspaces 與相同 glob／minimatch overrides，隔離生成 `package-lock.json` 後執行 `npm audit`，各級漏洞數亦全部為 0，exit 0；這是補充的 npm 解析圖結果，並非實際 pnpm 鎖定圖的稽核結果。
+
+Docker 未安裝，未執行 Docker smoke；真瀏覽器與實際 Word 未測，未部署。
+
+## 資源配額與稽核保留
+
+伺服器提供下列環境設定；未設定時採表內預設。開放註冊、所有會員共享類別／範本／留言，以及案件與圖片的本機處理方式不變。
+
+| 設定                         | 預設             | 用途                                                 |
+| ---------------------------- | ---------------- | ---------------------------------------------------- |
+| `FEEDBACK_PER_ACCOUNT`       | 500              | 每帳號現存留言數                                     |
+| `FEEDBACK_GLOBAL`            | 10000            | 全站現存留言數                                       |
+| `TEMPLATES_PER_ACCOUNT`      | 200              | 每帳號現存範本數                                     |
+| `TEMPLATES_GLOBAL`           | 2000             | 全站現存範本數                                       |
+| `TEMPLATE_BYTES_PER_ACCOUNT` | 134217728        | 每帳號範本 bytes                                     |
+| `TEMPLATE_BYTES_GLOBAL`      | 536870912        | 全站範本 bytes                                       |
+| `EVENT_RETENTION_DAYS`       | 7                | 登入／註冊／改密碼事件保留天數，至少保留現行計數視窗 |
+| `MAINTENANCE_INTERVAL_MS`    | 3600000          | 啟動時與固定間隔清理事件、過期 session               |
+| `AUDIT_RETENTION_DAYS`       | 不設定，永久保留 | 稽核線上表封存門檻                                   |
+| `AUDIT_ARCHIVE_DIR`          | 不設定           | 明確指定可持久保存的封存目錄                         |
+
+配額以目前儲存量計算，超額新增回傳 429；替換範本扣除原檔後重新計量，歸屬本次上傳者。歷史範本不推測上傳者，仍計入全站配額。遷移不刪除既有超額資料。範本同時存在 SQLite 與檔案，因此實體磁碟使用可能約為設定 bytes 的兩倍，另有資料庫及封存開銷。
+
+範本／留言列表預設每頁 100 筆，`limit` 範圍 1–100，`offset` 範圍 0–1000000。前端依序載入各頁，維持既有完整列表操作與畫面。
+
+稽核紀錄不與一般事件一併清理。設定保留天數後，遇到到期紀錄會告警；未指定封存目錄時仍保留原紀錄。指定目錄後，每輪最多封存 500 筆為新建 JSONL 檔（0600），同步檔案與目錄後才在交易中移除對應線上紀錄。任何寫檔或同步錯誤均告警並保留原紀錄。部署前應建立具正確寫入權限的持久封存目錄、備份及監控告警；封存檔不自動刪除。SQLite 刪列不等於立即縮小 DB 檔案。
+
+新註冊、管理建帳與改密碼一律拒絕超過 72 UTF-8 bytes 的新密碼（中文通常每字 3 bytes）。既有 bcrypt 雜湊無法辨識原始密碼是否超長，因此登入與改密碼的目前密碼驗證保留原有 bcrypt 語意及原先 200 字元輸入上限，不自動重新雜湊、不強制中斷既有帳號。歷史密碼若超長，應由本人登入後改成 72 bytes 內的新密碼；修改後的新密碼受上述限制。
+
+DOCX 上傳要求非巨集主文件 content type，拒絕巨集、ActiveX、OLE、外部關聯、無法安全解析的 XML，以及 ZIP64／多磁碟／矛盾 ZIP 目錄。XML 每個 part 上限 2,000,000 字元、20,000 標記、64 層、單標記 16,384 字元；正規化段落上限 65,536 字元、2,048 runs、1,024 placeholders。超過限制的舊範本上傳／替換會被拒絕，既有檔案不自動改寫。ZIP 實際解壓總量、項目數、上傳大小、路徑與壓縮比限制同時適用。
+
+DOCX 格式正規化有變更時以 DEFLATE（level 6）重建 ZIP，避免預設 STORE 將合法壓縮文件膨脹到 8 MiB 上限之外。輸入與輸出仍套用相同壓縮大小、實際解壓總量、項目數與壓縮比限制，未放寬解壓限制。
