@@ -490,7 +490,7 @@ it('shows the exact parallel hint in steps and full overview only when enabled',
   try {
     await mount()
     expect(host.querySelectorAll('.fixed-step')).toHaveLength(1)
-    expect(host.querySelector('.fixed-step')?.textContent).toContain('此步驟可請其他人同步進行')
+    expect(host.querySelector('.fixed-step')?.textContent).toContain('可請其他人同步處理')
     await check(input('攔查'), true)
     const stop = [...host.querySelectorAll('.fixed-step')].find((row) =>
       row.querySelector('h3')?.textContent?.includes('攔查專屬'),

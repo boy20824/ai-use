@@ -299,7 +299,7 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
   expect(host.querySelector('.basic-data-row')?.textContent).not.toContain('Mock Y label')
   expect(host.querySelector('#step-d-0')).toBeNull()
   await check(host.querySelector('[aria-label="情境模組選擇"] input[value="m"]')!, true)
-  expect(row('D Mock').textContent).toContain('此步驟可請其他人同步進行')
+  expect(row('D Mock').textContent).toContain('可請其他人同步處理')
   expect(row('D Mock').querySelector('input[type="number"]')).not.toBeNull()
   expect(host.querySelector('#step-f-0')).toBeNull()
   await field(host.querySelector('.basic-data-row')!, '姓名', 'Mock Person')
@@ -310,10 +310,19 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
     dates[i]!.dispatchEvent(new Event('change', { bubbles: true }))
     await nextTick()
   }
-  await field(row('D Mock'), 'Mock Y label', '24.5')
+  const parallelD = host.querySelector('.parallel-work-item')!
+  const details = parallelD.querySelector('details')!
+  details.open = true
+  await field(parallelD, 'Mock Y label', '24.5')
+  expect((row('D Mock').querySelector('input[type="number"]') as HTMLInputElement).value).toBe(
+    '24.5',
+  )
+  details.open = false
+  details.open = true
+  expect((parallelD.querySelector('input[type="number"]') as HTMLInputElement).value).toBe('24.5')
   assertScenarioAlignment()
   snapshot('workbench-m-selected')
-  await click('產生', row('D Mock'))
+  await click('產生', parallelD)
   await vi.waitFor(() => expect(mocks.downloadBytes).toHaveBeenCalledOnce())
   const data = mocks.downloadBytes.mock.calls[0]![0] as Uint8Array
   const xml = new PizZip(data).file('word/document.xml')!.asText()
