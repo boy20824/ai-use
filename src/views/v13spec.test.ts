@@ -271,7 +271,7 @@ describe('workflow acceptance UI', () => {
         const router = await mount()
         await check(input('已完成'), true)
         for (const field of host.querySelectorAll<HTMLInputElement>(
-          '#panel-steps input[type="text"], #panel-steps input[type="number"]',
+          '#panel-steps input[type="text"], #panel-steps input[type="number"], .shared-fields-panel input[type="text"], .shared-fields-panel input[type="number"]',
         )) {
           field.value = field.type === 'number' ? '0.35' : '測試姓名'
           field.dispatchEvent(new Event('input', { bubbles: true }))
