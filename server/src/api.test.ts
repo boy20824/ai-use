@@ -393,7 +393,10 @@ describe('api', () => {
     const app = await buildApp(db, config)
     try {
       const adminAuth = authFrom(await login(app, 'admin', passwords.admin))
-      const data = buildDocx('a'.repeat(1024 * 1024))
+      // Large passive payload, with bounded XML paragraph complexity.
+      const archive = new PizZip(buildDocx('large document'))
+      archive.file('word/media/image.png', Buffer.alloc(1024 * 1024))
+      const data = archive.generate({ type: 'nodebuffer' }) as Uint8Array
       expect(data.byteLength).toBeGreaterThan(1024 * 1024)
       const body = multipart(
         {},

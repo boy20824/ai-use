@@ -21,5 +21,11 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts", "scripts/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.vue",
+    "vite.config.ts",
+    "scripts/**/*.ts",
+    "server/src/pako.d.ts"
+  ]
 }

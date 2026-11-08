@@ -2,7 +2,7 @@
 import FeedbackText from '@/components/FeedbackText.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
-import { apiErrorMessage, apiRequest } from '@/services/api'
+import { apiErrorMessage, apiRequest, apiPagedList } from '@/services/api'
 import { useSessionStore } from '@/stores/session'
 import type { FeedbackPost, FeedbackStatus } from '@/types/domain'
 import { formatStoredDate } from '@/utils/rocDate'
@@ -37,16 +37,19 @@ function owns(post: FeedbackPost) {
 }
 
 async function load() {
-  const query = filter.value ? `?status=${filter.value}` : ''
-  const response = await apiRequest(`/api/feedback${query}`)
-  if (!response.ok) {
+  try {
+    const query = filter.value ? `?status=${filter.value}` : ''
+    posts.value = await apiPagedList<FeedbackPost>(
+      `/api/feedback${query}`,
+      'posts',
+      '無法讀取留言。',
+    )
+  } catch (error) {
     tone.value = 'warn'
-    message.value = await apiErrorMessage(response, '無法讀取留言。')
+    message.value = error instanceof Error ? error.message : '無法讀取留言。'
     ready.value = true
     return
   }
-  const body = (await response.json()) as { posts?: FeedbackPost[] }
-  posts.value = body.posts ?? []
   for (const post of posts.value) {
     if (replyDrafts.value[post.id] === undefined) replyDrafts.value[post.id] = post.adminReply
   }

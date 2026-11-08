@@ -1,4 +1,6 @@
 import PizZip from 'pizzip'
+import { Inflate } from 'pako'
+import { DOMParser } from '@xmldom/xmldom'
 
 const placeholderPattern = /\{\{\s*([^{}]+?)\s*\}\}/g
 const wordPartPattern = /^word\/(document|header\d+|footer\d+)\.xml$/
@@ -9,6 +11,7 @@ const rPrPattern = /<w:rPr\b[^>]*\/>|<w:rPr\b[^>]*>[\s\S]*?<\/w:rPr>/
 
 export interface ZipLimits {
   maxEntries: number
+  maxCompressedBytes?: number
   maxUncompressedBytes: number
 }
 
@@ -68,23 +71,23 @@ function textsInXml(xml: string): string {
 }
 
 function leafParagraphRanges(xml: string): ParagraphRange[] {
+  safeXml(xml)
   const all: ParagraphRange[] = []
-  const stack: number[] = []
+  const stack: { start: number; child: boolean }[] = []
   for (const match of xml.matchAll(paragraphTagPattern)) {
     const token = match[0]
     const index = match.index ?? 0
     if (token.startsWith('</')) {
-      const innerStart = stack.pop()
-      if (innerStart === undefined) continue
-      all.push({ innerStart, innerEnd: index })
+      const item = stack.pop()
+      if (item && !item.child) all.push({ innerStart: item.start, innerEnd: index })
       continue
     }
-    if (!token.endsWith('/>')) stack.push(index + token.length)
+    if (!token.endsWith('/>')) {
+      if (stack.length) stack[stack.length - 1]!.child = true
+      stack.push({ start: index + token.length, child: false })
+    }
   }
-  return all.filter(
-    (outer) =>
-      !all.some((inner) => inner.innerStart > outer.innerStart && inner.innerEnd < outer.innerEnd),
-  )
+  return all
 }
 
 export function placeholderNamesInXml(xml: string): string[] {
@@ -105,52 +108,289 @@ export function placeholderNamesInXml(xml: string): string[] {
   return names
 }
 
-export function assertSafeZip(data: Uint8Array, limits: ZipLimits) {
-  if (data.byteLength < 22 || data[0] !== 0x50 || data[1] !== 0x4b) throw new Error('bad-zip')
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-  let eocd = -1
-  const scanFrom = Math.max(0, data.byteLength - 22 - 65535)
-  for (let index = data.byteLength - 22; index >= scanFrom; index -= 1) {
-    if (view.getUint32(index, true) === 0x06054b50) {
-      eocd = index
+// Reject ambiguous containers before any consumer sees them. Inflation emits
+// bounded chunks and stops immediately on budget overflow, even with forged sizes.
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff
+  for (const byte of bytes) {
+    crc ^= byte
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0)
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+function inflateBounded(packed: Uint8Array, budget: number): Uint8Array {
+  const chunks: Uint8Array[] = []
+  let emitted = 0
+  const inflater = new Inflate({ raw: true, chunkSize: Math.max(1, Math.min(16384, budget + 1)) })
+  inflater.onData = (chunk: Uint8Array) => {
+    emitted += chunk.length
+    if (emitted > budget) throw new Error('too-large')
+    chunks.push(chunk)
+  }
+  if (
+    !inflater.push(packed, true) ||
+    inflater.err ||
+    !inflater.ended ||
+    inflater.strm.avail_in !== 0
+  )
+    throw new Error('bad-deflate')
+  const output = new Uint8Array(emitted)
+  let offset = 0
+  for (const chunk of chunks) {
+    output.set(chunk, offset)
+    offset += chunk.length
+  }
+  return output
+}
+
+export function readSafeZip(data: Uint8Array, limits: ZipLimits): Map<string, Uint8Array> {
+  if (data.length < 22 || data.length > (limits.maxCompressedBytes ?? 8 * 1024 * 1024))
+    throw new Error('bad-zip')
+  const v = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  const u16 = (n: number) => v.getUint16(n, true)
+  const u32 = (n: number) => v.getUint32(n, true)
+  let end = -1
+  for (let n = data.length - 22; n >= Math.max(0, data.length - 65557); n--) {
+    if (u32(n) === 0x06054b50 && n + 22 + u16(n + 20) === data.length) {
+      end = n
       break
     }
   }
-  if (eocd < 0) throw new Error('bad-zip')
-  const entries = view.getUint16(eocd + 10, true)
-  const directoryOffset = view.getUint32(eocd + 16, true)
-  if (entries > limits.maxEntries) throw new Error('too-many-entries')
-  let offset = directoryOffset
-  let uncompressedTotal = 0
-  const decoder = new TextDecoder('utf-8')
-  for (let index = 0; index < entries; index += 1) {
-    if (offset + 46 > data.byteLength || view.getUint32(offset, true) !== 0x02014b50) {
-      throw new Error('bad-zip')
+  if (end < 0 || u16(end + 4) || u16(end + 6)) throw new Error('multi-disk')
+  const count = u16(end + 10),
+    size = u32(end + 12),
+    start = u32(end + 16)
+  if (count === 65535 || size === 0xffffffff || start === 0xffffffff) throw new Error('zip64')
+  if (u16(end + 8) !== count || start + size !== end) throw new Error('bad-directory')
+  const result = new Map<string, Uint8Array>()
+  const names = new Set<string>()
+  const decoder = new TextDecoder('utf-8', { fatal: true })
+  let n = start,
+    localEnd = 0,
+    total = 0,
+    actualCount = 0
+  const extras = (from: number, length: number) => {
+    const until = from + length
+    while (from < until) {
+      if (from + 4 > until) throw new Error('bad-extra')
+      const id = u16(from),
+        len = u16(from + 2)
+      if (id === 1) throw new Error('zip64')
+      if (id === 0x7075) throw new Error('ambiguous-unicode-path')
+      from += 4 + len
+      if (from > until) throw new Error('bad-extra')
     }
-    const compressed = view.getUint32(offset + 20, true)
-    const uncompressed = view.getUint32(offset + 24, true)
-    const nameLength = view.getUint16(offset + 28, true)
-    const extraLength = view.getUint16(offset + 30, true)
-    const commentLength = view.getUint16(offset + 32, true)
-    if (compressed === 0xffffffff || uncompressed === 0xffffffff) throw new Error('zip64')
-    if (uncompressed > limits.maxUncompressedBytes) throw new Error('too-large')
-    uncompressedTotal += uncompressed
-    if (uncompressedTotal > limits.maxUncompressedBytes) throw new Error('too-large')
-    if (compressed > 0 && uncompressed > 1_000_000 && uncompressed / compressed > 100) {
-      throw new Error('zip-bomb')
-    }
-    const nameStart = offset + 46
-    const name = decoder.decode(data.subarray(nameStart, nameStart + nameLength))
-    if (
-      name.includes('..') ||
-      name.startsWith('/') ||
-      name.startsWith('\\') ||
-      name.includes('\\')
-    ) {
-      throw new Error('zip-path')
-    }
-    offset = nameStart + nameLength + extraLength + commentLength
   }
+  while (n < end) {
+    if (++actualCount > limits.maxEntries) throw new Error('too-many-entries')
+    if (n + 46 > end || u32(n) !== 0x02014b50) throw new Error('bad-directory')
+    const flags = u16(n + 8),
+      method = u16(n + 10),
+      compressed = u32(n + 20),
+      declared = u32(n + 24)
+    const nl = u16(n + 28),
+      el = u16(n + 30),
+      cl = u16(n + 32),
+      local = u32(n + 42)
+    if (u16(n + 34) || compressed === 0xffffffff || declared === 0xffffffff || local === 0xffffffff)
+      throw new Error('unsupported-zip')
+    if (flags & ~0x808 || (method !== 0 && method !== 8)) throw new Error('unsupported-zip')
+    if (n + 46 + nl + el + cl > end) throw new Error('bad-directory')
+    const name = decoder.decode(data.subarray(n + 46, n + 46 + nl))
+    if (
+      !name ||
+      /[\\:\x00-\x1f]/.test(name) ||
+      name.startsWith('/') ||
+      name.includes('..') ||
+      name.includes('%')
+    )
+      throw new Error('zip-path')
+    const key = name.toLowerCase()
+    if (names.has(key)) throw new Error('duplicate-entry')
+    names.add(key)
+    extras(n + 46 + nl, el)
+    if (local !== localEnd || local + 30 > start || u32(local) !== 0x04034b50)
+      throw new Error('bad-local')
+    const lnl = u16(local + 26),
+      lel = u16(local + 28),
+      payload = local + 30 + lnl + lel
+    if (
+      payload + compressed > start ||
+      u16(local + 6) !== flags ||
+      u16(local + 8) !== method ||
+      decoder.decode(data.subarray(local + 30, local + 30 + lnl)) !== name
+    )
+      throw new Error('bad-local')
+    extras(local + 30 + lnl, lel)
+    if (
+      !(flags & 8) &&
+      (u32(local + 18) !== compressed ||
+        u32(local + 22) !== declared ||
+        u32(local + 14) !== u32(n + 16))
+    )
+      throw new Error('bad-local')
+    const remaining = limits.maxUncompressedBytes - total
+    if (declared > remaining || remaining < 0) throw new Error('too-large')
+    if (declared > 1_000_000 && declared / Math.max(1, compressed) > 100)
+      throw new Error('zip-bomb')
+    const packed = data.subarray(payload, payload + compressed)
+    const output = method === 0 ? packed : inflateBounded(packed, remaining)
+    total += output.length
+    if (total > limits.maxUncompressedBytes || output.length !== declared)
+      throw new Error('too-large')
+    if (crc32(output) !== u32(n + 16)) throw new Error('bad-crc')
+    if (name.endsWith('/') && output.length) throw new Error('bad-directory-entry')
+    if (output.length > 1_000_000 && output.length / Math.max(1, compressed) > 100)
+      throw new Error('zip-bomb')
+    localEnd = payload + compressed
+    if (flags & 8) {
+      if (localEnd + 12 > start) throw new Error('bad-descriptor')
+      if (u32(localEnd) === 0x08074b50) localEnd += 4
+      if (
+        localEnd + 12 > start ||
+        u32(localEnd) !== u32(n + 16) ||
+        u32(localEnd + 4) !== compressed ||
+        u32(localEnd + 8) !== declared
+      )
+        throw new Error('bad-descriptor')
+      localEnd += 12
+    }
+    result.set(name, output)
+    n += 46 + nl + el + cl
+  }
+  if (actualCount !== count || n !== end || localEnd !== start) throw new Error('bad-directory')
+  return result
+}
+
+export function assertSafeZip(data: Uint8Array, limits: ZipLimits) {
+  readSafeZip(data, limits)
+}
+
+function safeXml(xml: string) {
+  // Bound lexical work before DOM construction; DTD/entities are unnecessary in OOXML.
+  if (xml.length > 2_000_000 || /<!DOCTYPE|<!ENTITY/i.test(xml)) throw new Error('unsafe-xml')
+  let depth = 0,
+    nodes = 0,
+    offset = 0
+  while (offset < xml.length) {
+    const start = xml.indexOf('<', offset)
+    if (start < 0) break
+    if (++nodes > 20000) throw new Error('complex-xml')
+    let end: number
+    if (xml.startsWith('<!--', start) || xml.startsWith('<![CDATA[', start)) {
+      const comment = xml.startsWith('<!--', start)
+      const marker = comment ? '-->' : ']]>'
+      end = xml.indexOf(marker, start + (comment ? 4 : 9))
+      if (end < 0) throw new Error('bad-xml')
+      offset = end + marker.length
+      continue
+    }
+    if (xml.startsWith('<?', start)) {
+      if (!xml.startsWith('<?xml ', start) || start > 1) throw new Error('unsafe-xml')
+      end = xml.indexOf('?>', start + 2)
+      if (end < 0 || end - start > 16384) throw new Error('bad-xml')
+      offset = end + 2
+      continue
+    }
+    if (xml.startsWith('<!', start)) throw new Error('unsafe-xml')
+    let quote = ''
+    for (end = start + 1; end < xml.length; end++) {
+      if (end - start > 16384) throw new Error('complex-xml')
+      const char = xml[end]!
+      if (quote) {
+        if (char === quote) quote = ''
+      } else if (char === '"' || char === "'") quote = char
+      else if (char === '<') throw new Error('bad-xml')
+      else if (char === '>') break
+    }
+    if (end === xml.length) throw new Error('bad-xml')
+    if (xml[start + 1] === '/') depth--
+    else if (xml[end - 1] !== '/') depth++
+    if (depth < 0 || depth > 64) throw new Error('complex-xml')
+    offset = end + 1
+  }
+  return new DOMParser({
+    onError: () => {
+      throw new Error('bad-xml')
+    },
+  }).parseFromString(xml, 'application/xml')
+}
+
+function safeDocx(bytes: Uint8Array, limits: ZipLimits): PizZip {
+  const entries = readSafeZip(bytes, limits)
+  const zip = new PizZip()
+  let main = false
+  for (const [name, data] of entries) {
+    const lower = name.toLowerCase()
+    if (/vbaproject|activex|embeddings|oleobject/.test(lower)) throw new Error('active-content')
+    if (/\.(xml|rels)$/i.test(name)) {
+      const xml = new TextDecoder('utf-8', { fatal: true }).decode(data)
+      const doc = safeXml(xml)
+      const elements = doc.getElementsByTagName('*')
+      for (let i = 0; i < elements.length; i++) {
+        const el = elements.item(i)!
+        const local = (el.localName ?? el.nodeName).toLowerCase()
+        const attrs = new Map<string, string>()
+        for (let j = 0; j < el.attributes.length; j++) {
+          const attr = el.attributes.item(j)!
+          const key = (attr.localName ?? attr.name).toLowerCase()
+          if (attrs.has(key)) throw new Error('ambiguous-xml-attribute')
+          attrs.set(key, attr.value)
+        }
+        if (
+          [
+            'vbaproject',
+            'activex',
+            'oleobject',
+            'object',
+            'control',
+            'controls',
+            'altchunk',
+          ].includes(local)
+        )
+          throw new Error('active-content')
+        const type = (attrs.get('contenttype') ?? '').toLowerCase()
+        if (
+          [type, (attrs.get('type') ?? '').toLowerCase()].some((value) =>
+            /macroenabled|vbaproject|activex|oleobject|\/control$|\/package$/.test(value),
+          )
+        )
+          throw new Error('active-content')
+        if (local === 'relationship') {
+          if (
+            el.namespaceURI !== 'http://schemas.openxmlformats.org/package/2006/relationships' ||
+            !['', 'internal'].includes((attrs.get('targetmode') ?? '').toLowerCase()) ||
+            /^[a-z][a-z0-9+.-]*:|^\/\/|[\\%\x00-\x20]/i.test(attrs.get('target') ?? '')
+          )
+            throw new Error('external-relationship')
+        }
+        if (
+          lower === '[content_types].xml' &&
+          local === 'override' &&
+          (attrs.get('partname') ?? '').toLowerCase() === '/word/document.xml'
+        ) {
+          if (
+            el.namespaceURI !== 'http://schemas.openxmlformats.org/package/2006/content-types' ||
+            type !==
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'
+          )
+            throw new Error('bad-main-type')
+          main = true
+        }
+      }
+      if (
+        lower.endsWith('.rels') &&
+        doc.documentElement?.namespaceURI !==
+          'http://schemas.openxmlformats.org/package/2006/relationships'
+      )
+        throw new Error('bad-relationships')
+    }
+    zip.file(name, data)
+  }
+  if (!main || !entries.has('word/document.xml') || !entries.has('[Content_Types].xml'))
+    throw new Error('missing-document-type')
+  return zip
 }
 
 function canonicalRPr(runXml: string): string {
@@ -206,11 +446,13 @@ function tokenizeParagraph(inner: string): ParagraphToken[] {
 }
 
 function normalizeParagraphInner(inner: string): { inner: string; notices: string[] } {
+  if (inner.length > 65536) throw new Error('complex-paragraph')
   const tokens = tokenizeParagraph(inner)
   const runs: ParsedRun[] = []
   for (const token of tokens) {
     if (token.kind === 'run') runs.push({ xml: token.xml, rPr: canonicalRPr(token.xml) })
   }
+  if (runs.length > 2048) throw new Error('complex-paragraph')
   if (runs.length === 0) return { inner, notices: [] }
 
   const chars: { runIndex: number; ch: string }[] = []
@@ -228,7 +470,9 @@ function normalizeParagraphInner(inner: string): { inner: string; notices: strin
   const notices: string[] = []
   const dirty = runs.map(() => false)
   const joined = chars.map((item) => item.ch).join('')
+  let placeholders = 0
   for (const match of joined.matchAll(/\{\{([^{}]*)\}\}/g)) {
+    if (++placeholders > 1024) throw new Error('complex-paragraph')
     const start = match.index ?? 0
     const end = start + match[0].length
     const covered = pieces.filter((piece) => piece.end > start && piece.start < end)
@@ -278,20 +522,18 @@ export function normalizeWordXml(xml: string): { xml: string; notices: string[] 
   )
   if (ranges.length === 0) return { xml, notices: [] }
   const notices: string[] = []
-  let next = xml
-  let delta = 0
+  const chunks: string[] = []
+  let previous = 0
   let changed = false
   for (const range of ranges) {
-    const start = range.innerStart + delta
-    const end = range.innerEnd + delta
-    const inner = next.slice(start, end)
+    const inner = xml.slice(range.innerStart, range.innerEnd)
     const result = normalizeParagraphInner(inner)
     notices.push(...result.notices)
-    if (result.inner === inner) continue
-    next = next.slice(0, start) + result.inner + next.slice(end)
-    delta += result.inner.length - inner.length
-    changed = true
+    chunks.push(xml.slice(previous, range.innerStart), result.inner)
+    previous = range.innerEnd
+    if (result.inner !== inner) changed = true
   }
+  chunks.push(xml.slice(previous))
   const unique: string[] = []
   const seen = new Set<string>()
   for (const notice of notices) {
@@ -299,7 +541,7 @@ export function normalizeWordXml(xml: string): { xml: string; notices: string[] 
     seen.add(notice)
     unique.push(notice)
   }
-  return { xml: changed ? next : xml, notices: unique }
+  return { xml: changed ? chunks.join('') : xml, notices: unique }
 }
 
 function uniqueTags(tags: string[]): string[] {
@@ -315,8 +557,7 @@ function uniqueTags(tags: string[]): string[] {
 
 export function normalizeDocx(data: ArrayBuffer | Uint8Array, limits: ZipLimits): NormalizedDocx {
   const bytes = asBytes(data)
-  assertSafeZip(bytes, limits)
-  const zip = new PizZip(bytes)
+  const zip = safeDocx(bytes, limits)
   const notices: string[] = []
   let changed = false
   for (const part of zip.file(wordPartPattern)) {
@@ -330,14 +571,21 @@ export function normalizeDocx(data: ArrayBuffer | Uint8Array, limits: ZipLimits)
   }
   const tags = uniqueTags(notices)
   if (!changed) return { data: bytes, notices: tags }
-  const output = zip.generate({ type: 'uint8array' })
+  const output = zip.generate({
+    type: 'uint8array',
+    compression: 'DEFLATE',
+    compressionOptions: { level: 6 },
+  })
   const normalized = output instanceof Uint8Array ? output : new Uint8Array(output)
   assertSafeZip(normalized, limits)
   return { data: normalized, notices: tags }
 }
 
-export function listPlaceholders(data: ArrayBuffer | Uint8Array): string[] {
-  const zip = new PizZip(asBytes(data))
+export function listPlaceholders(
+  data: ArrayBuffer | Uint8Array,
+  limits: ZipLimits = docxZipLimits,
+): string[] {
+  const zip = safeDocx(asBytes(data), limits)
   if (!zip.file('word/document.xml')) throw new Error('missing-document')
   const names: string[] = []
   const seen = new Set<string>()

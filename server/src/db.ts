@@ -531,6 +531,11 @@ function ensureAuditSchema(db: AppDatabase) {
 export function migrate(db: AppDatabase) {
   db.transaction(() => {
     db.exec(accountTables)
+    db.exec(`UPDATE login_events SET username = lower(username) WHERE username != lower(username);
+      CREATE INDEX IF NOT EXISTS login_account_time ON login_events(username, success, created_at);
+      CREATE INDEX IF NOT EXISTS login_ip_time ON login_events(ip, created_at);
+      CREATE INDEX IF NOT EXISTS login_time ON login_events(created_at);
+      CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);`)
     if (!tableExists(db, 'categories')) {
       createCurrentSchema(db)
     } else {
@@ -543,9 +548,18 @@ export function migrate(db: AppDatabase) {
       db.exec(stepTable + linkTable)
       // Built-in IDs may contain user content: never remove rows during migration.
     }
+    db.exec(`CREATE TABLE IF NOT EXISTS template_owners (
+      template_id TEXT PRIMARY KEY REFERENCES templates(id) ON DELETE CASCADE,
+      owner_id TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS template_owner ON template_owners(owner_id);
+      CREATE INDEX IF NOT EXISTS template_order ON templates(added_at DESC, id DESC);`)
     ensureAuditSchema(db)
+    db.exec('CREATE INDEX IF NOT EXISTS audit_time ON audit_log(created_at, id)')
     if (needsAccountUpgrade(db)) throw new Error('Historical accounts require a separate upgrade')
     db.exec(feedbackTable + registerEventsTable)
+    db.exec(`CREATE INDEX IF NOT EXISTS feedback_order ON feedback_posts(created_at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS register_time ON register_events(created_at);
+      CREATE INDEX IF NOT EXISTS password_attempts_time ON password_change_attempts(created_at);`)
     db.transaction(() => {
       if (!columnNames(db, 'categories').includes('group_name'))
         db.exec(
@@ -582,6 +596,10 @@ export function isUniqueConstraint(error: unknown): boolean {
   if (code === 'SQLITE_CONSTRAINT_UNIQUE') return true
   const message = 'message' in error ? String((error as { message?: string }).message ?? '') : ''
   return message.includes('UNIQUE')
+}
+
+export function normalizeLoginAccount(value: string): string {
+  return value.replace(/[A-Z]/g, (char) => char.toLowerCase())
 }
 
 export function createQueries(db: AppDatabase) {
@@ -695,7 +713,7 @@ export function createQueries(db: AppDatabase) {
   const listTemplates = db.prepare(`
     SELECT id, file_name, mime_type, size_bytes, added_at, placeholders, origin
     FROM templates
-    ORDER BY added_at DESC, id DESC
+    ORDER BY added_at DESC, id DESC LIMIT ? OFFSET ?
   `)
   const listTemplatesByCategory = db.prepare(`
     SELECT t.id, t.file_name, t.mime_type, t.size_bytes, t.added_at, t.placeholders, t.origin
@@ -704,7 +722,7 @@ export function createQueries(db: AppDatabase) {
     JOIN category_steps cs ON cs.id = st.step_id
     WHERE cs.category_id = ?
     GROUP BY t.id
-    ORDER BY MIN(cs.sort_order), MIN(st.sort_order), t.id
+    ORDER BY MIN(cs.sort_order), MIN(st.sort_order), t.id LIMIT ? OFFSET ?
   `)
   const getTemplateFile = db.prepare(
     'SELECT id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data FROM templates WHERE id = ?',
@@ -721,6 +739,7 @@ export function createQueries(db: AppDatabase) {
     FROM step_templates st
     JOIN category_steps cs ON cs.id = st.step_id
     JOIN categories c ON c.id = cs.category_id
+    WHERE st.template_id = ?
     ORDER BY c.name COLLATE NOCASE, cs.sort_order, st.sort_order, st.template_id
   `)
   const insertLink = db.prepare(
@@ -751,7 +770,7 @@ export function createQueries(db: AppDatabase) {
     FROM feedback_posts p
     JOIN users u ON u.id = p.author_id
     WHERE (? IS NULL OR p.status = ?)
-    ORDER BY p.created_at DESC, p.id DESC
+    ORDER BY p.created_at DESC, p.id DESC LIMIT ? OFFSET ?
   `)
   const getFeedbackRow = db.prepare(`
     SELECT
@@ -806,9 +825,9 @@ export function createQueries(db: AppDatabase) {
     return grouped
   }
 
-  function usagesByTemplate(): Map<string, TemplateUsage[]> {
+  function usagesByTemplate(ids: string[]): Map<string, TemplateUsage[]> {
     const grouped = new Map<string, TemplateUsage[]>()
-    for (const row of listUsages.all() as UsageRow[]) {
+    for (const row of ids.flatMap((id) => listUsages.all(id)) as UsageRow[]) {
       const list = grouped.get(row.template_id) ?? []
       list.push({
         categoryId: row.category_id,
@@ -823,7 +842,7 @@ export function createQueries(db: AppDatabase) {
   }
 
   function hydrateTemplates(rows: TemplateRow[], includeData: boolean): TemplateRecord[] {
-    const grouped = usagesByTemplate()
+    const grouped = usagesByTemplate(rows.map((row) => row.id))
     return rows.map((row) => mapTemplate(row, grouped.get(row.id) ?? [], includeData))
   }
 
@@ -1338,9 +1357,11 @@ export function createQueries(db: AppDatabase) {
       })
       apply()
     },
-    listTemplates(categoryId?: string) {
+    listTemplates(categoryId?: string, limit = 100, offset = 0) {
       const rows = (
-        categoryId ? listTemplatesByCategory.all(categoryId) : listTemplates.all()
+        categoryId
+          ? listTemplatesByCategory.all(categoryId, Math.min(100, limit), offset)
+          : listTemplates.all(Math.min(100, limit), offset)
       ) as TemplateRow[]
       return hydrateTemplates(rows, false)
     },
@@ -1389,9 +1410,11 @@ export function createQueries(db: AppDatabase) {
         record.createdAt,
       )
     },
-    listFeedback(status?: FeedbackStatus) {
+    listFeedback(status?: FeedbackStatus, limit = 100, offset = 0) {
       const filter = status ?? null
-      return (listFeedbackRows.all(filter, filter) as FeedbackRow[]).map(mapFeedback)
+      return (
+        listFeedbackRows.all(filter, filter, Math.min(100, limit), offset) as FeedbackRow[]
+      ).map(mapFeedback)
     },
     getFeedback(id: string) {
       const row = getFeedbackRow.get(id) as FeedbackRow | undefined
@@ -1431,11 +1454,72 @@ export function createQueries(db: AppDatabase) {
       })
       return apply()
     },
+    setTemplateOwner(id: string, ownerId: string) {
+      db.prepare(
+        'INSERT INTO template_owners(template_id, owner_id) VALUES (?, ?) ON CONFLICT(template_id) DO UPDATE SET owner_id = excluded.owner_id',
+      ).run(id, ownerId)
+    },
+    feedbackQuota(ownerId: string, accountLimit: number, globalLimit: number) {
+      const row = db
+        .prepare(
+          'SELECT COUNT(*) AS total, COALESCE(SUM(author_id = ?), 0) AS own FROM feedback_posts',
+        )
+        .get(ownerId) as { total: number; own: number }
+      return row.total < globalLimit && row.own < accountLimit
+    },
+    templateQuota(
+      ownerId: string,
+      size: number,
+      replaceId: string,
+      accountLimit: number,
+      globalLimit: number,
+      accountBytes: number,
+      globalBytes: number,
+    ) {
+      // Legacy rows retain unknown ownership and always count against global quotas.
+      const row = db
+        .prepare(
+          `SELECT COUNT(*) AS total, COALESCE(SUM(owner_id = ?), 0) AS own,
+        COALESCE(SUM(size_bytes), 0) AS bytes, COALESCE(SUM(CASE WHEN owner_id = ? THEN size_bytes ELSE 0 END), 0) AS ownBytes
+        FROM templates t LEFT JOIN template_owners o ON o.template_id = t.id WHERE t.id != ?`,
+        )
+        .get(ownerId, ownerId, replaceId) as {
+        total: number
+        own: number
+        bytes: number
+        ownBytes: number
+      }
+      return (
+        row.total + 1 <= globalLimit &&
+        row.own + 1 <= accountLimit &&
+        row.bytes + size <= globalBytes &&
+        row.ownBytes + size <= accountBytes
+      )
+    },
+    cleanup(now: number, eventCutoff: number) {
+      db.transaction(() => {
+        db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(new Date(now).toISOString())
+        db.prepare('DELETE FROM login_events WHERE created_at < ?').run(eventCutoff)
+        db.prepare('DELETE FROM register_events WHERE created_at < ?').run(eventCutoff)
+        db.prepare('DELETE FROM password_change_attempts WHERE created_at < ?').run(eventCutoff)
+      })()
+    },
+    auditArchiveBatch(cutoff: string) {
+      return db
+        .prepare('SELECT * FROM audit_log WHERE created_at < ? ORDER BY id LIMIT 500')
+        .all(cutoff) as { id: number }[]
+    },
+    removeArchivedAudit(ids: number[]) {
+      db.transaction(() => {
+        const remove = db.prepare('DELETE FROM audit_log WHERE id = ?')
+        for (const id of ids) remove.run(id)
+      })()
+    },
     recordLogin(username: string, ip: string, success: boolean) {
-      insertLoginEvent.run(username, ip, success ? 1 : 0, Date.now())
+      insertLoginEvent.run(normalizeLoginAccount(username), ip, success ? 1 : 0, Date.now())
     },
     recentFailures(username: string, since: number) {
-      const row = countFailures.get(username, since) as { count: number }
+      const row = countFailures.get(normalizeLoginAccount(username), since) as { count: number }
       return row.count
     },
     recentAttempts(ip: string, since: number) {
@@ -1443,7 +1527,7 @@ export function createQueries(db: AppDatabase) {
       return row.count
     },
     clearFailures(username: string) {
-      clearFailures.run(username)
+      clearFailures.run(normalizeLoginAccount(username))
     },
   }
 }

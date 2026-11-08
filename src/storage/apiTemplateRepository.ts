@@ -1,4 +1,4 @@
-import { apiErrorMessage, apiRequest } from '@/services/api'
+import { apiErrorMessage, apiRequest, apiPagedList } from '@/services/api'
 import { templateMimeType } from '@/services/docxTemplates'
 import type {
   StoredTemplate,
@@ -9,10 +9,12 @@ import type {
 export function createApiTemplateRepository(): TemplateRepository {
   return {
     async list() {
-      const response = await apiRequest('/api/templates')
-      if (!response.ok) throw new Error(await apiErrorMessage(response, '無法讀取範本文件。'))
-      const body = (await response.json()) as { templates: TemplateSummary[] }
-      return body.templates.map((item) => ({
+      const templates = await apiPagedList<TemplateSummary>(
+        '/api/templates',
+        'templates',
+        '無法讀取範本文件。',
+      )
+      return templates.map((item) => ({
         ...item,
         usages: item.usages ?? [],
         data: new ArrayBuffer(0),

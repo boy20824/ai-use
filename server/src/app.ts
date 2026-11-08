@@ -1,3 +1,5 @@
+import path from 'node:path'
+import { mkdirSync, openSync, writeFileSync, fsyncSync, closeSync } from 'node:fs'
 import { releaseNotes } from './releaseNotes.ts'
 import cookie from '@fastify/cookie'
 import cors from '@fastify/cors'
@@ -61,9 +63,12 @@ const loginSchema = z
       .min(1)
       .max(80)
       .regex(/^[\w.-]+$/),
+    // Preserve legacy bcrypt truncation for existing accounts; new secrets are byte limited.
     password: z.string().min(1).max(200),
   })
   .strict()
+
+const passwordByteLimit = (value: string) => Buffer.byteLength(value, 'utf8') <= 72
 
 const changePasswordSchema = z
   .object({
@@ -72,16 +77,22 @@ const changePasswordSchema = z
       .string()
       .min(12)
       .max(200)
-      .refine((value) => Buffer.byteLength(value, 'utf8') <= 72),
+      .refine(passwordByteLimit, '密碼不可超過 72 UTF-8 bytes。'),
   })
   .strict()
 
 const categoryIdSchema = z.string().regex(/^[a-z0-9-]{1,64}$/)
 const templateIdSchema = z.string().regex(/^[a-zA-Z0-9-]{1,64}$/)
 
+const pagination = {
+  limit: z.coerce.number().int().min(1).max(100).default(100),
+  offset: z.coerce.number().int().min(0).max(1000000).default(0),
+}
+
 const categoryQuerySchema = z
   .object({
     categoryId: categoryIdSchema.optional(),
+    ...pagination,
   })
   .strict()
 
@@ -171,7 +182,11 @@ const usernameSchema = z
   .trim()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/)
 
-const passwordSchema = z.string().min(8).max(200)
+const passwordSchema = z
+  .string()
+  .min(8)
+  .max(200)
+  .refine(passwordByteLimit, '密碼不可超過 72 UTF-8 bytes。')
 
 const registerSchema = z
   .object({
@@ -252,6 +267,7 @@ const feedbackUpdateSchema = z
 
 const feedbackQuerySchema = z
   .object({
+    ...pagination,
     status: feedbackStatusSchema.optional(),
   })
   .strict()
@@ -553,6 +569,60 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   })
   app.decorateRequest('authUser', null)
 
+  const maintenance = () => {
+    const now = Date.now()
+    // Never shorten the security counting windows when configuring retention.
+    const retention = Math.max(
+      (config.eventRetentionDays ?? 7) * 86400000,
+      config.loginLockoutMinutes * 60000,
+      config.registerWindowMs,
+      15 * 60000,
+    )
+    queries.cleanup(now, now - retention)
+    if (config.auditRetentionDays !== undefined) {
+      const cutoff = new Date(now - config.auditRetentionDays * 86400000).toISOString()
+      const rows = queries.auditArchiveBatch(cutoff)
+      if (rows.length) {
+        // Preserve old trails unless a durable archive has been explicitly configured.
+        console.warn('Audit retention: historical records eligible for archival:', rows.length)
+        if (config.auditArchiveDir) {
+          mkdirSync(config.auditArchiveDir, { recursive: true, mode: 0o700 })
+          const archive = openSync(
+            path.join(config.auditArchiveDir, `audit-${randomBytes(16).toString('hex')}.jsonl`),
+            'wx',
+            0o600,
+          )
+          try {
+            writeFileSync(archive, rows.map((row) => JSON.stringify(row)).join('\n') + '\n')
+            fsyncSync(archive)
+          } finally {
+            closeSync(archive)
+          }
+          const directory = openSync(config.auditArchiveDir, 'r')
+          try {
+            fsyncSync(directory)
+          } finally {
+            closeSync(directory)
+          }
+          queries.removeArchivedAudit(rows.map((row) => row.id))
+        }
+      }
+    }
+  }
+  const runMaintenance = () => {
+    try {
+      maintenance()
+    } catch {
+      console.warn('Security maintenance failed; audit records retained. Check archive storage.')
+    }
+  }
+  runMaintenance()
+  const maintenanceTimer = setInterval(runMaintenance, config.maintenanceIntervalMs ?? 3600000)
+  maintenanceTimer.unref()
+  app.addHook('onClose', async () => {
+    clearInterval(maintenanceTimer)
+  })
+
   await app.register(helmet, {
     contentSecurityPolicy: {
       useDefaults: false,
@@ -746,6 +816,11 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       reply.header('retry-after', 900)
       return fail(reply, 429, 'rate-limited', '請求過多，請稍後再試。')
     }
+    const proposedPassword = (request.body as { newPassword?: unknown } | null)?.newPassword
+    if (typeof proposedPassword === 'string' && !passwordByteLimit(proposedPassword)) {
+      denied()
+      return fail(reply, 400, 'invalid-input', '密碼不可超過 72 UTF-8 bytes。')
+    }
     const parsed = changePasswordSchema.safeParse(request.body)
     const record = queries.findUserById(user.id)
     const token = sessionToken(request, config)
@@ -792,6 +867,9 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       config.registerGlobalLimit,
     )
     if (!allowed) return fail(reply, 429, 'rate-limited', '註冊嘗試過多，請稍後再試。')
+    const proposedPassword = (request.body as { password?: unknown } | null)?.password
+    if (typeof proposedPassword === 'string' && !passwordByteLimit(proposedPassword))
+      return fail(reply, 400, 'invalid-input', '密碼不可超過 72 UTF-8 bytes。')
     const parsed = registerSchema.safeParse(request.body)
     if (!parsed.success) return fail(reply, 400, 'invalid-input', registerMessage(parsed.error))
     const passwordHash = bcrypt.hashSync(parsed.data.password, 10)
@@ -1305,7 +1383,9 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       return fail(reply, 400, 'invalid-input', '找不到這個勤務流程。')
     }
     return {
-      templates: queries.listTemplates(parsed.data.categoryId).map(publicTemplate),
+      templates: queries
+        .listTemplates(parsed.data.categoryId, parsed.data.limit, parsed.data.offset)
+        .map(publicTemplate),
     }
   })
 
@@ -1362,13 +1442,15 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     let storedBytes = data
     let formatNotices: string[] = []
     try {
-      const normalized = normalizeDocx(data, {
+      const zipLimits = {
         maxEntries: config.maxZipEntries,
+        maxCompressedBytes: config.maxUploadBytes,
         maxUncompressedBytes: config.maxZipUncompressedBytes,
-      })
+      }
+      const normalized = normalizeDocx(data, zipLimits)
       storedBytes = Buffer.from(normalized.data)
       formatNotices = normalized.notices
-      placeholders = listPlaceholders(storedBytes)
+      placeholders = listPlaceholders(storedBytes, zipLimits)
     } catch {
       return fail(reply, 400, 'bad-upload', '無法讀取這份 Word 範本。')
     }
@@ -1388,10 +1470,23 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const previousBytes = previous
       ? readTemplateBytes(config.uploadDir, record.id, previous.data)
       : undefined
+    if (
+      !queries.templateQuota(
+        user.id,
+        storedBytes.length,
+        replaceId,
+        config.templatesPerAccount ?? 200,
+        config.templatesGlobal ?? 2000,
+        config.templateBytesPerAccount ?? 128 * 1024 * 1024,
+        config.templateBytesGlobal ?? 512 * 1024 * 1024,
+      )
+    )
+      return fail(reply, 429, 'quota-exceeded', '範本儲存配額已滿，請先清理既有範本。')
     writeTemplateFile(config.uploadDir, record.id, storedBytes)
     try {
       if (replacing) queries.replaceTemplate(record)
       else queries.insertTemplate(record, linkedStepId ?? undefined)
+      queries.setTemplateOwner(record.id, user.id)
     } catch (error) {
       if (previousBytes) writeTemplateFile(config.uploadDir, record.id, previousBytes)
       else removeTemplateFile(config.uploadDir, record.id)
@@ -1443,6 +1538,9 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   app.post('/api/members', async (request, reply) => {
     const user = requireSysadmin(request, reply, 'member_create', '只有系統管理員可以管理會員。')
     if (!user) return
+    const proposedPassword = (request.body as { password?: unknown } | null)?.password
+    if (typeof proposedPassword === 'string' && !passwordByteLimit(proposedPassword))
+      return fail(reply, 400, 'invalid-input', '密碼不可超過 72 UTF-8 bytes。')
     const parsed = memberCreateSchema.safeParse(request.body)
     if (!parsed.success) return fail(reply, 400, 'invalid-input', registerMessage(parsed.error))
     const id = randomBytes(16).toString('hex')
@@ -1500,7 +1598,11 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     if (!user) return
     const parsed = feedbackQuerySchema.safeParse(request.query)
     if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
-    return { posts: queries.listFeedback(parsed.data.status).map(publicFeedback) }
+    return {
+      posts: queries
+        .listFeedback(parsed.data.status, parsed.data.limit, parsed.data.offset)
+        .map(publicFeedback),
+    }
   })
 
   app.post('/api/feedback', async (request, reply) => {
@@ -1510,6 +1612,14 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
     const id = randomBytes(16).toString('hex')
     const createdAt = new Date().toISOString()
+    if (
+      !queries.feedbackQuota(
+        user.id,
+        config.feedbackPerAccount ?? 500,
+        config.feedbackGlobal ?? 10000,
+      )
+    )
+      return fail(reply, 429, 'quota-exceeded', '留言配額已滿，請先清理既有留言。')
     queries.insertFeedback({
       id,
       authorId: user.id,
