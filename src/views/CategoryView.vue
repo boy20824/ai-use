@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { fieldMappingIssues } from '@/workbench/fieldMapping'
 import StepFields from '@/components/StepFields.vue'
+import WorkbenchStepFields from '@/components/WorkbenchStepFields.vue'
+import AppIcon from '@/components/AppIcon.vue'
+import { parallelSteps, retainStepValues } from '@/workbench/parallel'
 import {
   contextKey,
   generationContexts,
@@ -71,6 +74,26 @@ const category = computed(() => categories.byId(categoryId.value))
 const selectedVariants = ref<string[]>([])
 const visibleSteps = computed(() =>
   category.value ? composeSteps(category.value, selectedVariants.value) : [],
+)
+const parallelWork = computed(() => parallelSteps(visibleSteps.value))
+const handledSteps = ref<string[]>([])
+const handledCount = computed(
+  () => parallelWork.value.filter((step) => handledSteps.value.includes(step.id)).length,
+)
+const parallelRegion = ref<HTMLElement | null>(null)
+function focusParallelWork() {
+  parallelRegion.value?.scrollIntoView({ block: 'nearest' })
+  parallelRegion.value?.focus({ preventScroll: true })
+}
+watch(
+  visibleSteps,
+  (steps) => {
+    const active = new Set(steps.map((step) => step.id))
+    scopedValues.value = retainStepValues(scopedValues.value, steps)
+    handledSteps.value = handledSteps.value.filter((id) => active.has(id))
+    completedSteps.value = completedSteps.value.filter((id) => active.has(id))
+  },
+  { flush: 'sync' },
 )
 watch(
   selectedVariants,
@@ -192,6 +215,7 @@ watch(
   [category, () => templates.items],
   () => {
     completedSteps.value = []
+    handledSteps.value = []
   },
   { flush: 'sync' },
 )
@@ -206,6 +230,7 @@ watch(
 function clearDraft() {
   draftVersion++
   completedSteps.value = []
+  handledSteps.value = []
   busy.value = false
   selectedVariants.value = []
   printStep.value = null
@@ -612,6 +637,20 @@ onUnmounted(clearDraft)
     <p v-for="issue in mappingIssues" :key="issue" role="alert" class="mb-3 text-tone-danger-ink">
       {{ issue }}
     </p>
+    <div class="parallel-entry mb-4 flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        class="btn-secondary focus-control"
+        aria-controls="parallel-work"
+        @click="focusParallelWork"
+      >
+        <AppIcon name="members" class="h-5 w-5" />
+        可同步作業，共 {{ parallelWork.length }} 項
+      </button>
+      <span role="status" aria-live="polite" aria-atomic="true" class="text-sm text-ink-muted"
+        >已處理 {{ handledCount }}／共 {{ parallelWork.length }}</span
+      >
+    </div>
     <div class="workbench-layout">
       <aside class="workbench-library self-start rounded-2xl border border-edge bg-surface p-4">
         <h2 class="font-semibold">全部範本</h2>
@@ -684,7 +723,10 @@ onUnmounted(clearDraft)
               v-for="(step, index) in visibleSteps"
               :key="step.id"
               class="fixed-step flex gap-4 border-b border-edge py-5"
-              :class="{ 'bg-tone-ok': completedSteps.includes(step.id) }"
+              :class="{
+                'bg-tone-ok': !step.canRunInParallel && completedSteps.includes(step.id),
+                'parallel-step': step.canRunInParallel,
+              }"
             >
               <div class="flex w-8 flex-col items-center">
                 <span
@@ -702,11 +744,27 @@ onUnmounted(clearDraft)
                 <div class="step-description">
                   <h3
                     class="text-sm font-semibold text-ink whitespace-pre-wrap"
-                    :class="{ 'line-through': completedSteps.includes(step.id) }"
+                    :class="{
+                      'line-through': !step.canRunInParallel && completedSteps.includes(step.id),
+                    }"
                   >
                     {{ step.title ?? step.body }}
                   </h3>
                   <label
+                    v-if="step.canRunInParallel"
+                    class="mt-2 inline-flex cursor-pointer items-center gap-2 text-sm text-ink"
+                  >
+                    <input
+                      v-model="handledSteps"
+                      type="checkbox"
+                      :value="step.id"
+                      :aria-label="`${step.title ?? step.body}：本次已處理`"
+                      class="focus-control h-4 w-4"
+                    />
+                    本次已處理
+                  </label>
+                  <label
+                    v-else
                     class="mt-2 inline-flex cursor-pointer items-center gap-2 text-sm text-ink"
                   >
                     <input
@@ -738,75 +796,27 @@ onUnmounted(clearDraft)
                     </button>
                   </details>
                 </div>
-                <p v-if="step.canRunInParallel" class="mt-2 text-sm">此步驟可請其他人同步進行</p>
-                <StepFields
-                  v-if="!baseIds.has(step.id)"
+                <p
+                  v-if="step.canRunInParallel"
+                  class="parallel-hint mt-2 flex items-center gap-2 text-sm"
+                >
+                  <AppIcon name="members" class="h-5 w-5 shrink-0" />可請其他人同步處理
+                </p>
+                <WorkbenchStepFields
+                  :is-base="baseIds.has(step.id)"
                   :fields="localFields(step.id)"
                   :values="stepValues(step.id)"
                   :definitions="category.fields"
                   :prefix="`step-${step.id}`"
+                  :missing="stepMissing(step.id)"
+                  :templates="templatesFor(step)"
+                  :busy="busy"
+                  :message="messageStepId === step.id ? message : ''"
+                  :message-tone="messageTone"
                   @update="(key, value) => setStepValue(step.id, key, value)"
+                  @generate="(id) => produceOne(step.id, id)"
+                  @generate-all="produceStep(step.id, step.templateIds, index)"
                 />
-                <p v-if="stepMissing(step.id).length" class="mt-2 text-xs text-ink-muted">
-                  請先填寫：{{ stepMissing(step.id).join('、') }}
-                </p>
-                <p v-if="templatesFor(step).length === 0" class="mt-3 text-sm text-ink-muted">
-                  這個步驟還沒有範本。
-                </p>
-                <div v-else class="step-documents">
-                  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-                    <button
-                      v-if="templatesFor(step).length > 1"
-                      type="button"
-                      class="btn-primary"
-                      :disabled="!canGenerateStep(step.id)"
-                      @click="produceStep(step.id, step.templateIds, index)"
-                    >
-                      產生本步驟全部
-                    </button>
-                  </div>
-                  <ul class="step-template-list divide-y divide-edge">
-                    <li
-                      v-for="item in templatesFor(step)"
-                      :key="item.id"
-                      class="flex items-center justify-between gap-3 px-4 py-3"
-                    >
-                      <span class="min-w-0">
-                        <span class="block break-all text-sm font-medium text-ink">{{
-                          displayFileName(item.fileName)
-                        }}</span>
-                        <span class="mt-1 block text-xs text-ink-muted">
-                          {{
-                            item.placeholders.length > 0
-                              ? item.placeholders.join('、')
-                              : '沒有偵測到欄位'
-                          }}
-                        </span>
-                      </span>
-                      <button
-                        type="button"
-                        class="btn-secondary shrink-0 px-3 py-2"
-                        :title="stepMissing(step.id).join('、') || '產出 .docx'"
-                        :disabled="!canGenerateStep(step.id)"
-                        @click="produceOne(step.id, item.id)"
-                      >
-                        產生
-                      </button>
-                    </li>
-                  </ul>
-                </div>
-                <p
-                  v-if="message && messageStepId === step.id"
-                  class="mt-3 rounded-control px-3 py-2 text-sm leading-6"
-                  :class="
-                    messageTone === 'ok'
-                      ? 'bg-emerald-50 text-emerald-950'
-                      : 'bg-amber-50 text-amber-950'
-                  "
-                  role="status"
-                >
-                  {{ message }}
-                </p>
               </div>
             </li>
           </ol>
@@ -1001,6 +1011,83 @@ onUnmounted(clearDraft)
           </div>
         </section>
       </div>
+      <section
+        id="parallel-work"
+        ref="parallelRegion"
+        role="region"
+        tabindex="-1"
+        aria-labelledby="parallel-work-title"
+        class="parallel-work focus-control rounded-2xl border border-edge bg-surface p-4"
+      >
+        <h2 id="parallel-work-title" class="font-semibold text-ink-strong">可同步作業區</h2>
+        <p class="mt-2 text-sm text-ink">需要前置資料的作業，請確認備齊後再進行</p>
+        <p class="mt-2 text-xs text-ink-muted">
+          「本次已處理」僅為本次手動註記，非系統驗證或法定程序完成；離開後清除。
+        </p>
+        <p v-if="parallelWork.length === 0" class="mt-4 text-sm text-ink-muted">
+          此情境組合沒有可同步作業
+        </p>
+        <ol v-else class="mt-4 space-y-4" aria-label="可同步作業清單">
+          <li
+            v-for="step in parallelWork"
+            :key="step.id"
+            class="parallel-work-item min-w-0 border-t border-edge pt-3"
+          >
+            <label class="mb-2 inline-flex cursor-pointer items-center gap-2 text-sm text-ink">
+              <input
+                v-model="handledSteps"
+                type="checkbox"
+                :value="step.id"
+                :aria-label="`${step.title ?? step.body}：本次已處理`"
+                class="focus-control h-4 w-4"
+              />
+              本次已處理
+            </label>
+            <details>
+              <summary class="focus-control cursor-pointer font-semibold text-ink">
+                {{ step.title ?? step.body }}
+              </summary>
+              <ul v-if="step.items?.length" class="mt-3 list-disc pl-5 text-sm">
+                <li v-for="(item, index) in step.items" :key="index">{{ item }}</li>
+              </ul>
+              <p
+                v-if="step.note"
+                class="mt-3 rounded-control bg-amber-100 p-3 text-sm text-amber-950"
+              >
+                {{ step.note }}
+              </p>
+              <button
+                type="button"
+                class="btn-ghost mt-3 text-sm text-accent-ink"
+                @click="printSop(step)"
+              >
+                列印 SOP
+              </button>
+              <WorkbenchStepFields
+                :is-base="false"
+                :fields="localFields(step.id)"
+                :values="stepValues(step.id)"
+                :definitions="category.fields"
+                :prefix="`parallel-${step.id}`"
+                :missing="stepMissing(step.id)"
+                :templates="templatesFor(step)"
+                :busy="busy"
+                :message="messageStepId === step.id ? message : ''"
+                :message-tone="messageTone"
+                @update="(key, value) => setStepValue(step.id, key, value)"
+                @generate="(id) => produceOne(step.id, id)"
+                @generate-all="
+                  produceStep(
+                    step.id,
+                    step.templateIds,
+                    visibleSteps.findIndex((item) => item.id === step.id),
+                  )
+                "
+              />
+            </details>
+          </li>
+        </ol>
+      </section>
     </div>
   </div>
 
