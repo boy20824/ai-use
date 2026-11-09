@@ -135,6 +135,68 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 describe('local multi-image splitter DOM', () => {
+  it('disables Word with a required-name hint until slices and a valid Mock name are available', async () => {
+    const button = () =>
+      [...host.querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === '產出 Word',
+      )!
+    const input = host.querySelector<HTMLInputElement>('#splitter-victim-name')!
+    expect(input.maxLength).toBe(50)
+    expect(input.required).toBe(true)
+    expect(button().disabled).toBe(true)
+    expect(host.querySelector('#splitter-word-hint')?.textContent).toContain('必填')
+    await upload([fixture('fake-word.png')])
+    input.value = '   '
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(button().disabled).toBe(true)
+    expect(host.querySelector('#splitter-word-hint')?.textContent).toContain('請填寫被害人姓名')
+    input.value = '王小明(Mock)'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(button().disabled).toBe(false)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  it('downloads Word from locally exported PNGs in source order and recovers after template failure', async () => {
+    await upload([fixture('fake-word-A.png'), fixture('fake-word-B.png', 9, 1793)])
+    const input = host.querySelector<HTMLInputElement>('#splitter-victim-name')!
+    input.value = '王小明(Mock)'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    await click('產出 Word')
+    await idle()
+    expect(host.querySelector('[role=alert]')?.textContent).toContain('無法產出 Word')
+    expect(clicks).toEqual([])
+    const template = Uint8Array.from(
+      readFileSync('public/templates/scam-screenshots-template.docx'),
+    ).buffer
+    const fetchTemplate = vi.fn(async () => ({ ok: true, arrayBuffer: async () => template }))
+    vi.stubGlobal('fetch', fetchTemplate)
+    await click('產出 Word')
+    await idle()
+    expect(clicks[0]).toMatch(/^詐騙對話截圖_王小明\(Mock\)_\d{7}\.docx$/)
+    const blob = [...blobs.values()].find(
+      (blob) =>
+        blob.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )!
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+    expect(
+      await Promise.all(
+        [1, 2, 3, 4].map(async (i) =>
+          dimensions(await zip.file(`word/media/screenshot-${i}.png`)!.async('uint8array')),
+        ),
+      ),
+    ).toEqual([
+      { width: 8, height: 1792 },
+      { width: 8, height: 1792 },
+      { width: 9, height: 1792 },
+      { width: 9, height: 1 },
+    ])
+    expect(fetchTemplate.mock.calls).toEqual([
+      ['/templates/scam-screenshots-template.docx', { mode: 'same-origin' }],
+    ])
+    expect(host.querySelector('[role=alert]')).toBeNull()
+  })
   it('adds multiple picker and dropped images, reorders, exports batch/ZIP in current order, and saves synthetic DOM evidence', async () => {
     await upload([fixture('fake-A.png'), fixture('fake-B.png', 9, 1793)])
     await upload([fixture('fake-C.png', 10, 4)], true)

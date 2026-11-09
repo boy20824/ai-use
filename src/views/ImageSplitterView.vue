@@ -14,9 +14,16 @@ import {
   slices,
   type Source,
 } from '@/splitter/core'
+import { createDocx, DOCX_MIME, docxFilename, victimNameError } from '@/splitter/docx'
 import { createPreviewRenderer, type PreviewState, type PreviewTarget } from '@/splitter/preview'
 import { computed, onBeforeUnmount, ref, shallowRef, watchPostEffect } from 'vue'
 
+const victimName = ref('')
+const nameError = computed(() => victimNameError(victimName.value))
+const wordHint = computed(
+  () => nameError.value || (!images.value.length ? '請先加入圖片並完成切割。' : ''),
+)
+const wordProgress = ref('')
 const images = shallowRef<Source[]>([])
 const selected = ref<number>()
 const current = computed(() => images.value.find((image) => image.id === selected.value))
@@ -193,6 +200,50 @@ async function exportImages(mode: 'zip' | 'all' | number) {
     if (active()) busy.value = false
   }
 }
+async function exportWord() {
+  if (busy.value || wordHint.value) return
+  busy.value = true
+  error.value = ''
+  releaseDownloads()
+  const token = ++generation
+  const active = () => alive && token === generation
+  const snapshot = images.value.map((image) => ({ ...image, cuts: [...image.cuts] }))
+  const name = victimName.value.trim()
+  const total = snapshot.reduce((sum, image) => sum + image.cuts.length + 1, 0)
+  wordProgress.value = `已處理第 0/${total} 張`
+  status.value = '正在產出 Word…'
+  try {
+    const bytes = await createDocx({
+      name,
+      total,
+      active,
+      images: (append) =>
+        batch(snapshot, active, async (_path, png) => {
+          await append(new Uint8Array(await png.arrayBuffer()))
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        }),
+      onProgress: (processed, count) => {
+        if (active()) wordProgress.value = `已處理第 ${processed}/${count} 張`
+      },
+    })
+    if (active()) {
+      save(bytes, docxFilename(name), DOCX_MIME)
+      status.value = 'Word 已產生下載。'
+    }
+  } catch {
+    if (active()) {
+      releaseDownloads()
+      status.value = 'Word 產出失敗。'
+      error.value =
+        '無法產出 Word，可能是範本讀取失敗或記憶體不足。請稍後重試、減少本次圖片，或改用 PNG／ZIP 下載；若持續失敗請聯絡管理員。'
+    }
+  } finally {
+    if (active()) {
+      busy.value = false
+      wordProgress.value = ''
+    }
+  }
+}
 </script>
 
 <template>
@@ -234,6 +285,27 @@ async function exportImages(mode: 'zip' | 'all' | number) {
       <button class="btn-secondary" :disabled="busy || !images.length" @click="exportImages('all')">
         依序下載所有 PNG
       </button>
+    </div>
+    <div class="splitter-word data-panel">
+      <label for="splitter-victim-name">被害人姓名（必填）</label>
+      <input
+        id="splitter-victim-name"
+        v-model="victimName"
+        type="text"
+        maxlength="50"
+        required
+        autocomplete="off"
+        :disabled="busy"
+        :aria-invalid="!!nameError"
+        aria-describedby="splitter-word-hint"
+      />
+      <button class="btn-primary" :disabled="busy || !!wordHint" @click="exportWord">
+        產出 Word
+      </button>
+      <p id="splitter-word-hint">
+        {{ wordHint || '每頁依序放置 3 張切片，姓名僅用於本機產出 Word。' }}
+      </p>
+      <p v-if="wordProgress" role="status">{{ wordProgress }}</p>
     </div>
     <div v-if="images.length" class="splitter-layout">
       <aside class="splitter-list data-panel" aria-label="圖片處理順序">
@@ -334,6 +406,18 @@ async function exportImages(mode: 'zip' | 'all' | number) {
 </template>
 
 <style scoped>
+.splitter-word {
+  padding: 16px;
+  line-height: 1.8;
+}
+.splitter-word input {
+  border: 1px solid var(--color-edge);
+  border-radius: 4px;
+  padding: 8px;
+  margin: 8px;
+  max-width: 100%;
+}
+
 .splitter-note,
 .splitter-upload {
   padding: 18px;
