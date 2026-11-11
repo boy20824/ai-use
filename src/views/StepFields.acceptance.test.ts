@@ -166,7 +166,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, deselection and memory clearing', async () => {
+it('maintainer mapping/save/reopen, step field entry and shared values, production DOCX/ZIP, deselection and memory clearing', async () => {
   let saved: CaseCategory = {
     id: 'mock',
     name: 'Mock acceptance',
@@ -302,7 +302,7 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
   expect(row('D Mock').textContent).toContain('可請其他人同步處理')
   expect(row('D Mock').querySelector('input[type="number"]')).not.toBeNull()
   expect(host.querySelector('#step-f-0')).toBeNull()
-  await field(host.querySelector('.basic-data-row')!, '姓名', 'Mock Person')
+  expect(host.querySelector('.basic-data-row input[placeholder="請輸入姓名"]')).toBeNull()
   await field(host.querySelector('.basic-data-row')!, 'Mock X label', 'Mock Shared X')
   const dates = host.querySelectorAll('.basic-data-row select')
   for (const [i, value] of ['115', '11', '7'].entries()) {
@@ -340,7 +340,7 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
   await settle()
   expect(host.querySelector('.fixed-step h3')?.textContent?.trim()).toBe('F Mock')
   expect((row('D Mock').querySelector('input[type="number"]') as HTMLInputElement).value).toBe(
-    '24.5',
+    '99.25',
   )
   await click('全部文件總覽')
   snapshot('overview-reordered')
@@ -355,7 +355,7 @@ it('maintainer mapping/save/reopen, step-local entry, production DOCX/ZIP, desel
     ),
   )
   writeFileSync(`${evidence}/repeated-step-documents.xml.txt`, xmls.join('\n\n'))
-  expect(xmls.some((x) => x.includes('Mock Shared X/24.5/'))).toBe(true)
+  expect(xmls.filter((x) => x.includes('Mock Shared X/99.25/'))).toHaveLength(2)
   expect(xmls.some((x) => x.includes('Mock Shared X/99.25/'))).toBe(true)
   expect(xmls.some((x) => x.includes('Mock Only N'))).toBe(true)
   expect(Object.keys(zip.files)).toHaveLength(4)

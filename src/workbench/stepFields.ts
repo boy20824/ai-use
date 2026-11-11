@@ -40,29 +40,37 @@ export function generationContexts(
   return result
 }
 
-/** Standalone base definitions are shared independently of template usage.
- * Legacy definitions share only when used by the base SOP.
- * The built-in name/date mapping is the existing application contract.
- * Undeclared identical tags remain independent even between basic steps.
- */
-export function sharedFieldNames(category: CaseCategory, contexts: GenerationContext[]): string[] {
-  const baseIds = new Set(category.baseSteps?.map((ref) => ref.stepId) ?? [])
-  const used = inputFields(
-    contexts.filter((context) => context.stepId && baseIds.has(context.stepId)),
-  )
-  const declared = new Set(category.fields?.map((field) => field.key) ?? [])
+/** Only explicit base definitions belong above the workflow. */
+export function sharedFieldNames(category: CaseCategory): string[] {
   return [
-    '姓名',
-    '日期',
-    ...new Set(
-      [
-        ...(category.fields ?? [])
-          .filter((field) => field.scope === 'base')
-          .map((field) => field.key),
-        ...used.filter((key) => declared.has(key)),
-      ].filter((key) => key !== '姓名' && key !== '日期'),
-    ),
+    ...new Set([
+      ...(category.builtinFields?.['姓名'] === true ? ['姓名'] : []),
+      '日期',
+      ...(category.fields ?? [])
+        .filter((field) => field.scope === 'base')
+        .map((field) => field.key),
+    ]),
   ]
+}
+
+/** Visible composition order, counting a repeated template only once per step. */
+export function sharedFieldLabels(
+  steps: CategoryStep[],
+  contexts: GenerationContext[],
+): Record<string, string> {
+  const occurrences = new Map<string, number[]>()
+  steps.forEach((step, index) => {
+    for (const key of inputFields(contexts.filter((context) => context.stepId === step.id))) {
+      const numbers = occurrences.get(key) ?? []
+      numbers.push(index + 1)
+      occurrences.set(key, numbers)
+    }
+  })
+  return Object.fromEntries(
+    [...occurrences]
+      .filter(([, numbers]) => numbers.length > 1)
+      .map(([key, numbers]) => [key, `共用：步驟 ${numbers.join('、')}`]),
+  )
 }
 export const localFieldNames = (contexts: GenerationContext[], shared: string[]) =>
   inputFields(contexts).filter((key) => !shared.includes(key))
@@ -70,35 +78,19 @@ export const scopeKey = (context: GenerationContext) =>
   JSON.stringify(
     context.stepId === null ? ['temporary', context.templateId] : ['step', context.stepId],
   )
-export type ScopedValues = Record<string, Record<string, string>>
 
 export function contextValues(
   context: GenerationContext,
-  shared: string[],
   values: Record<string, string>,
-  scoped: ScopedValues,
 ): Record<string, string> {
-  const local = scoped[scopeKey(context)] ?? {}
-  return valuesForFields({ ...local, ...valuesForFields(values, shared) }, inputFields([context]))
+  return valuesForFields(values, inputFields([context]))
 }
 export function missingContextFields(
   contexts: GenerationContext[],
-  shared: string[],
   values: Record<string, string>,
-  scoped: ScopedValues,
 ): string[] {
-  return contexts.flatMap((context) =>
-    missingOverviewFields(
-      inputFields([context]),
-      contextValues(context, shared, values, scoped),
-    ).map((key) => `${context.stepTitle}：${key}`),
-  )
+  return missingOverviewFields(inputFields(contexts), values)
 }
-export function filledContext(
-  context: GenerationContext,
-  shared: string[],
-  values: Record<string, string>,
-  scoped: ScopedValues,
-) {
-  return applyRocDateFields(contextValues(context, shared, values, scoped))
+export function filledContext(context: GenerationContext, values: Record<string, string>) {
+  return applyRocDateFields(contextValues(context, values))
 }

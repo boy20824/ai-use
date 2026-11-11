@@ -1,3 +1,4 @@
+import { photoFields } from '../../server/src/photoBlocks'
 import { displayFileName } from '@/utils/fileName'
 import { isDerivedDateTag, parseRocDate } from '@/utils/rocDate'
 
@@ -56,7 +57,7 @@ export function manualFieldsFromPlaceholders(
   let needsDate = names.includes('日期')
   for (const placeholder of placeholders) {
     const name = placeholder.trim()
-    if (!name || /^[#/!@]/.test(name)) continue
+    if (!name || /^[#/!@]/.test(name) || photoFields.has(name)) continue
     if (name === '日期' || isDerivedDateTag(name)) {
       needsDate = true
       continue
@@ -86,7 +87,7 @@ export function valuesForFields(
 
 export function missingOverviewFields(fields: string[], values: Record<string, string>): string[] {
   const missing: string[] = []
-  for (const name of fields) {
+  for (const name of new Set(fields)) {
     const raw = (values[name] ?? '').trim()
     if (!raw) {
       missing.push(name)

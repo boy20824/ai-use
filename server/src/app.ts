@@ -320,6 +320,7 @@ function publicCategory(category: CategoryRecord) {
     modules: category.modules,
     combinationOrders: category.combinationOrders,
     fields: category.fields,
+    builtinFields: category.builtinFields,
     name: category.name,
     summary: category.summary,
     updatedAt: category.updatedAt,

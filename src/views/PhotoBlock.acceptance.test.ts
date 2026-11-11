@@ -130,9 +130,13 @@ it('照片表單、同步區、單份與 ZIP 依範本隔離，排序、覆寫�
   app.mount(host)
   await vi.waitFor(() => expect(host.querySelectorAll('[aria-label="照片區塊 a"]')).toHaveLength(2))
   expect(host.querySelector('[aria-label="照片區塊 ordinary"]')).toBeNull()
+  expect(host.querySelector('.shared-fields-panel [aria-label^="照片區塊"]')).toBeNull()
+  for (const panel of host.querySelectorAll('[aria-label^="照片區塊"]')) {
+    expect(panel.closest('[aria-label="本步驟欄位"]')).not.toBeNull()
+  }
   expect(host.textContent).toContain('照片區塊（每頁 2 格）')
   expect(host.textContent).toContain('照片區塊會整段移除')
-  for (const label of ['姓名', '案由', '警局', '分局', '案次編號']) {
+  for (const label of ['案由', '警局', '分局', '案次編號']) {
     const basic = [...host.querySelectorAll('.shared-fields-panel label')].find(
       (l) => l.textContent?.trim() === label,
     )!
@@ -212,4 +216,65 @@ it('照片表單、同步區、單份與 ZIP 依範本隔離，排序、覆寫�
   expect(request).not.toHaveBeenCalled()
   expect(storage).not.toHaveBeenCalled()
   expect(urls).not.toHaveBeenCalled()
+})
+
+it('照片上傳與攝影欄位只在使用照片範本的第三步，基本資料與其他步驟沒有照片欄位（規格 5.2）', async () => {
+  const photo = buildPhotoTemplate()
+  const ordinary = buildDocx({ document: wordDocument(paragraph(run('', '{{被害人姓名}}'))) })
+  mocks.library = [
+    {
+      id: 'photo',
+      fileName: 'Mock 照片.docx',
+      data: photo,
+      sizeBytes: photo.length,
+      placeholders: listPlaceholders(photo),
+    },
+    {
+      id: 'text',
+      fileName: 'Mock 文字.docx',
+      data: ordinary,
+      sizeBytes: ordinary.length,
+      placeholders: listPlaceholders(ordinary),
+    },
+  ]
+  mocks.category = reactive({
+    id: 'mock',
+    name: 'Mock 照片位置',
+    summary: '',
+    updatedAt: '',
+    templateCount: 2,
+    builtinFields: { 姓名: false },
+    steps: [
+      { id: 'one', body: 'Mock 第一步', templateIds: [] },
+      { id: 'two', body: 'Mock 第二步', templateIds: ['text'] },
+      { id: 'three', body: 'Mock 第三步', templateIds: ['photo'] },
+    ],
+    baseSteps: ['one', 'two', 'three'].map((stepId, sortOrder) => ({ stepId, sortOrder })),
+  })
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/categories/:id', component: CategoryView },
+      { path: '/categories', component: { template: '<p>Mock</p>' } },
+    ],
+  })
+  await router.push('/categories/mock')
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp({ render: () => h(RouterView) }).use(router)
+  app.mount(host)
+  await vi.waitFor(() => expect(host.querySelector('[aria-label="照片區塊 photo"]')).not.toBeNull())
+  const steps = host.querySelectorAll('.fixed-step')
+  expect(steps).toHaveLength(3)
+  expect(steps[0]!.querySelector('input[type=file]')).toBeNull()
+  expect(steps[1]!.querySelector('input[type=file]')).toBeNull()
+  expect(steps[2]!.querySelector('input[type=file]')).not.toBeNull()
+  expect(steps[2]!.querySelector('[aria-label="本步驟欄位"]')?.textContent).toContain('共用攝影人')
+  expect(host.querySelector('.shared-fields-panel input[type=file]')).toBeNull()
+  const fields = [...steps[2]!.querySelectorAll('[data-field-key]')].map((el) =>
+    el.getAttribute('data-field-key'),
+  )
+  for (const special of ['攝影人', '攝影地點', '攝影時間', '照片說明', '照片', '日期']) {
+    expect(fields).not.toContain(special)
+  }
 })

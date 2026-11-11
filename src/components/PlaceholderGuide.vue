@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const nameField = '{{姓名}}'
+const nameField = '{{被害人姓名}}'
 const dateField = '{{日期}}'
 const dateSlashField = '{{日期_民國}}'
 const yearField = '{{年}}'
@@ -46,7 +46,7 @@ const photoTags = '{{照片}}、{{照片編號}}、{{攝影時間}}、{{攝影�
     </p>
     <p class="mt-2">
       若 Word
-      把同一個欄位拆到不同字型或格式，上傳時會合併，並沿用第一個字的格式。產生文件時套用基本資料，填入的內容不會被保存。
+      把同一個欄位拆到不同字型或格式，上傳時會合併，並沿用第一個字的格式。欄位在使用範本的步驟填寫，同名欄位共用；產生文件時套用填寫內容，內容不會被保存。
     </p>
     <p class="mt-2 font-medium text-ink">動態照片區塊</p>
     <p class="mt-2">

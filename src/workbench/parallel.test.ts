@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CaseCategory } from '@/types/domain'
 import { composeSteps } from './compose'
-import { parallelSteps, retainStepValues } from './parallel'
+import { parallelSteps } from './parallel'
 
 const refs = (ids: string) => [...ids].map((stepId, sortOrder) => ({ stepId, sortOrder }))
 const category: CaseCategory = {
@@ -54,20 +54,4 @@ describe('parallel work from final composition (acceptance 1–4)', () => {
       'D',
     ])
   })
-})
-it('removes only exited step scopes, preserving active and temporary scopes (acceptance 8)', () => {
-  const values = {
-    '["step","D"]': { X: 'D' },
-    '["step","J"]': { X: 'J' },
-    '["temporary","file"]': { X: 'temporary' },
-  }
-  const retained = retainStepValues(values, composeSteps(category, ['alcohol']))
-  expect(retained).toEqual({
-    '["step","D"]': { X: 'D' },
-    '["temporary","file"]': { X: 'temporary' },
-  })
-  expect(retainStepValues(retained, composeSteps(category, ['alcohol', 'arrest']))).toEqual(
-    retained,
-  )
-  expect(values['["step","J"]']).toEqual({ X: 'J' })
 })

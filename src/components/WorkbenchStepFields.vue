@@ -4,7 +4,7 @@ import type { FieldDef } from '@/types/domain'
 import type { OverviewTemplate } from '@/workbench/overview'
 import { displayFileName } from '@/utils/fileName'
 defineProps<{
-  isBase: boolean
+  sharedLabels?: Record<string, string>
   fields: string[]
   values: Record<string, string>
   definitions?: FieldDef[]
@@ -20,19 +20,41 @@ const emit = defineEmits<{
   update: [key: string, value: string]
   generate: [templateId: string]
   generateAll: []
+  focusField: [key: string]
 }>()
 </script>
 <template>
-  <StepFields
-    v-if="!isBase"
-    :fields="fields"
-    :values="values"
-    :definitions="definitions"
-    :prefix="prefix"
-    @update="(key, value) => emit('update', key, value)"
-  />
+  <section
+    v-if="fields.length || templates.some((item) => photoCells?.[item.id])"
+    aria-label="本步驟欄位"
+    class="mt-3"
+  >
+    <h4 class="text-sm font-semibold text-ink">本步驟欄位</h4>
+    <StepFields
+      :fields="fields"
+      :values="values"
+      :definitions="definitions"
+      :shared-labels="sharedLabels"
+      :prefix="prefix"
+      @update="(key, value) => emit('update', key, value)"
+    />
+    <div
+      v-for="item in templates.filter((item) => photoCells?.[item.id])"
+      :key="item.id"
+      class="mt-3"
+    >
+      <p class="text-sm font-medium">{{ displayFileName(item.fileName) }}</p>
+      <slot name="photos" :template-id="item.id" />
+    </div>
+  </section>
   <p v-if="missing.length" class="mt-2 text-xs text-ink-muted">
-    請先填寫：{{ missing.join('、') }}
+    請先填寫：
+    <template v-for="(key, index) in [...new Set(missing)]" :key="key">
+      {{ index ? '、' : ''
+      }}<button type="button" class="focus-control underline" @click="emit('focusField', key)">
+        {{ key }}
+      </button>
+    </template>
   </p>
   <p v-if="templates.length === 0" class="mt-3 text-sm text-ink-muted">這個步驟還沒有範本。</p>
   <div v-else class="step-documents">
@@ -71,7 +93,6 @@ const emit = defineEmits<{
         >
           產生
         </button>
-        <slot name="photos" :template-id="item.id" />
       </li>
     </ul>
   </div>

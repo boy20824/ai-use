@@ -11,17 +11,17 @@ import {
 } from '../../shared/photoBlockRender'
 import { parseRocDate } from '@/utils/rocDate'
 import AppIcon from '@/components/AppIcon.vue'
-import { parallelSteps, retainStepValues } from '@/workbench/parallel'
+import { parallelSteps } from '@/workbench/parallel'
 import {
   contextKey,
   generationContexts,
   sharedFieldNames,
+  sharedFieldLabels,
   localFieldNames,
   scopeKey,
   missingContextFields,
   filledContext,
   type GenerationContext,
-  type ScopedValues,
 } from '@/workbench/stepFields'
 import EmptyState from '@/components/EmptyState.vue'
 import PageIntro from '@/components/PageIntro.vue'
@@ -55,8 +55,8 @@ const router = useRouter()
 const categories = useCategoryStore()
 const templates = useTemplateStore()
 const session = useSessionStore()
+const workbench = ref<HTMLElement | null>(null)
 const values = ref<Record<string, string>>(initialDraftValues())
-const scopedValues = ref<ScopedValues>({})
 const photoDrafts = ref<PhotoDrafts>({})
 const photoCells = ref<Record<string, number>>({})
 const photoProcessing = ref(new Set<symbol>())
@@ -109,7 +109,6 @@ watch(
   visibleSteps,
   (steps) => {
     const active = new Set(steps.map((step) => step.id))
-    scopedValues.value = retainStepValues(scopedValues.value, steps)
     handledSteps.value = handledSteps.value.filter((id) => active.has(id))
     completedSteps.value = completedSteps.value.filter((id) => active.has(id))
   },
@@ -155,42 +154,35 @@ const mappingIssues = computed(() =>
       )
     : [],
 )
-const fieldNames = computed(() =>
-  category.value ? sharedFieldNames(category.value, contexts.value) : [],
-)
-const baseIds = computed(() => new Set(category.value?.baseSteps?.map((ref) => ref.stepId) ?? []))
-const basicGroups = computed(() => visibleSteps.value.filter((step) => baseIds.value.has(step.id)))
+const fieldNames = computed(() => (category.value ? sharedFieldNames(category.value) : []))
+const sharedLabels = computed(() => sharedFieldLabels(visibleSteps.value, contexts.value))
 function contextsFor(stepId: string) {
   return contexts.value.filter((context) => context.stepId === stepId)
 }
 function localFields(stepId: string) {
   return localFieldNames(contextsFor(stepId), fieldNames.value)
 }
-function localValues(context: GenerationContext) {
-  return scopedValues.value[scopeKey(context)] ?? {}
-}
-function setLocal(context: GenerationContext, key: string, value: string) {
-  const scope = scopeKey(context)
-  scopedValues.value = {
-    ...scopedValues.value,
-    [scope]: { ...scopedValues.value[scope], [key]: value },
-  }
-}
-function stepValues(stepId: string) {
-  const context = contextsFor(stepId)[0]
-  return context ? localValues(context) : {}
-}
-function setStepValue(stepId: string, key: string, value: string) {
-  const context = contextsFor(stepId)[0]
-  if (context) setLocal(context, key, value)
+function setField(key: string, value: string) {
+  values.value[key] = value
 }
 function stepMissing(stepId: string) {
-  return missingContextFields(
-    contextsFor(stepId),
-    fieldNames.value,
-    values.value,
-    scopedValues.value,
-  )
+  return missingContextFields(contextsFor(stepId), values.value)
+}
+async function focusField(key: string) {
+  const name = key === '日期格式' ? '日期' : key
+  // Switch to the first workflow occurrence even when called from the overview/sidebar.
+  const inBase = fieldNames.value.includes(name)
+  const step = visibleSteps.value.find((step) => localFields(step.id).includes(name))
+  if (inBase || step) tab.value = 'steps'
+  await nextTick()
+  const field = [
+    ...(workbench.value?.querySelectorAll<HTMLElement>('[data-field-key]') ?? []),
+  ].find((el) => el.dataset.fieldKey === name)
+  for (let ancestor = field?.parentElement; ancestor; ancestor = ancestor.parentElement) {
+    if (ancestor instanceof HTMLDetailsElement) ancestor.open = true
+  }
+  field?.scrollIntoView({ block: 'center' })
+  field?.querySelector<HTMLElement>('input, select')?.focus({ preventScroll: true })
 }
 function canGenerateStep(stepId: string) {
   return !busy.value && photoProcessing.value.size === 0 && stepMissing(stepId).length === 0
@@ -255,7 +247,6 @@ function clearDraft() {
   selectedVariants.value = []
   printStep.value = null
   values.value = initialDraftValues()
-  scopedValues.value = {}
   photoDrafts.value = {}
   photoProcessing.value.clear()
   photoCells.value = {}
@@ -287,7 +278,7 @@ function templatesFor(step: CategoryStep) {
 async function renderOne(context: GenerationContext) {
   await photoMetadataLoading
   const id = context.templateId
-  const filled = filledContext(context, fieldNames.value, values.value, scopedValues.value)
+  const filled = filledContext(context, values.value)
   if (!filled) throw new Error('invalid-date')
   const template = templates.byId(id)
   const bytes = await templates.bytesFor(id)
@@ -430,9 +421,7 @@ const overviewGroups = computed(() => {
       ),
     }))
 })
-const overviewMissing = computed(() =>
-  missingContextFields(checkedOverview.value, fieldNames.value, values.value, scopedValues.value),
-)
+const overviewMissing = computed(() => missingContextFields(checkedOverview.value, values.value))
 const canGenerateOverview = computed(
   () =>
     checkedOverview.value.length > 0 &&
@@ -442,8 +431,7 @@ const canGenerateOverview = computed(
 )
 const overviewHint = computed(() => {
   if (checkedOverview.value.length === 0) return '請勾選至少一份文件。'
-  if (overviewMissing.value.some((name) => name.endsWith('：日期格式')))
-    return '日期不是有效的民國日期。'
+  if (overviewMissing.value.some((name) => name === '日期格式')) return '日期不是有效的民國日期。'
   if (overviewMissing.value.length === 0) return ''
   return `請先填寫：${overviewMissing.value.join('、')}。`
 })
@@ -564,7 +552,7 @@ onUnmounted(clearDraft)
       <p v-if="printStep.note">{{ printStep.note }}</p>
     </article>
   </Teleport>
-  <div v-if="category" class="case-workbench" :class="{ embedded }">
+  <div v-if="category" ref="workbench" class="case-workbench" :class="{ embedded }">
     <RouterLink
       v-if="!embedded"
       to="/categories"
@@ -634,7 +622,18 @@ onUnmounted(clearDraft)
       class="basic-data-row shared-fields-panel"
       aria-label="基本共用欄位"
     >
-      <p v-if="generateHint" class="mb-3 text-xs text-ink-muted">{{ generateHint }}</p>
+      <p v-if="generateHint" class="mb-3 text-xs text-ink-muted">
+        請先填寫：
+        <button
+          v-for="key in missingFields"
+          :key="key"
+          type="button"
+          class="focus-control mr-2 underline"
+          @click="focusField(key)"
+        >
+          {{ key }}
+        </button>
+      </p>
       <details open>
         <summary class="focus-control cursor-pointer">
           <h3 class="inline text-sm font-semibold text-ink">基本資料</h3>
@@ -642,14 +641,14 @@ onUnmounted(clearDraft)
         </summary>
         <div class="py-4">
           <p class="mt-1 text-sm leading-6 text-stone-600">
-            姓名與日期會套進這個流程各步驟的範本。日期預設為台北今天。
+            基本資料會套進各步驟的範本。日期預設為台北今天。
           </p>
           <details class="mt-3 text-xs text-ink-muted">
             <summary class="focus-control cursor-pointer">範本欄位說明</summary>
             <PlaceholderGuide class="mt-3" />
           </details>
           <div class="mt-4 grid max-w-xl gap-4">
-            <div v-for="(name, index) in fieldNames" :key="name">
+            <div v-for="(name, index) in fieldNames" :key="name" :data-field-key="name">
               <label class="block text-sm font-medium text-stone-800" :for="`draft-${index}`">
                 {{ fieldLabel(name) }}
               </label>
@@ -668,22 +667,6 @@ onUnmounted(clearDraft)
             </div>
           </div>
         </div>
-        <section
-          v-for="step in basicGroups"
-          :key="step.id"
-          :aria-label="`基本資料：${step.title ?? step.body}`"
-        >
-          <p v-if="localFields(step.id).length" class="mt-3 text-sm">
-            {{ step.title ?? step.body }}
-          </p>
-          <StepFields
-            :fields="localFields(step.id)"
-            :values="stepValues(step.id)"
-            :definitions="category.fields"
-            :prefix="`base-${step.id}`"
-            @update="(key, value) => setStepValue(step.id, key, value)"
-          />
-        </section>
       </details>
     </section>
 
@@ -872,9 +855,9 @@ onUnmounted(clearDraft)
                   <AppIcon name="members" class="h-5 w-5 shrink-0" />可請其他人同步處理
                 </p>
                 <WorkbenchStepFields
-                  :is-base="baseIds.has(step.id)"
                   :fields="localFields(step.id)"
-                  :values="stepValues(step.id)"
+                  :shared-labels="sharedLabels"
+                  :values="values"
                   :definitions="category.fields"
                   :prefix="`step-${step.id}`"
                   :missing="stepMissing(step.id)"
@@ -883,7 +866,8 @@ onUnmounted(clearDraft)
                   :busy="busy || photoProcessing.size > 0"
                   :message="messageStepId === step.id ? message : ''"
                   :message-tone="messageTone"
-                  @update="(key, value) => setStepValue(step.id, key, value)"
+                  @update="setField"
+                  @focus-field="focusField"
                   @generate="(id) => produceOne(step.id, id)"
                   @generate-all="produceStep(step.id, step.templateIds, index)"
                 >
@@ -1053,35 +1037,36 @@ onUnmounted(clearDraft)
                 :aria-label="group.context.stepTitle"
                 class="mt-4"
               >
-                <p v-if="group.fields.length" class="text-sm font-medium">
-                  {{ group.context.stepTitle }}
-                </p>
+                <p class="text-sm font-medium">{{ group.context.stepTitle }}：本步驟欄位</p>
                 <StepFields
                   :fields="group.fields"
-                  :values="localValues(group.context)"
+                  :shared-labels="sharedLabels"
+                  :values="values"
                   :definitions="category.fields"
                   :prefix="`overview-${scopeKey(group.context)}`"
-                  @update="(key, value) => setLocal(group.context, key, value)"
+                  @update="setField"
                 />
+                <template
+                  v-for="templateId in checkedOverview
+                    .filter((item) => scopeKey(item) === scopeKey(group.context))
+                    .map((item) => item.templateId)"
+                  :key="templateId"
+                >
+                  <div v-if="photoCells[templateId]" class="mt-4">
+                    <p class="text-sm font-medium">
+                      {{ displayFileName(templates.byId(templateId)?.fileName ?? '') }}
+                    </p>
+                    <PhotoBlockFields
+                      :template-id="templateId"
+                      :cells="photoCells[templateId]!"
+                      :draft="photoDrafts[templateId]"
+                      :busy="busy || photoProcessing.size > 0"
+                      @update="setPhotoDraft(templateId, $event)"
+                      @processing="setPhotoProcessing"
+                    />
+                  </div>
+                </template>
               </section>
-              <template
-                v-for="templateId in [...new Set(checkedOverview.map((item) => item.templateId))]"
-                :key="templateId"
-              >
-                <div v-if="photoCells[templateId]" class="mt-4">
-                  <p class="text-sm font-medium">
-                    {{ displayFileName(templates.byId(templateId)?.fileName ?? '') }}
-                  </p>
-                  <PhotoBlockFields
-                    :template-id="templateId"
-                    :cells="photoCells[templateId]!"
-                    :draft="photoDrafts[templateId]"
-                    :busy="busy || photoProcessing.size > 0"
-                    @update="setPhotoDraft(templateId, $event)"
-                    @processing="setPhotoProcessing"
-                  />
-                </div>
-              </template>
               <div class="mt-4 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
@@ -1092,7 +1077,19 @@ onUnmounted(clearDraft)
                   產生勾選文件
                 </button>
                 <p v-if="!canGenerateOverview && overviewHint" class="text-sm text-amber-900">
-                  {{ overviewHint }}
+                  <template v-if="overviewMissing.length"
+                    >請先填寫：
+                    <button
+                      v-for="key in overviewMissing"
+                      :key="key"
+                      type="button"
+                      class="focus-control mr-2 underline"
+                      @click="focusField(key)"
+                    >
+                      {{ key }}
+                    </button>
+                  </template>
+                  <template v-else>{{ overviewHint }}</template>
                 </p>
               </div>
               <p
@@ -1164,9 +1161,9 @@ onUnmounted(clearDraft)
                 列印 SOP
               </button>
               <WorkbenchStepFields
-                :is-base="false"
                 :fields="localFields(step.id)"
-                :values="stepValues(step.id)"
+                :shared-labels="sharedLabels"
+                :values="values"
                 :definitions="category.fields"
                 :prefix="`parallel-${step.id}`"
                 :missing="stepMissing(step.id)"
@@ -1175,7 +1172,8 @@ onUnmounted(clearDraft)
                 :busy="busy || photoProcessing.size > 0"
                 :message="messageStepId === step.id ? message : ''"
                 :message-tone="messageTone"
-                @update="(key, value) => setStepValue(step.id, key, value)"
+                @update="setField"
+                @focus-field="focusField"
                 @generate="(id) => produceOne(step.id, id)"
                 @generate-all="
                   produceStep(

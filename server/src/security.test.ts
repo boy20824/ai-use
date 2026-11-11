@@ -528,6 +528,7 @@ describe('security controls', () => {
       result: string
     }[]
     expect(audit.filter((row) => row.result === 'allowed').map((row) => row.action)).toEqual([
+      'category_update', // Startup adjustment is audited.
       'upload',
       'delete',
     ])
