@@ -2,6 +2,14 @@
 import { fieldMappingIssues } from '@/workbench/fieldMapping'
 import StepFields from '@/components/StepFields.vue'
 import WorkbenchStepFields from '@/components/WorkbenchStepFields.vue'
+import PhotoBlockFields from '@/components/PhotoBlockFields.vue'
+import { readPhotoBlock } from '../../server/src/docxXml'
+import {
+  renderTemplatePhotos,
+  type PhotoDraft,
+  type PhotoDrafts,
+} from '../../shared/photoBlockRender'
+import { parseRocDate } from '@/utils/rocDate'
 import AppIcon from '@/components/AppIcon.vue'
 import { parallelSteps, retainStepValues } from '@/workbench/parallel'
 import {
@@ -49,6 +57,18 @@ const templates = useTemplateStore()
 const session = useSessionStore()
 const values = ref<Record<string, string>>(initialDraftValues())
 const scopedValues = ref<ScopedValues>({})
+const photoDrafts = ref<PhotoDrafts>({})
+const photoCells = ref<Record<string, number>>({})
+const photoProcessing = ref(new Set<symbol>())
+function setPhotoProcessing(id: symbol, active: boolean) {
+  if (active) photoProcessing.value.add(id)
+  else photoProcessing.value.delete(id)
+}
+let photoMetadataLoading: Promise<void> = Promise.resolve()
+let photoRevision = 0
+function setPhotoDraft(id: string, draft: PhotoDraft) {
+  photoDrafts.value = { ...photoDrafts.value, [id]: draft }
+}
 const busy = ref(false)
 const message = ref('')
 const messageTone = ref<'ok' | 'warn'>('ok')
@@ -173,7 +193,7 @@ function stepMissing(stepId: string) {
   )
 }
 function canGenerateStep(stepId: string) {
-  return !busy.value && stepMissing(stepId).length === 0
+  return !busy.value && photoProcessing.value.size === 0 && stepMissing(stepId).length === 0
 }
 const missingFields = computed(() => missingOverviewFields(fieldNames.value, values.value))
 const generateHint = computed(() =>
@@ -236,6 +256,10 @@ function clearDraft() {
   printStep.value = null
   values.value = initialDraftValues()
   scopedValues.value = {}
+  photoDrafts.value = {}
+  photoProcessing.value.clear()
+  photoCells.value = {}
+  photoRevision++
   message.value = ''
   messageStepId.value = ''
   tab.value = 'steps'
@@ -261,15 +285,27 @@ function templatesFor(step: CategoryStep) {
 }
 
 async function renderOne(context: GenerationContext) {
+  await photoMetadataLoading
   const id = context.templateId
   const filled = filledContext(context, fieldNames.value, values.value, scopedValues.value)
   if (!filled) throw new Error('invalid-date')
   const template = templates.byId(id)
   const bytes = await templates.bytesFor(id)
   if (!template || !bytes) throw new Error('missing-template')
+  const draft = photoDrafts.value[id]
+  if (
+    photoCells.value[id] &&
+    draft?.photos.some((photo) => {
+      const time = photo.overrides?.time ?? draft.common.time
+      return time !== '' && !parseRocDate(time)
+    })
+  )
+    throw new Error('invalid-date')
   return {
     name: `產生-${displayFileName(template.fileName)}`,
-    data: renderDocx(bytes, filled),
+    data: photoCells.value[id]
+      ? renderTemplatePhotos(id, bytes, filled, photoDrafts.value)
+      : renderDocx(bytes, filled),
   }
 }
 
@@ -343,6 +379,35 @@ const categoryTemplateIds = computed(() => dedupedIds(visibleSteps.value))
 const overviewList = computed(() =>
   generationContexts(visibleSteps.value, temporaryIds.value, (id) => templates.byId(id)),
 )
+watch(
+  [overviewList, () => templates.items],
+  () => {
+    const version = ++photoRevision
+    const ids = [...new Set(overviewList.value.map((item) => item.templateId))]
+    // Empty summaries have no readable file yet. Real template records always carry sizeBytes.
+    const readable = ids.filter((id) => (templates.byId(id)?.sizeBytes ?? 0) > 0)
+    photoMetadataLoading = (async () => {
+      const next: Record<string, number> = {}
+      for (const id of readable) {
+        try {
+          const bytes = await templates.bytesFor(id)
+          if (version !== photoRevision) return
+          if (!bytes) continue
+          const block = readPhotoBlock(bytes)
+          if (block) next[id] = block.photoCellsPerPage
+        } catch {
+          /* Upload validation reports invalid syntax; unavailable files cannot render. */
+        }
+      }
+      if (version !== photoRevision) return
+      photoCells.value = next
+      photoDrafts.value = Object.fromEntries(
+        Object.entries(photoDrafts.value).filter(([id]) => !!next[id]),
+      )
+    })()
+  },
+  { immediate: true },
+)
 const checkedOverview = computed(() => checkedTemplates(overviewList.value, unchecked.value))
 const overviewFields = computed(() => {
   const needed = new Set(inputFields(checkedOverview.value))
@@ -369,7 +434,11 @@ const overviewMissing = computed(() =>
   missingContextFields(checkedOverview.value, fieldNames.value, values.value, scopedValues.value),
 )
 const canGenerateOverview = computed(
-  () => checkedOverview.value.length > 0 && overviewMissing.value.length === 0 && !busy.value,
+  () =>
+    checkedOverview.value.length > 0 &&
+    overviewMissing.value.length === 0 &&
+    !busy.value &&
+    photoProcessing.value.size === 0,
 )
 const overviewHint = computed(() => {
   if (checkedOverview.value.length === 0) return '請勾選至少一份文件。'
@@ -810,13 +879,26 @@ onUnmounted(clearDraft)
                   :prefix="`step-${step.id}`"
                   :missing="stepMissing(step.id)"
                   :templates="templatesFor(step)"
-                  :busy="busy"
+                  :photo-cells="photoCells"
+                  :busy="busy || photoProcessing.size > 0"
                   :message="messageStepId === step.id ? message : ''"
                   :message-tone="messageTone"
                   @update="(key, value) => setStepValue(step.id, key, value)"
                   @generate="(id) => produceOne(step.id, id)"
                   @generate-all="produceStep(step.id, step.templateIds, index)"
-                />
+                >
+                  <template #photos="{ templateId }">
+                    <PhotoBlockFields
+                      v-if="photoCells[templateId]"
+                      :template-id="templateId"
+                      :cells="photoCells[templateId]!"
+                      :draft="photoDrafts[templateId]"
+                      :busy="busy || photoProcessing.size > 0"
+                      @update="setPhotoDraft(templateId, $event)"
+                      @processing="setPhotoProcessing"
+                    />
+                  </template>
+                </WorkbenchStepFields>
               </div>
             </li>
           </ol>
@@ -982,6 +1064,24 @@ onUnmounted(clearDraft)
                   @update="(key, value) => setLocal(group.context, key, value)"
                 />
               </section>
+              <template
+                v-for="templateId in [...new Set(checkedOverview.map((item) => item.templateId))]"
+                :key="templateId"
+              >
+                <div v-if="photoCells[templateId]" class="mt-4">
+                  <p class="text-sm font-medium">
+                    {{ displayFileName(templates.byId(templateId)?.fileName ?? '') }}
+                  </p>
+                  <PhotoBlockFields
+                    :template-id="templateId"
+                    :cells="photoCells[templateId]!"
+                    :draft="photoDrafts[templateId]"
+                    :busy="busy || photoProcessing.size > 0"
+                    @update="setPhotoDraft(templateId, $event)"
+                    @processing="setPhotoProcessing"
+                  />
+                </div>
+              </template>
               <div class="mt-4 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
@@ -1071,7 +1171,8 @@ onUnmounted(clearDraft)
                 :prefix="`parallel-${step.id}`"
                 :missing="stepMissing(step.id)"
                 :templates="templatesFor(step)"
-                :busy="busy"
+                :photo-cells="photoCells"
+                :busy="busy || photoProcessing.size > 0"
                 :message="messageStepId === step.id ? message : ''"
                 :message-tone="messageTone"
                 @update="(key, value) => setStepValue(step.id, key, value)"
@@ -1083,7 +1184,19 @@ onUnmounted(clearDraft)
                     visibleSteps.findIndex((item) => item.id === step.id),
                   )
                 "
-              />
+              >
+                <template #photos="{ templateId }">
+                  <PhotoBlockFields
+                    v-if="photoCells[templateId]"
+                    :template-id="templateId"
+                    :cells="photoCells[templateId]!"
+                    :draft="photoDrafts[templateId]"
+                    :busy="busy || photoProcessing.size > 0"
+                    @update="setPhotoDraft(templateId, $event)"
+                    @processing="setPhotoProcessing"
+                  />
+                </template>
+              </WorkbenchStepFields>
             </details>
           </li>
         </ol>

@@ -1,6 +1,7 @@
 import PizZip from 'pizzip'
 import { Inflate } from 'pako'
 import { DOMParser } from '@xmldom/xmldom'
+import { parsePhotoBlock, photoFields, type PhotoBlock } from './photoBlocks.ts'
 
 const placeholderPattern = /\{\{\s*([^{}]+?)\s*\}\}/g
 const wordPartPattern = /^word\/(document|header\d+|footer\d+)\.xml$/
@@ -614,14 +615,28 @@ export function listPlaceholders(
   if (!zip.file('word/document.xml')) throw new Error('missing-document')
   const names: string[] = []
   const seen = new Set<string>()
-  for (const part of zip.file(wordPartPattern)) {
+  const parts = zip.file(wordPartPattern)
+  const hasPhotoBlock = parts
+    .map((part) => parsePhotoBlock(normalizeWordXml(part.asText()).xml, part.name))
+    .some(Boolean)
+  for (const part of parts) {
     for (const name of placeholderNamesInXml(part.asText())) {
-      if (seen.has(name)) continue
+      if (seen.has(name) || (hasPhotoBlock && photoFields.has(name))) continue
       seen.add(name)
       names.push(name)
     }
   }
   return names
+}
+
+export function readPhotoBlock(data: ArrayBuffer | Uint8Array): PhotoBlock | null {
+  const zip = safeDocx(asBytes(data), docxZipLimits)
+  let block: PhotoBlock | null = null
+  for (const part of zip.file(wordPartPattern)) {
+    const parsed = parsePhotoBlock(normalizeWordXml(part.asText()).xml, part.name)
+    if (parsed) block = parsed
+  }
+  return block
 }
 
 export function splitFormatNotice(tags: string[]): string {

@@ -14,6 +14,7 @@ import {
   type TemplateSummary,
 } from '@/storage'
 import { formatStamp } from '@/utils/format'
+import { PhotoBlockError } from '../../server/src/photoBlocks'
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 
@@ -152,8 +153,12 @@ export const useTemplateStore = defineStore('templates', () => {
         } else {
           placeholders = listPlaceholders(data)
         }
-      } catch {
-        rejected.push(`${fileName} 無法讀取`)
+      } catch (cause) {
+        rejected.push(
+          cause instanceof PhotoBlockError
+            ? `${fileName}：${cause.message}`
+            : `${fileName} 無法讀取`,
+        )
         continue
       }
       try {
@@ -193,6 +198,7 @@ export const useTemplateStore = defineStore('templates', () => {
   async function replace(id: string, file: File) {
     if (!safeFileName(file.name).toLowerCase().endsWith('.docx') || file.size > maxTemplateBytes)
       throw new Error('請選擇 8 MB 以內的 .docx。')
+    listPlaceholders(await file.arrayBuffer())
     const form = new FormData()
     form.append('file', file)
     const response = await apiRequest(`/api/templates/${encodeURIComponent(id)}/file`, {

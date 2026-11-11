@@ -9,6 +9,9 @@ import type { AppConfig, SeedPasswords } from './config.ts'
 import { seedSampleEnabled } from './config.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
 import { seedReferenceData } from './seed.ts'
+import { buildPhotoTemplate } from '../../shared/photoTemplateFixture.ts'
+import { mockPhotoDraft, mockPhotoFields } from '../../shared/photoMock.ts'
+import { renderPhotoDocx } from '../../shared/photoBlockRender.ts'
 
 const passwords: SeedPasswords = {
   clerk: 'clerk-pass',
@@ -109,6 +112,58 @@ describe('category library', () => {
   const databases: AppDatabase[] = []
   afterEach(() => {
     for (const db of databases.splice(0)) db.close()
+  })
+
+  it('accepts the Mock photo template and generated 2/5/7-photo documents via the real upload route, and reports syntax positions', async () => {
+    const { app, db } = await boot()
+    databases.push(db)
+    try {
+      const admin = auth(
+        await app.inject({
+          method: 'POST',
+          url: '/api/auth/login',
+          payload: { username: 'admin', password: passwords.admin },
+        }),
+      )
+      const template = buildPhotoTemplate()
+      for (const [name, data] of [
+        ['photo-template.docx', template],
+        ...[2, 5, 7].map(
+          (count) =>
+            [
+              `mock-${count}.docx`,
+              renderPhotoDocx(template, mockPhotoFields, mockPhotoDraft(count)),
+            ] as const,
+        ),
+      ] as const) {
+        const form = multipart(name, data)
+        const response = await app.inject({
+          method: 'POST',
+          url: '/api/templates',
+          cookies: admin.cookies,
+          headers: { ...admin.headers, ...form.headers },
+          payload: form.payload,
+        })
+        expect(response.statusCode, response.body).toBe(201)
+      }
+      const broken = new PizZip(template)
+      broken.file(
+        'word/document.xml',
+        broken.file('word/document.xml')!.asText().replace('{{/照片頁}}', ''),
+      )
+      const form = multipart('broken.docx', broken.generate({ type: 'uint8array' }))
+      const invalid = await app.inject({
+        method: 'POST',
+        url: '/api/templates',
+        cookies: admin.cookies,
+        headers: { ...admin.headers, ...form.headers },
+        payload: form.payload,
+      })
+      expect(invalid.statusCode).toBe(400)
+      expect(invalid.json().message).toMatch(/照片頁缺少結尾.*第 \d+ 個標記，第 \d+ 段/)
+    } finally {
+      await app.close()
+    }
   })
 
   it('keeps the sample template behind a non-production flag and never seeds categories', () => {
