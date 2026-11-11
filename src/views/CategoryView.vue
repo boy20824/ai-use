@@ -36,6 +36,7 @@ import type { CategoryStep } from '@/types/domain'
 import { downloadBlob, downloadBytes } from '@/utils/download'
 import { displayFileName } from '@/utils/fileName'
 import { composeSteps } from '@/workbench/compose'
+import { applyFieldDefaults } from '@/config/fieldDefaults'
 import { initialDraftValues } from '@/workbench/draft'
 import {
   checkedTemplates,
@@ -57,6 +58,8 @@ const templates = useTemplateStore()
 const session = useSessionStore()
 const workbench = ref<HTMLElement | null>(null)
 const values = ref<Record<string, string>>(initialDraftValues())
+const defaultedFields = new Set<string>()
+const draftGeneration = ref(0)
 const photoDrafts = ref<PhotoDrafts>({})
 const photoCells = ref<Record<string, number>>({})
 const photoProcessing = ref(new Set<symbol>())
@@ -246,7 +249,9 @@ function clearDraft() {
   busy.value = false
   selectedVariants.value = []
   printStep.value = null
+  defaultedFields.clear()
   values.value = initialDraftValues()
+  draftGeneration.value++
   photoDrafts.value = {}
   photoProcessing.value.clear()
   photoCells.value = {}
@@ -369,6 +374,16 @@ const categoryTemplateIds = computed(() => dedupedIds(visibleSteps.value))
 
 const overviewList = computed(() =>
   generationContexts(visibleSteps.value, temporaryIds.value, (id) => templates.byId(id)),
+)
+// Only initialize each available field once per draft, so clearing an input stays cleared.
+watch(
+  [() => [...fieldNames.value, ...inputFields(overviewList.value)], draftGeneration],
+  ([fields]) => {
+    const added = fields.filter((key) => !defaultedFields.has(key))
+    values.value = applyFieldDefaults(values.value, added)
+    for (const key of added) defaultedFields.add(key)
+  },
+  { immediate: true },
 )
 watch(
   [overviewList, () => templates.items],

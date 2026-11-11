@@ -2,7 +2,7 @@ import PizZip from 'pizzip'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyRocDateFields, defaultRocDateSlash } from '@/utils/rocDate'
 import { initialDraftValues } from '@/workbench/draft'
-import { inputFields, manualFieldsFromPlaceholders } from '@/workbench/overview'
+import { inputFields, manualFieldsFromPlaceholders, valuesForFields } from '@/workbench/overview'
 import { listPlaceholders, renderDocx } from './docxTemplates'
 import { docxZipLimits, normalizeDocx, splitFormatNotice } from '../../server/src/docxXml'
 import {
@@ -182,4 +182,15 @@ describe('日期欄位與格式', () => {
       '這些欄位在 Word 裡被拆成不同格式，已沿用第一個字的格式：地址。',
     )
   })
+})
+
+it('renders the excluded 案次編號 placeholder as a blank', () => {
+  const source = buildDocx({
+    document: wordDocument(paragraph(run('', 'Mock 前{{案次編號}}後'))),
+  })
+  const fields = inputFields([{ placeholders: listPlaceholders(source) }])
+  const values = valuesForFields({ 案次編號: '舊值（Mock）' }, fields)
+  const xml = partText(renderDocx(source, values), 'word/document.xml')
+  expect(plainText(xml)).toBe('Mock 前後')
+  expect(xml).not.toContain('{{案次編號}}')
 })

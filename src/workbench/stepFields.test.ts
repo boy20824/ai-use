@@ -162,3 +162,16 @@ describe('step field placement acceptance', () => {
       ).toContain('詐欺（Mock）')
   })
 })
+
+it('omits 案次編號 from base fields, context values and missing prompts', () => {
+  const { category } = fixture()
+  category.fields!.push({ id: 'old', key: '案次編號', type: 'text', scope: 'base' })
+  expect(sharedFieldNames(category)).not.toContain('案次編號')
+  const contexts = generationContexts(
+    [{ id: 's', body: 'Mock', templateIds: ['photo'] }],
+    [],
+    () => ({ id: 'photo', fileName: 'Mock.docx', placeholders: ['案次編號'] }),
+  )
+  expect(missingContextFields(contexts, { 案次編號: '' })).toEqual([])
+  expect(contextValues(contexts[0]!, { 案次編號: '舊值（Mock）' })).toEqual({})
+})
