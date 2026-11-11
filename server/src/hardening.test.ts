@@ -29,8 +29,127 @@ function zip(extra: Record<string, string> = {}, type = mainType) {
 function central(data: Buffer) {
   return data.indexOf(Buffer.from('504b0102', 'hex'))
 }
+function addZipFlags(data: Buffer, method: number, flags: number) {
+  let patched = 0
+  for (let n = central(data); data.readUInt32LE(n) === 0x02014b50;) {
+    if (data.readUInt16LE(n + 10) === method) {
+      const local = data.readUInt32LE(n + 42)
+      expect(data.readUInt32LE(local)).toBe(0x04034b50)
+      data.writeUInt16LE(data.readUInt16LE(local + 6) | flags, local + 6)
+      data.writeUInt16LE(data.readUInt16LE(n + 8) | flags, n + 8)
+      patched++
+    }
+    n += 46 + data.readUInt16LE(n + 28) + data.readUInt16LE(n + 30) + data.readUInt16LE(n + 32)
+  }
+  expect(patched).toBeGreaterThan(0)
+  return data
+}
 
 describe('bounded ZIP and passive DOCX', () => {
+  it('accepts Office metadata attributes with the same local name in different namespaces', () => {
+    const data = zip({
+      'customXml/item1.xml':
+        '<ct:contentTypeSchema xmlns:ct="http://schemas.microsoft.com/office/2006/metadata/contentType" xmlns:ma="http://schemas.microsoft.com/office/2006/metadata/properties/metaAttributes" ct:_="content" ma:_="metadata"/>',
+    })
+    expect(listPlaceholders(data, limits)).toEqual(['name'])
+    const normalized = normalizeDocx(data, limits)
+    expect(listPlaceholders(normalized.data, limits)).toEqual(['name'])
+  })
+  it.each([
+    '<metadata Target="first" target="second"/>',
+    '<metadata val="first" VAL="second"/>',
+    '<metadata xmlns:a="urn:metadata" xmlns:b="urn:metadata" a:val="first" b:VAL="second"/>',
+  ])('rejects case-insensitive duplicate attributes in the same namespace %#', (xml) => {
+    const data = zip({ 'customXml/item1.xml': xml })
+    expect(() => normalizeDocx(data, limits)).toThrow('ambiguous-xml-attribute')
+    expect(() => listPlaceholders(data, limits)).toThrow('ambiguous-xml-attribute')
+  })
+  it.each(['ContentType', 'Type', 'Target', 'TargetMode', 'PartName'])(
+    'rejects cross-namespace collisions for sensitive attribute %s',
+    (name) => {
+      for (const attrs of [
+        `${name}="local" other:${name.toLowerCase()}="second"`,
+        `other:${name.toLowerCase()}="second" ${name}="local"`,
+      ]) {
+        const data = zip({
+          'word/_rels/document.xml.rels': `<Relationships xmlns="${relNS}" xmlns:other="urn:other"><Relationship ${attrs}/></Relationships>`,
+        })
+        expect(() => normalizeDocx(data, limits)).toThrow('ambiguous-xml-attribute')
+        expect(() => listPlaceholders(data, limits)).toThrow('ambiguous-xml-attribute')
+      }
+    },
+  )
+  it.each([
+    '<?mso-contentType?>',
+    '<?mso-contentType application/xml?>',
+    '<?xml version="1.0"?><?mso-contentType application/xml?>',
+    '<?xml version="1.0"?>\n<!-- Office metadata -->\n<?mso-contentType?>\n<?mso-application progid="Word.Document"?>',
+    '<?  mso-contentType application/xml?>',
+    '<?mso-contentType ' + 'x'.repeat(16384 - '<?mso-contentType ?>'.length) + '?>',
+  ])('accepts Office processing instructions in the XML prolog %#', (prolog) => {
+    const document =
+      '<w:document xmlns:w="urn:word"><w:p><w:r><w:t>{{name}}</w:t></w:r></w:p></w:document>'
+    for (const extra of [
+      { 'word/document.xml': prolog + document },
+      { 'customXml/item2.xml': prolog + '<metadata/>' },
+    ] as Record<string, string>[]) {
+      const data = zip(extra)
+      expect(listPlaceholders(data, limits)).toEqual(['name'])
+      const normalized = normalizeDocx(data, limits)
+      expect(listPlaceholders(normalized.data, limits)).toEqual(['name'])
+    }
+  })
+  it.each([
+    '<?xml-stylesheet href="style.xsl"?><root/>',
+    '<?xml version="1.0"?><?xml-stylesheet href="style.xsl"?><root/>',
+    '<?php echo "marker"?><root/>',
+    '<?  xml-stylesheet href="style.xsl"?><root/>',
+    '<root><?mso-contentType application/xml?></root>',
+    '<root/><?mso-contentType?>',
+    '<?mso-contentType?><?xml version="1.0"?><root/>',
+    '<?xml version="1.0"?><?xml version="1.0"?><root/>',
+    '<!DOCTYPE root><root/>',
+  ])('rejects unsafe XML declarations and processing instructions %#', (xml) => {
+    const data = zip({ 'customXml/item2.xml': xml })
+    expect(() => normalizeDocx(data, limits)).toThrow('unsafe-xml')
+    expect(() => listPlaceholders(data, limits)).toThrow('unsafe-xml')
+  })
+  it.each([
+    '<?mso-contentType application/xml',
+    '<?mso-contentType ' + 'x'.repeat(16385 - '<?mso-contentType ?>'.length) + '?><root/>',
+  ])('rejects unclosed or over-long Office processing instructions %#', (xml) => {
+    const data = zip({ 'customXml/item2.xml': xml })
+    expect(() => normalizeDocx(data, limits)).toThrow('bad-xml')
+    expect(() => listPlaceholders(data, limits)).toThrow('bad-xml')
+  })
+  it.each([0x2, 0x4, 0x6])('accepts Deflate compression hints %#', (flags) => {
+    const data = addZipFlags(zip(), 8, flags)
+    expect(() => assertSafeZip(data, limits)).not.toThrow()
+    const normalized = normalizeDocx(data, limits)
+    expect(listPlaceholders(normalized.data, limits)).toEqual(['name'])
+  })
+  it.each([0x1, 0x40, 0x2000, 0x10])('rejects unsupported Deflate flags %#', (flags) => {
+    const data = addZipFlags(zip(), 8, flags | 0x6)
+    expect(() => assertSafeZip(data, limits)).toThrow('unsupported-zip')
+    expect(() => normalizeDocx(data, limits)).toThrow('unsupported-zip')
+  })
+  it.each([0x2, 0x4, 0x6])('rejects Deflate compression hints on stored entries %#', (flags) => {
+    const stored = new PizZip(zip()).generate({
+      type: 'nodebuffer',
+      compression: 'STORE',
+    }) as Buffer
+    const data = addZipFlags(stored, 0, flags)
+    expect(() => assertSafeZip(data, limits)).toThrow('unsupported-zip')
+    expect(() => normalizeDocx(data, limits)).toThrow('unsupported-zip')
+  })
+  it('requires local flags to match the central directory even for allowed Deflate hints', () => {
+    const data = addZipFlags(zip(), 8, 0x6)
+    const n = central(data)
+    const local = data.readUInt32LE(n + 42)
+    data.writeUInt16LE(data.readUInt16LE(n + 8) & ~0x6, local + 6)
+    expect(() => assertSafeZip(data, limits)).toThrow('bad-local')
+    expect(() => normalizeDocx(data, limits)).toThrow('bad-local')
+  })
   it('keeps a valid compressed document within 8 MiB after a small formatting repair', () => {
     const maxCompressedBytes = 8 * 1024 * 1024
     const uploadLimits = { ...limits, maxCompressedBytes, maxUncompressedBytes: 32 * 1024 * 1024 }
