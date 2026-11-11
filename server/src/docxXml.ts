@@ -195,7 +195,9 @@ export function readSafeZip(data: Uint8Array, limits: ZipLimits): Map<string, Ui
       local = u32(n + 42)
     if (u16(n + 34) || compressed === 0xffffffff || declared === 0xffffffff || local === 0xffffffff)
       throw new Error('unsupported-zip')
-    if (flags & ~0x808 || (method !== 0 && method !== 8)) throw new Error('unsupported-zip')
+    if (method !== 0 && method !== 8) throw new Error('unsupported-zip')
+    const allowedFlags = 0x808 | (method === 8 ? 0x6 : 0)
+    if (flags & ~allowedFlags) throw new Error('unsupported-zip')
     if (n + 46 + nl + el + cl > end) throw new Error('bad-directory')
     const name = decoder.decode(data.subarray(n + 46, n + 46 + nl))
     if (

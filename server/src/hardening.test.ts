@@ -29,8 +29,51 @@ function zip(extra: Record<string, string> = {}, type = mainType) {
 function central(data: Buffer) {
   return data.indexOf(Buffer.from('504b0102', 'hex'))
 }
+function addZipFlags(data: Buffer, method: number, flags: number) {
+  let patched = 0
+  for (let n = central(data); data.readUInt32LE(n) === 0x02014b50;) {
+    if (data.readUInt16LE(n + 10) === method) {
+      const local = data.readUInt32LE(n + 42)
+      expect(data.readUInt32LE(local)).toBe(0x04034b50)
+      data.writeUInt16LE(data.readUInt16LE(local + 6) | flags, local + 6)
+      data.writeUInt16LE(data.readUInt16LE(n + 8) | flags, n + 8)
+      patched++
+    }
+    n += 46 + data.readUInt16LE(n + 28) + data.readUInt16LE(n + 30) + data.readUInt16LE(n + 32)
+  }
+  expect(patched).toBeGreaterThan(0)
+  return data
+}
 
 describe('bounded ZIP and passive DOCX', () => {
+  it.each([0x2, 0x4, 0x6])('accepts Deflate compression hints %#', (flags) => {
+    const data = addZipFlags(zip(), 8, flags)
+    expect(() => assertSafeZip(data, limits)).not.toThrow()
+    const normalized = normalizeDocx(data, limits)
+    expect(listPlaceholders(normalized.data, limits)).toEqual(['name'])
+  })
+  it.each([0x1, 0x40, 0x2000, 0x10])('rejects unsupported Deflate flags %#', (flags) => {
+    const data = addZipFlags(zip(), 8, flags | 0x6)
+    expect(() => assertSafeZip(data, limits)).toThrow('unsupported-zip')
+    expect(() => normalizeDocx(data, limits)).toThrow('unsupported-zip')
+  })
+  it.each([0x2, 0x4, 0x6])('rejects Deflate compression hints on stored entries %#', (flags) => {
+    const stored = new PizZip(zip()).generate({
+      type: 'nodebuffer',
+      compression: 'STORE',
+    }) as Buffer
+    const data = addZipFlags(stored, 0, flags)
+    expect(() => assertSafeZip(data, limits)).toThrow('unsupported-zip')
+    expect(() => normalizeDocx(data, limits)).toThrow('unsupported-zip')
+  })
+  it('requires local flags to match the central directory even for allowed Deflate hints', () => {
+    const data = addZipFlags(zip(), 8, 0x6)
+    const n = central(data)
+    const local = data.readUInt32LE(n + 42)
+    data.writeUInt16LE(data.readUInt16LE(n + 8) & ~0x6, local + 6)
+    expect(() => assertSafeZip(data, limits)).toThrow('bad-local')
+    expect(() => normalizeDocx(data, limits)).toThrow('bad-local')
+  })
   it('keeps a valid compressed document within 8 MiB after a small formatting repair', () => {
     const maxCompressedBytes = 8 * 1024 * 1024
     const uploadLimits = { ...limits, maxCompressedBytes, maxUncompressedBytes: 32 * 1024 * 1024 }
