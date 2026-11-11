@@ -47,7 +47,7 @@ export function sharedFieldNames(category: CaseCategory): string[] {
       ...(category.builtinFields?.['姓名'] === true ? ['姓名'] : []),
       '日期',
       ...(category.fields ?? [])
-        .filter((field) => field.scope === 'base')
+        .filter((field) => field.scope === 'base' && field.key !== '案次編號')
         .map((field) => field.key),
     ]),
   ]

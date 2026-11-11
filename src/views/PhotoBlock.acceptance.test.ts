@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import PizZip from 'pizzip'
 import JSZip from 'jszip'
 import CategoryView from './CategoryView.vue'
+import { fieldDefaults } from '@/config/fieldDefaults'
 import { buildPhotoTemplate } from '../../shared/photoTemplateFixture'
 import { mockPhotoDraft } from '../../shared/photoMock'
 import { buildDocx, paragraph, run, wordDocument } from '../../shared/docxFixture'
@@ -136,15 +137,31 @@ it('照片表單、同步區、單份與 ZIP 依範本隔離，排序、覆寫�
   }
   expect(host.textContent).toContain('照片區塊（每頁 2 格）')
   expect(host.textContent).toContain('照片區塊會整段移除')
-  for (const label of ['案由', '警局', '分局', '案次編號']) {
-    const basic = [...host.querySelectorAll('.shared-fields-panel label')].find(
-      (l) => l.textContent?.trim() === label,
-    )!
-    await input(
-      document.getElementById(basic.getAttribute('for')!) as HTMLInputElement,
-      `Mock ${label}`,
-    )
-  }
+  const baseInput = (key: string) =>
+    host.querySelector<HTMLInputElement>(`.shared-fields-panel [data-field-key="${key}"] input`)!
+  expect(baseInput('警局').value).toBe(fieldDefaults['警局'])
+  expect(baseInput('分局').value).toBe(fieldDefaults['分局'])
+  expect(host.querySelector('[data-field-key="案次編號"]')).toBeNull()
+  expect([...host.querySelectorAll('p button')].map((el) => el.textContent?.trim())).not.toContain(
+    '案次編號',
+  )
+  await input(baseInput('案由'), 'Mock 案由')
+  await input(baseInput('警局'), '')
+  expect(baseInput('警局').value).toBe('')
+  await input(baseInput('警局'), 'Mock 警局')
+  await input(baseInput('分局'), '其他分局（Mock)')
+  // A later-appearing alias gets initialized without changing the edited bureau/division.
+  mocks.category!.fields!.push({
+    id: 'alias',
+    key: '警察局',
+    name: '警察局',
+    type: 'text',
+    scope: 'base',
+  })
+  await nextTick()
+  expect(baseInput('警察局').value).toBe(fieldDefaults['警察局'])
+  expect(baseInput('警局').value).toBe('Mock 警局')
+  expect(baseInput('分局').value).toBe('其他分局（Mock)')
   const panel = host.querySelector('[aria-label="照片區塊 a"]')!
   await input(labeled(panel, '共用攝影人'), '王小明(Mock)')
   await input(labeled(panel, '共用攝影地點'), 'Mock 市測試路 1 號')
@@ -191,6 +208,8 @@ it('照片表單、同步區、單份與 ZIP 依範本隔離，排序、覆寫�
   button(parallel.querySelector('li')!, '產生').click()
   await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledOnce())
   const output = mocks.download.mock.calls[0]![0] as Uint8Array
+  expect(textOf(output)).not.toContain('{{案次編號}}')
+  expect(textOf(output)).toContain('其他分局（Mock)')
   expect(xmlOf(output).match(/<wp:inline/g)).toHaveLength(5)
   expect(textOf(output)).toMatch(/編號（1）[\s\S]*Mock 第4張 <script>&"'/)
   expect(textOf(output).match(/王小明\(Mock\)/g)).toHaveLength(4)

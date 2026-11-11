@@ -51,8 +51,10 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
       :to="entry.to"
       class="entry-card focus-control"
       ><span class="entry-icon"><AppIcon :name="entry.icon" /></span>
-      <h2>{{ entry.label }}</h2>
-      <p>{{ entry.hint }}</p></RouterLink
+      <div class="entry-text">
+        <h2>{{ entry.label }}</h2>
+        <p>{{ entry.hint }}</p>
+      </div></RouterLink
     >
   </section>
   <p

@@ -6,6 +6,8 @@ import {
   checkedTemplates,
   dedupedIds,
   inputFields,
+  manualFieldsFromPlaceholders,
+  missingOverviewFields,
   overviewCatalog,
   overviewDownloadName,
   valuesForFields,
@@ -109,4 +111,11 @@ describe('全部文件總覽', () => {
     expect(fields).not.toContain('日期_民國')
     expect(inputFields([{ placeholders: ['年', '月', '日'] }])).toEqual(['日期'])
   })
+})
+
+it('excludes 案次編號 from manual fields and missing prompts, including old base definitions', () => {
+  const placeholders = ['案次編號', '警局', '分局']
+  expect(inputFields([{ placeholders }])).toEqual(['警局', '分局'])
+  expect(manualFieldsFromPlaceholders(placeholders, ['案次編號'])).toEqual(['警局', '分局'])
+  expect(missingOverviewFields(['案次編號'], { 案次編號: '' })).toEqual([])
 })

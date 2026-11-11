@@ -52,12 +52,12 @@ export function manualFieldsFromPlaceholders(
   placeholders: string[],
   base: string[] = [],
 ): string[] {
-  const names = [...base]
+  const names = base.filter((name) => name !== '案次編號')
   const seen = new Set(names)
   let needsDate = names.includes('日期')
   for (const placeholder of placeholders) {
     const name = placeholder.trim()
-    if (!name || /^[#/!@]/.test(name) || photoFields.has(name)) continue
+    if (!name || name === '案次編號' || /^[#/!@]/.test(name) || photoFields.has(name)) continue
     if (name === '日期' || isDerivedDateTag(name)) {
       needsDate = true
       continue
@@ -88,6 +88,7 @@ export function valuesForFields(
 export function missingOverviewFields(fields: string[], values: Record<string, string>): string[] {
   const missing: string[] = []
   for (const name of new Set(fields)) {
+    if (name === '案次編號') continue
     const raw = (values[name] ?? '').trim()
     if (!raw) {
       missing.push(name)
