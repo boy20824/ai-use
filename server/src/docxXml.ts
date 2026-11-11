@@ -289,9 +289,23 @@ function safeXml(xml: string) {
       continue
     }
     if (xml.startsWith('<?', start)) {
-      if (!xml.startsWith('<?xml ', start) || start > 1) throw new Error('unsafe-xml')
       end = xml.indexOf('?>', start + 2)
-      if (end < 0 || end - start > 16384) throw new Error('bad-xml')
+      if (end < 0 || end + 2 - start > 16384) throw new Error('bad-xml')
+      const instruction = xml.slice(start + 2, end)
+      const target = /^\s*([^\s?]+)/.exec(instruction)?.[1] ?? ''
+      const declaration = target === 'xml' && xml.startsWith('<?xml ', start) && start <= 1
+      // Depth alone cannot distinguish the prolog from a closed root element.
+      const prolog = !xml
+        .slice(0, start)
+        .replace(/<!--[\s\S]*?-->|<\?[\s\S]*?\?>/g, '')
+        .trim()
+      if (!declaration && !(target.startsWith('mso-') && prolog)) throw new Error('unsafe-xml')
+      // The DOM parser requires the target immediately after <?.
+      const leading = instruction.length - instruction.trimStart().length
+      if (leading) {
+        xml = xml.slice(0, start + 2) + instruction.trimStart() + xml.slice(end)
+        end -= leading
+      }
       offset = end + 2
       continue
     }
@@ -334,11 +348,20 @@ function safeDocx(bytes: Uint8Array, limits: ZipLimits): PizZip {
         const el = elements.item(i)!
         const local = (el.localName ?? el.nodeName).toLowerCase()
         const attrs = new Map<string, string>()
+        const seenAttrs = new Set<string>()
         for (let j = 0; j < el.attributes.length; j++) {
           const attr = el.attributes.item(j)!
           const key = (attr.localName ?? attr.name).toLowerCase()
-          if (attrs.has(key)) throw new Error('ambiguous-xml-attribute')
-          attrs.set(key, attr.value)
+          const expandedKey = JSON.stringify([attr.namespaceURI ?? '', key])
+          // Security lookups use local names, so those must be unique across namespaces too.
+          if (
+            seenAttrs.has(expandedKey) ||
+            (attrs.has(key) &&
+              ['contenttype', 'type', 'target', 'targetmode', 'partname'].includes(key))
+          )
+            throw new Error('ambiguous-xml-attribute')
+          seenAttrs.add(expandedKey)
+          if (!attrs.has(key)) attrs.set(key, attr.value)
         }
         if (
           [

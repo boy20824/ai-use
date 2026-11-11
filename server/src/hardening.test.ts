@@ -46,6 +46,82 @@ function addZipFlags(data: Buffer, method: number, flags: number) {
 }
 
 describe('bounded ZIP and passive DOCX', () => {
+  it('accepts Office metadata attributes with the same local name in different namespaces', () => {
+    const data = zip({
+      'customXml/item1.xml':
+        '<ct:contentTypeSchema xmlns:ct="http://schemas.microsoft.com/office/2006/metadata/contentType" xmlns:ma="http://schemas.microsoft.com/office/2006/metadata/properties/metaAttributes" ct:_="content" ma:_="metadata"/>',
+    })
+    expect(listPlaceholders(data, limits)).toEqual(['name'])
+    const normalized = normalizeDocx(data, limits)
+    expect(listPlaceholders(normalized.data, limits)).toEqual(['name'])
+  })
+  it.each([
+    '<metadata Target="first" target="second"/>',
+    '<metadata val="first" VAL="second"/>',
+    '<metadata xmlns:a="urn:metadata" xmlns:b="urn:metadata" a:val="first" b:VAL="second"/>',
+  ])('rejects case-insensitive duplicate attributes in the same namespace %#', (xml) => {
+    const data = zip({ 'customXml/item1.xml': xml })
+    expect(() => normalizeDocx(data, limits)).toThrow('ambiguous-xml-attribute')
+    expect(() => listPlaceholders(data, limits)).toThrow('ambiguous-xml-attribute')
+  })
+  it.each(['ContentType', 'Type', 'Target', 'TargetMode', 'PartName'])(
+    'rejects cross-namespace collisions for sensitive attribute %s',
+    (name) => {
+      for (const attrs of [
+        `${name}="local" other:${name.toLowerCase()}="second"`,
+        `other:${name.toLowerCase()}="second" ${name}="local"`,
+      ]) {
+        const data = zip({
+          'word/_rels/document.xml.rels': `<Relationships xmlns="${relNS}" xmlns:other="urn:other"><Relationship ${attrs}/></Relationships>`,
+        })
+        expect(() => normalizeDocx(data, limits)).toThrow('ambiguous-xml-attribute')
+        expect(() => listPlaceholders(data, limits)).toThrow('ambiguous-xml-attribute')
+      }
+    },
+  )
+  it.each([
+    '<?mso-contentType?>',
+    '<?mso-contentType application/xml?>',
+    '<?xml version="1.0"?><?mso-contentType application/xml?>',
+    '<?xml version="1.0"?>\n<!-- Office metadata -->\n<?mso-contentType?>\n<?mso-application progid="Word.Document"?>',
+    '<?  mso-contentType application/xml?>',
+    '<?mso-contentType ' + 'x'.repeat(16384 - '<?mso-contentType ?>'.length) + '?>',
+  ])('accepts Office processing instructions in the XML prolog %#', (prolog) => {
+    const document =
+      '<w:document xmlns:w="urn:word"><w:p><w:r><w:t>{{name}}</w:t></w:r></w:p></w:document>'
+    for (const extra of [
+      { 'word/document.xml': prolog + document },
+      { 'customXml/item2.xml': prolog + '<metadata/>' },
+    ] as Record<string, string>[]) {
+      const data = zip(extra)
+      expect(listPlaceholders(data, limits)).toEqual(['name'])
+      const normalized = normalizeDocx(data, limits)
+      expect(listPlaceholders(normalized.data, limits)).toEqual(['name'])
+    }
+  })
+  it.each([
+    '<?xml-stylesheet href="style.xsl"?><root/>',
+    '<?xml version="1.0"?><?xml-stylesheet href="style.xsl"?><root/>',
+    '<?php echo "marker"?><root/>',
+    '<?  xml-stylesheet href="style.xsl"?><root/>',
+    '<root><?mso-contentType application/xml?></root>',
+    '<root/><?mso-contentType?>',
+    '<?mso-contentType?><?xml version="1.0"?><root/>',
+    '<?xml version="1.0"?><?xml version="1.0"?><root/>',
+    '<!DOCTYPE root><root/>',
+  ])('rejects unsafe XML declarations and processing instructions %#', (xml) => {
+    const data = zip({ 'customXml/item2.xml': xml })
+    expect(() => normalizeDocx(data, limits)).toThrow('unsafe-xml')
+    expect(() => listPlaceholders(data, limits)).toThrow('unsafe-xml')
+  })
+  it.each([
+    '<?mso-contentType application/xml',
+    '<?mso-contentType ' + 'x'.repeat(16385 - '<?mso-contentType ?>'.length) + '?><root/>',
+  ])('rejects unclosed or over-long Office processing instructions %#', (xml) => {
+    const data = zip({ 'customXml/item2.xml': xml })
+    expect(() => normalizeDocx(data, limits)).toThrow('bad-xml')
+    expect(() => listPlaceholders(data, limits)).toThrow('bad-xml')
+  })
   it.each([0x2, 0x4, 0x6])('accepts Deflate compression hints %#', (flags) => {
     const data = addZipFlags(zip(), 8, flags)
     expect(() => assertSafeZip(data, limits)).not.toThrow()
