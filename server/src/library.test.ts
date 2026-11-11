@@ -517,6 +517,7 @@ describe('category library', () => {
     const allowed = audit.filter((row) => row.result === 'allowed')
     const denied = audit.filter((row) => row.result === 'denied')
     expect(allowed.map((row) => row.action)).toEqual([
+      'category_update', // Built-in field adjustment at startup.
       'category_create',
       'category_update',
       'category_create',

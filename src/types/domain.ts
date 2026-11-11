@@ -47,6 +47,7 @@ export interface CategoryModule {
 }
 
 export interface CaseCategory {
+  builtinFields?: Record<string, boolean>
   baseSteps?: StepRef[]
   modules?: CategoryModule[]
   combinationOrders?: { moduleIds: string[]; stepIds: string[] }[]

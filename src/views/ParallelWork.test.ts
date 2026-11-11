@@ -47,6 +47,7 @@ const refs = (ids: string) => [...ids].map((stepId, sortOrder) => ({ stepId, sor
 beforeEach(() => {
   mocks.category = reactive({
     id: 'mock',
+    builtinFields: { 姓名: true },
     name: 'Mock',
     summary: '',
     updatedAt: '',
@@ -149,14 +150,14 @@ it('shows empty state, selected-only stable deduped list and visible main hints 
   expect(host.textContent).not.toContain('編輯流程')
   expect(host.querySelector('input[aria-label*="canRunInParallel"]')).toBeNull()
 })
-it('shares values bidirectionally across collapse and tabs, isolates identical tags and generates from either view (5–6)', async () => {
+it('shares values bidirectionally across collapse and tabs, shares identical tags and generates from either view (5–6)', async () => {
   await mount()
   await select('alcohol')
   await select('arrest')
   await fill(host.querySelector('#draft-0')!, 'Mock Person')
   await fill(item('D').querySelector('input[type="text"]')!, 'D only')
   expect(main('D').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('D only')
-  expect(item('J').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('')
+  expect(item('J').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('D only')
   await fill(main('D').querySelector('input[type="text"]')!, 'D updated')
   const details = item('D').querySelector('details')!
   details.open = true
@@ -205,7 +206,7 @@ it('synchronizes reversible manual notes and a separate live count without advan
   expect(item('D').querySelector('summary')?.classList.contains('focus-control')).toBe(true)
   expect(handled(item('D')).getAttribute('aria-label')).toBe('D：本次已處理')
 })
-it('clears exited scopes and notes immediately, retains remaining ones, and clears on case change and remount (8–9)', async () => {
+it('clears exited notes, retains shared field values, and clears on case change and remount (8–9)', async () => {
   const localWrite = vi.spyOn(Storage.prototype, 'setItem')
   const router = await mount()
   await select('alcohol')
@@ -217,10 +218,10 @@ it('clears exited scopes and notes immediately, retains remaining ones, and clea
   await fill(host.querySelector('#draft-0')!, 'Shared')
   await select('arrest', false)
   expect(handled(item('D')).checked).toBe(true)
-  expect(item('D').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('D only')
+  expect(item('D').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('J only')
   await select('arrest')
   expect(handled(item('J')).checked).toBe(false)
-  expect(item('J').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('')
+  expect(item('J').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('J only')
   expect((host.querySelector('#draft-0') as HTMLInputElement).value).toBe('Shared')
   await router.push('/categories/other')
   await select('alcohol')

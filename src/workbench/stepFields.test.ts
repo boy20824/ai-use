@@ -8,7 +8,7 @@ import {
   generationContexts,
   sharedFieldNames,
   localFieldNames,
-  scopeKey,
+  sharedFieldLabels,
   contextValues,
   filledContext,
   missingContextFields,
@@ -23,174 +23,142 @@ function fixture() {
     summary: '',
     updatedAt: '',
     templateCount: 3,
-    fields: [
-      { id: 'x', key: 'X', name: 'Shared X', type: 'text' },
-      { id: 'unused', key: 'Z', type: 'text' },
-    ],
+    builtinFields: { 姓名: false },
+    fields: [{ id: 'manual', key: '承辦單位', type: 'text', scope: 'base' }],
     steps: [
-      { id: 'basic', body: 'Basic', templateIds: ['basic'] },
-      { id: 'd', body: 'D', templateIds: ['same'] },
-      { id: 'f', body: 'F', templateIds: ['same', 'other'] },
+      { id: 's1', body: '一', templateIds: [] },
+      { id: 's2', body: '二', templateIds: ['a', 'extra'] },
+      { id: 's3', body: '三', templateIds: [] },
+      { id: 's4', body: '四', templateIds: [] },
+      { id: 's5', body: '五', templateIds: ['b'], canRunInParallel: true },
+      { id: 'hidden', body: '隱藏', templateIds: ['hidden'] },
     ],
-    baseSteps: [{ stepId: 'basic', sortOrder: 0 }],
+    baseSteps: ['s1', 's2', 's3', 's4', 's5'].map((stepId, sortOrder) => ({ stepId, sortOrder })),
     modules: [
-      { id: 'm', categoryId: 'c', name: 'M', sortOrder: 0, steps: [{ stepId: 'd', sortOrder: 0 }] },
-      { id: 'n', categoryId: 'c', name: 'N', sortOrder: 1, steps: [{ stepId: 'f', sortOrder: 0 }] },
+      {
+        id: 'm',
+        categoryId: 'c',
+        name: 'Mock 模組',
+        sortOrder: 0,
+        steps: [{ stepId: 'hidden', sortOrder: 0 }],
+      },
     ],
   }
   const library = [
-    { id: 'basic', fileName: 'basic.docx', placeholders: ['X', '未映射', '姓名', '日期'] },
     {
-      id: 'same',
-      fileName: 'same.docx',
-      placeholders: ['X', 'Y', '未映射', '年', '月', '日', '日期_民國'],
+      id: 'a',
+      fileName: 'a.docx',
+      placeholders: ['被害人姓名', '案由', '案由', '日期_民國', '承辦單位'],
     },
-    { id: 'other', fileName: 'other.docx', placeholders: ['Z'] },
+    {
+      id: 'extra',
+      fileName: 'extra.docx',
+      placeholders: ['案由', '姓名', '被害人姓名', '#照片頁', '@照片', '攝影人', '照片說明'],
+    },
+    { id: 'b', fileName: 'b.docx', placeholders: ['案由', '年', '月', '日'] },
+    { id: 'hidden', fileName: 'hidden.docx', placeholders: ['隱藏必填'] },
+    { id: 'temp', fileName: 'temp.docx', placeholders: ['案由'] },
   ]
-  const contexts = (selected = ['m', 'n'], temporary: string[] = []) =>
-    generationContexts(composeSteps(category, selected), temporary, (id) =>
-      library.find((t) => t.id === id),
-    )
-  return { category, library, contexts }
+  const steps = composeSteps(category, [])
+  const contexts = generationContexts(steps, ['temp'], (id) => library.find((t) => t.id === id))
+  return { category, library, steps, contexts }
+}
+const values = {
+  日期: '115/11/11',
+  案由: '詐欺（Mock）',
+  被害人姓名: '王小明（Mock）',
+  姓名: 'Mock',
+  承辦單位: 'Mock 單位',
 }
 
-describe('explicit sharing and stable step contexts', () => {
-  it('shares exact basic category mappings; isolates same-name undeclared tags, even in base steps', () => {
+describe('step field placement acceptance', () => {
+  it('shows only date and explicit manual base fields above; template victim/name fields stay in their step (1,4,5,6)', () => {
     const { category, contexts } = fixture()
-    const all = contexts()
-    const shared = sharedFieldNames(category, all)
-    expect(shared).toEqual(['姓名', '日期', 'X'])
+    const base = sharedFieldNames(category)
+    expect(base).toEqual(['日期', '承辦單位'])
     expect(
       localFieldNames(
-        all.filter((c) => c.stepId === 'd'),
-        shared,
+        contexts.filter((c) => c.stepId === 's2'),
+        base,
       ),
-    ).toEqual(['Y', '未映射'])
+    ).toEqual(['被害人姓名', '案由', '姓名'])
     expect(
       localFieldNames(
-        all.filter((c) => c.stepId === 'f'),
-        shared,
+        contexts.filter((c) => c.stepId === 's5'),
+        base,
       ),
-    ).toEqual(['Y', '未映射', 'Z'])
-    const scoped = Object.fromEntries(
-      all.map((c) => [scopeKey(c), { Y: c.stepId!, 未映射: c.stepId!, Z: 'only-f' }]),
-    )
-    const values = { X: 'common', 姓名: 'Mock', 日期: '115/11/7' }
-    for (const c of all.filter((item) => item.placeholders.includes('X'))) {
-      expect(contextValues(c, shared, values, scoped)).toMatchObject({ X: 'common' })
-      expect(contextValues(c, shared, values, scoped)['未映射']).toBe(c.stepId)
+    ).toEqual(['案由'])
+    expect(sharedFieldNames({ ...category, fields: [] })).toEqual(['日期'])
+    category.fields!.push({ id: 'name', key: '姓名', type: 'text', scope: 'base' })
+    expect(sharedFieldNames(category)).toContain('姓名')
+    expect(localFieldNames(contexts, sharedFieldNames(category))).not.toContain('姓名')
+  })
+  it('restores the historical name above when enabled without duplicating it in steps', () => {
+    const { category, contexts } = fixture()
+    category.builtinFields = { 姓名: true }
+    expect(sharedFieldNames(category)).toEqual(['姓名', '日期', '承辦單位'])
+    expect(localFieldNames(contexts, sharedFieldNames(category))).not.toContain('姓名')
+  })
+  it('deduplicates tags in first appearance order and omits photo-specific markers (2)', () => {
+    const { contexts } = fixture()
+    expect(localFieldNames(contexts, ['日期', '承辦單位'])).toEqual(['被害人姓名', '案由', '姓名'])
+  })
+  it('labels only visible steps with current composition numbers and counts each step once (3,7)', () => {
+    const { steps, contexts } = fixture()
+    expect(sharedFieldLabels(steps, contexts)['案由']).toBe('共用：步驟 2、5')
+    expect(sharedFieldLabels(steps, contexts)['被害人姓名']).toBeUndefined()
+    const reversed = [...steps].reverse()
+    expect(sharedFieldLabels(reversed, contexts)['案由']).toBe('共用：步驟 1、4')
+  })
+  it('shares exact same-name values across steps and temporary templates (3,9)', () => {
+    const { contexts } = fixture()
+    const draft = { ...values }
+    for (const context of contexts.filter((c) => c.placeholders.includes('案由'))) {
+      expect(contextValues(context, draft)['案由']).toBe('詐欺（Mock）')
     }
-    category.steps.push({ id: 'basic2', body: 'Basic2', templateIds: ['basic'] })
-    category.baseSteps!.push({ stepId: 'basic2', sortOrder: 1 })
+    draft['案由'] = '更新（Mock）'
     expect(
-      new Set(
-        contexts()
-          .filter((c) => c.templateId === 'basic')
-          .map(scopeKey),
-      ).size,
-    ).toBe(2)
+      contexts
+        .filter((c) => c.placeholders.includes('案由'))
+        .every((c) => contextValues(c, draft)['案由'] === '更新（Mock）'),
+    ).toBe(true)
+    expect(contextValues(contexts[0]!, draft)['被害人姓名']).toBe('王小明（Mock）')
   })
-
-  it('deduplicates scanned step tags and gives explicit base sharing priority over stale local values', () => {
-    const { category, contexts } = fixture()
-    const all = contexts()
-    const shared = sharedFieldNames(category, all)
-    const f = all.find((context) => context.stepId === 'f')!
-    expect(localFieldNames([f, f], shared)).toEqual(['Y', '未映射'])
-    const scoped = { [scopeKey(f)]: { X: 'stale local X', Y: 'local Y' } }
-    expect(contextValues(f, shared, { X: 'base X', Y: 'stray global Y' }, scoped)).toMatchObject({
-      X: 'base X',
-      Y: 'local Y',
-    })
+  it('omits unselected modules from validation and preserves per-document selection (7)', () => {
+    const { contexts } = fixture()
+    expect(contexts.map((c) => c.stepId)).not.toContain('hidden')
+    expect(missingContextFields(contexts, values)).toEqual([])
+    const selected = checkedTemplates(contexts, { [contexts[0]!.id]: true })
+    expect(selected.some((c) => c.stepId === 's5')).toBe(true)
+    expect(selected).not.toContain(contexts[0])
   })
-
-  it('omits unselected modules from fields, validation and generation; selection is per context', () => {
-    const { category, contexts } = fixture()
-    const onlyM = contexts(['m'])
-    const shared = sharedFieldNames(category, onlyM)
-    const scoped = Object.fromEntries(onlyM.map((c) => [scopeKey(c), { Y: 'd', 未映射: 'local' }]))
-    expect(onlyM.map((c) => c.stepId)).toEqual(['basic', 'd'])
-    expect(localFieldNames(onlyM, shared)).not.toContain('Z')
-    expect(
-      missingContextFields(onlyM, shared, { X: 'x', 姓名: 'name', 日期: '115/11/7' }, scoped),
-    ).toEqual([])
-    const all = contexts()
-    const d = all.find((c) => c.stepId === 'd')!
-    const selected = checkedTemplates(all, { [d.id]: true })
-    expect(selected.some((c) => c.stepId === 'f' && c.templateId === 'same')).toBe(true)
-    expect(selected).not.toContain(d)
+  it('reports each missing key only once across templates and steps, including invalid dates (8)', () => {
+    const { contexts } = fixture()
+    expect(missingContextFields(contexts, { ...values, 案由: '' })).toEqual(['案由'])
+    expect(missingContextFields(contexts, { ...values, 日期: '115/2/30' })).toEqual(['日期格式'])
+    expect(filledContext(contexts[0]!, { ...values, 日期: '115/2/30' })).toBeNull()
   })
-
-  it('retains values after cross-source reordering and renders repeated templates with correct dates, format and ZIP names', async () => {
-    const { category, contexts } = fixture()
-    const all = contexts()
-    const shared = sharedFieldNames(category, all)
-    const scoped = Object.fromEntries(
-      all.map((c) => [scopeKey(c), { Y: c.stepId!, 未映射: c.stepId!, Z: 'z' }]),
-    )
-    category.combinationOrders = [{ moduleIds: ['m', 'n'], stepIds: ['f', 'basic', 'd'] }]
-    const ordered = contexts()
-    expect(ordered.map((c) => c.stepId)).toEqual(['f', 'f', 'basic', 'd'])
+  it('renders both documents from shared mock data, retains styling and generates collision-safe ZIP entries (3,9)', async () => {
+    const { contexts } = fixture()
     const source = buildDocx({
       document: wordDocument(
-        paragraph(run(kaiBoldRPr, '{{X}}/{{Y}}/{{日期}}/{{日期_民國}}/{{年}}/{{月}}/{{日}}')),
+        paragraph(run(kaiBoldRPr, '{{案由}}/{{日期}}/{{日期_民國}}/{{年}}/{{月}}/{{日}}')),
       ),
     })
-    const repeated = ordered.filter((c) => c.templateId === 'same')
-    const files = repeated.map((c) => {
-      const fields = filledContext(c, shared, { X: 'shared', 日期: '115/11/7' }, scoped)!
-      // Include the canonical date tag too; manual derived tags still resolve from 日期.
-      const data = renderDocx(source, fields)
-      const xml = new PizZip(data).file('word/document.xml')!.asText()
-      expect(xml).toContain(`shared/${c.stepId}/115年11月7日/115/11/7/115/11/7`)
-      expect(xml).toContain('<w:b')
-      return { name: 'same.docx', data }
-    })
+    const files = contexts
+      .filter((c) => ['a', 'b'].includes(c.templateId))
+      .map((context) => {
+        const data = renderDocx(source, filledContext(context, values)!)
+        const xml = new PizZip(data).file('word/document.xml')!.asText()
+        expect(xml).toContain('詐欺（Mock）/115年11月11日/115/11/11/115/11/11')
+        expect(xml).toContain('<w:b')
+        return { name: 'Mock.docx', data }
+      })
     const zip = await JSZip.loadAsync(await (await zipGeneratedFiles(files)).arrayBuffer())
-    expect(Object.keys(zip.files)).toEqual(['same.docx', 'same-2.docx'])
-    expect(
-      new PizZip(await zip.file('same.docx')!.async('uint8array'))
-        .file('word/document.xml')!
-        .asText(),
-    ).toContain('shared/f/')
-    expect(
-      new PizZip(await zip.file('same-2.docx')!.async('uint8array'))
-        .file('word/document.xml')!
-        .asText(),
-    ).toContain('shared/d/')
+    expect(Object.keys(zip.files)).toEqual(['Mock.docx', 'Mock-2.docx'])
+    for (const file of Object.values(zip.files))
+      expect(
+        new PizZip(await file.async('uint8array')).file('word/document.xml')!.asText(),
+      ).toContain('詐欺（Mock）')
   })
-
-  it('keeps temporary templates in their own context and validates invalid dates', () => {
-    const { category, contexts } = fixture()
-    const all = contexts(['m'], ['other', 'other', 'same'])
-    expect(all.filter((c) => c.stepId === null)).toHaveLength(1)
-    const temporary = all.find((c) => c.stepId === null)!
-    const shared = sharedFieldNames(category, all)
-    expect(missingContextFields([temporary], shared, {}, {})).toEqual(['本次暫加：Z'])
-    const basic = all[0]!
-    expect(filledContext(basic, shared, { 日期: '115/2/30' }, {})).toBeNull()
-  })
-})
-
-it('shares standalone base definitions in later scenario tags without base output, preserving legacy locality', () => {
-  const { category, contexts } = fixture()
-  category.fields!.push({
-    id: 'standalone',
-    key: 'Y',
-    name: 'Standalone',
-    type: 'text',
-    scope: 'base',
-  })
-  category.steps[0]!.templateIds = []
-  const all = contexts()
-  const shared = sharedFieldNames(category, all)
-  expect(shared).toEqual(['姓名', '日期', 'Y'])
-  expect(shared).not.toContain('X') // historical X cannot be reclassified after losing base mapping
-  expect(shared).not.toContain('Z') // historical scenario-only definition stays local
-  const f = all.find((c) => c.stepId === 'f')!
-  expect(
-    contextValues(f, shared, { Y: 'shared' }, { [scopeKey(f)]: { Y: 'stale', X: 'local' } }),
-  ).toMatchObject({ Y: 'shared', X: 'local' })
-  category.fields![2]!.key = 'Unused'
-  expect(sharedFieldNames(category, [])).toEqual(['姓名', '日期', 'Unused'])
 })

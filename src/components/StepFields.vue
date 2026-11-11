@@ -5,6 +5,7 @@ defineProps<{
   fields: string[]
   values: Record<string, string>
   definitions?: FieldDef[]
+  sharedLabels?: Record<string, string>
   prefix: string
 }>()
 const emit = defineEmits<{ update: [key: string, value: string] }>()
@@ -14,10 +15,13 @@ function input(key: string, event: Event) {
 </script>
 <template>
   <div class="mt-3 grid gap-4">
-    <div v-for="(name, index) in fields" :key="name">
+    <div v-for="(name, index) in fields" :key="name" :data-field-key="name">
       <label :for="`${prefix}-${index}`" class="block text-sm font-medium">
         {{ definitions?.find((field) => field.key === name)?.name ?? name }}
       </label>
+      <span v-if="sharedLabels?.[name]" class="text-xs text-ink-muted">{{
+        sharedLabels[name]
+      }}</span>
       <RocDateField
         v-if="name === '日期'"
         :model-value="values[name] ?? ''"

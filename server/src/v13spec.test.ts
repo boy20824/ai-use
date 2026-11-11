@@ -1160,3 +1160,54 @@ it('persists standalone base ownership without output, preserves legacy ownershi
   ).toBe(400)
   expect(db.prepare('SELECT * FROM category_fields ORDER BY id').all()).toEqual(before)
 })
+
+it('returns built-in settings on category APIs, permits manual name and base fields only to maintainers, and reflects recovery', async () => {
+  const { app, db } = await setup()
+  const admin = await login(app)
+  const user = await login(app, 'clerk')
+  const managerId = createQueries(db).findUserByUsername('clerk')!.id
+  const c = await category(app, admin, 'Mock 步驟欄位')
+  const url = `/api/categories/${c.id}`
+  expect((await request(app, user, 'GET', url)).json().category.builtinFields).toEqual({
+    姓名: false,
+  })
+  expect(
+    (await request(app, user, 'GET', '/api/categories'))
+      .json()
+      .categories.find((item: { id: string }) => item.id === c.id).builtinFields,
+  ).toEqual({ 姓名: false })
+  const fields = [
+    { id: 'unit', key: '承辦單位', type: 'text', scope: 'base' },
+    { id: 'manual-name', key: '姓名', type: 'text', scope: 'base' },
+  ]
+  expect(
+    (await request(app, user, 'PATCH', url, { name: 'Mock 步驟欄位', fields })).statusCode,
+  ).toBe(403)
+  db.prepare('UPDATE users SET can_manage_categories = 1 WHERE id = ?').run(managerId)
+  expect(
+    (await request(app, user, 'PATCH', url, { name: 'Mock 步驟欄位', fields })).statusCode,
+  ).toBe(200)
+  const stored = (await request(app, user, 'GET', url)).json().category
+  expect(stored.fields.map((field: { key: string }) => field.key)).toEqual(['承辦單位', '姓名'])
+  expect(stored.builtinFields).toEqual({ 姓名: false })
+  // Model an existing category with absent setting before the once-only adjustment.
+  const { applyRemoveBaseName, removeBaseNameId, revertRemoveBaseName } =
+    await import('./builtinFields.ts')
+  db.prepare('DELETE FROM data_adjustments WHERE id = ?').run(removeBaseNameId)
+  db.prepare('DELETE FROM category_builtin_fields WHERE category_id = ?').run(c.id)
+  applyRemoveBaseName(db)
+  expect((await request(app, user, 'GET', url)).json().category.builtinFields).toEqual({
+    姓名: false,
+  })
+  revertRemoveBaseName(db, 'Mock admin')
+  expect((await request(app, user, 'GET', url)).json().category.builtinFields).toEqual({
+    姓名: true,
+  })
+  migrate(db)
+  expect((await request(app, user, 'GET', url)).json().category.builtinFields).toEqual({
+    姓名: true,
+  })
+  expect(
+    (await request(app, user, 'PATCH', url, { builtinFields: { 姓名: true } })).statusCode,
+  ).toBe(400)
+})

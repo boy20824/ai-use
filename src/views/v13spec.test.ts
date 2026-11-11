@@ -361,7 +361,7 @@ it('keeps #21 completion checkboxes functional with saved cross-source order and
   }
 })
 
-it('places scenario inputs in their steps, preserves scoped values through combination ordering, and generates each selected context', async () => {
+it('places scenario inputs in their steps, preserves shared values through combination ordering, and generates each selected context', async () => {
   const original = mocks.category.steps
   mocks.library.push(
     { id: 'base-x', fileName: 'base.docx', placeholders: ['酒測值', '姓名', '日期'] },
@@ -394,15 +394,17 @@ it('places scenario inputs in their steps, preserves scoped values through combi
     )!
   try {
     const router = await mount()
-    expect(host.querySelector('.basic-data-row')?.textContent).toContain('酒測值')
+    expect(host.querySelector('.basic-data-row')?.textContent).not.toContain('酒測值')
     expect(host.querySelector('.basic-data-row')?.textContent).not.toContain('專屬')
-    await fill(host.querySelector('#draft-0')!, 'Mock name')
+    await fill(host.querySelector('#step-common-1')!, 'Mock name')
     await fill(host.querySelector('input[type="number"]')!, '0.35')
     await check(input('攔查'), true)
     expect(host.textContent).not.toContain('n.docx')
-    expect(host.querySelector('#step-stop-step-0')).not.toBeNull()
-    await fill(host.querySelector('#step-stop-step-0')!, 'D-value')
-    expect(stepRow('攔查專屬').querySelector('input[type="number"]')).toBeNull()
+    expect(host.querySelector('#step-stop-step-1')).not.toBeNull()
+    await fill(host.querySelector('#step-stop-step-1')!, 'D-value')
+    expect(
+      (stepRow('攔查專屬').querySelector('input[type="number"]') as HTMLInputElement).value,
+    ).toBe('0.35')
     const generateD = [...stepRow('攔查專屬').querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === '產生',
     )!
@@ -413,16 +415,16 @@ it('places scenario inputs in their steps, preserves scoped values through combi
       '共同步驟',
       '攔查專屬',
     ])
-    expect((host.querySelector('#step-stop-step-0') as HTMLInputElement).value).toBe('D-value')
-    expect((host.querySelector('#step-crash-step-0') as HTMLInputElement).value).toBe('')
+    expect((host.querySelector('#step-stop-step-1') as HTMLInputElement).value).toBe('D-value')
+    expect((host.querySelector('#step-crash-step-1') as HTMLInputElement).value).toBe('D-value')
     expect(generateD.disabled).toBe(false) // Missing N fields cannot block D.
-    await fill(host.querySelector('#step-crash-step-0')!, 'F-value')
-    await fill(host.querySelector('#step-crash-step-1')!, 'Z-value')
+    await fill(host.querySelector('#step-crash-step-1')!, 'F-value')
+    await fill(host.querySelector('#step-crash-step-2')!, 'Z-value')
     generateD.click()
     await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledOnce())
     expect(mocks.render).toHaveBeenLastCalledWith(
       expect.anything(),
-      expect.objectContaining({ 酒測值: '0.35', 專屬: 'D-value' }),
+      expect.objectContaining({ 酒測值: '0.35', 專屬: 'F-value' }),
     )
     host.querySelector<HTMLButtonElement>('#tab-overview')!.click()
     await nextTick()
@@ -463,7 +465,7 @@ it('places scenario inputs in their steps, preserves scoped values through combi
     expect(mocks.render).toHaveBeenNthCalledWith(
       2,
       expect.anything(),
-      expect.objectContaining({ 專屬: 'D-value' }),
+      expect.objectContaining({ 專屬: 'F-value' }),
     )
     expect(mocks.zip).toHaveBeenLastCalledWith([
       expect.objectContaining({ name: '產生-same.docx' }),
@@ -471,7 +473,7 @@ it('places scenario inputs in their steps, preserves scoped values through combi
     ])
     await router.push('/categories/another-mock')
     await check(input('攔查'), true)
-    expect((host.querySelector('#step-stop-step-0') as HTMLInputElement).value).toBe('')
+    expect((host.querySelector('#step-stop-step-1') as HTMLInputElement).value).toBe('')
     expect(localStorage.length).toBe(0)
     expect(sessionStorage.length).toBe(0)
   } finally {

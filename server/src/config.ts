@@ -27,11 +27,11 @@ const demoSessionSecrets = new Set([
 
 const demoSeedPasswords = new Set(['clerk-demo', 'admin-demo', 'viewer-demo'])
 
-export function loadEnvFiles() {
+export function loadEnvFiles(quiet = false) {
   const rootEnv = path.resolve(serverRoot, '../.env')
   const serverEnv = path.resolve(serverRoot, '.env')
-  if (existsSync(rootEnv)) loadDotenv({ path: rootEnv })
-  if (existsSync(serverEnv)) loadDotenv({ path: serverEnv, override: true })
+  if (existsSync(rootEnv)) loadDotenv({ path: rootEnv, quiet })
+  if (existsSync(serverEnv)) loadDotenv({ path: serverEnv, override: true, quiet })
 }
 
 export interface SeedPasswords {
@@ -232,6 +232,10 @@ function sampleTemplatePathFromEnv(): string {
   return path.resolve(raw)
 }
 
+export function databasePathFromEnv(): string {
+  return pathEnv('DATABASE_PATH', 'data/app.sqlite')
+}
+
 export function loadConfig(): AppConfig {
   loadEnvFiles()
   const nodeEnv = process.env.NODE_ENV
@@ -253,7 +257,7 @@ export function loadConfig(): AppConfig {
     auditArchiveDir: process.env.AUDIT_ARCHIVE_DIR ? pathEnv('AUDIT_ARCHIVE_DIR', '') : undefined,
     host: hostFromEnv(nodeEnv),
     port: numberEnv('PORT', 3000),
-    databasePath: pathEnv('DATABASE_PATH', 'data/app.sqlite'),
+    databasePath: databasePathFromEnv(),
     uploadDir: pathEnv('UPLOAD_DIR', 'data/uploads'),
     sessionSecret: sessionSecretFromEnv(nodeEnv, process.env.SESSION_SECRET, passwords),
     sessionTtlHours: numberEnv('SESSION_TTL_HOURS', 12),

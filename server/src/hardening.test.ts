@@ -466,7 +466,7 @@ it('cleans only expired events/sessions and preserves audit without explicit arc
   queries.cleanup(Date.now(), Date.now() - 10000)
   expect(queries.recentFailures('admin', 0)).toBe(1)
   expect(db.prepare('SELECT COUNT(*) AS n FROM sessions').get()).toEqual({ n: 1 })
-  expect(db.prepare('SELECT COUNT(*) AS n FROM audit_log').get()).toEqual({ n: 1 })
+  expect(db.prepare('SELECT COUNT(*) AS n FROM audit_log').get()).toEqual({ n: 2 })
   expect(
     db.prepare("SELECT name FROM sqlite_master WHERE name = 'login_account_time'").get(),
   ).toBeTruthy()
@@ -487,7 +487,7 @@ it('warns and durably archives historical audit before removal', async () => {
     auditRetentionDays: 1,
   })
   await preserved.close()
-  expect(db.prepare('SELECT COUNT(*) AS n FROM audit_log').get()).toEqual({ n: 1 })
+  expect(db.prepare('SELECT COUNT(*) AS n FROM audit_log').get()).toEqual({ n: 2 })
   const archiveDir = path.join(dir, 'archive')
   const archival = await buildApp(db, {
     ...config,
@@ -502,7 +502,7 @@ it('warns and durably archives historical audit before removal', async () => {
   expect(readFileSync(path.join(archiveDir, readdirSync(archiveDir)[0]!), 'utf8')).toContain(
     '2000-01-01',
   )
-  expect(db.prepare('SELECT COUNT(*) AS n FROM audit_log').get()).toEqual({ n: 0 })
+  expect(db.prepare('SELECT COUNT(*) AS n FROM audit_log').get()).toEqual({ n: 1 })
 })
 
 it('preserves every audit field across archive batches and retains rows on archive failure', async () => {
@@ -528,7 +528,7 @@ it('preserves every audit field across archive batches and retains rows on archi
   await failed.close()
   expect(db.prepare('SELECT * FROM audit_log ORDER BY id').all()).toEqual(original)
   rmSync(archiveDir)
-  for (const remaining of [2, 1]) {
+  for (const remaining of [3, 2]) {
     const archival = await buildApp(db, {
       ...config,
       auditRetentionDays: 1,
@@ -543,8 +543,12 @@ it('preserves every audit field across archive batches and retains rows on archi
       .split('\n')
       .map((line) => JSON.parse(line)),
   )
-  expect(archived.sort((a, b) => a.id - b.id)).toEqual(original.slice(0, 501))
-  expect(db.prepare('SELECT * FROM audit_log').all()).toEqual(original.slice(501))
+  expect(archived.sort((a, b) => a.id - b.id)).toEqual(
+    original.filter((row) => (row as { created_at: string }).created_at === '2000-01-01'),
+  )
+  expect(db.prepare('SELECT * FROM audit_log').all()).toEqual(
+    original.filter((row) => (row as { created_at: string }).created_at !== '2000-01-01'),
+  )
 })
 
 it('rejects namespace-shadowed relationship attributes but permits passive theme object defaults', () => {

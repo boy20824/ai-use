@@ -1,3 +1,4 @@
+import { applyRemoveBaseName } from './builtinFields.ts'
 import { migrateCombinationOrders, migrateModules } from './modules.ts'
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
@@ -145,6 +146,7 @@ export interface ModuleRecord {
 }
 
 export interface CategoryRecord {
+  builtinFields?: Record<string, boolean>
   baseSteps?: StepRef[]
   modules?: ModuleRecord[]
   combinationOrders?: { moduleIds: string[]; stepIds: string[] }[]
@@ -582,6 +584,7 @@ export function migrate(db: AppDatabase) {
       )
     migrateModules(db)
     migrateCombinationOrders(db)
+    applyRemoveBaseName(db)
     // Additive settings preserve legacy step rows/details byte for byte.
     db.exec(`CREATE TABLE IF NOT EXISTS step_parallel_settings (
       step_id TEXT PRIMARY KEY REFERENCES category_steps(id) ON DELETE CASCADE,
@@ -898,6 +901,14 @@ export function createQueries(db: AppDatabase) {
 
   function hydrateCategory(row: CategoryRow, steps: CategoryStepRecord[]): CategoryRecord {
     const category = mapCategory(row, steps)
+    const builtin = db
+      .prepare('SELECT field_key, enabled FROM category_builtin_fields WHERE category_id = ?')
+      .all(row.id) as { field_key: string; enabled: number }[]
+    // Absence means the historical built-in is restored. New categories explicitly disable it.
+    category.builtinFields = {
+      姓名: true,
+      ...Object.fromEntries(builtin.map((field) => [field.field_key, field.enabled === 1])),
+    }
     category.group = (
       db.prepare('SELECT group_name FROM categories WHERE id = ?').get(row.id) as {
         group_name: CategoryGroup
@@ -1272,6 +1283,7 @@ export function createQueries(db: AppDatabase) {
     createCategory(input: CategoryInput, actorUsername: string) {
       const apply = db.transaction(() => {
         insertCategory.run(input.id, input.code, input.name, input.summary, input.updatedAt)
+        db.prepare("INSERT INTO category_builtin_fields VALUES (?, '姓名', 0)").run(input.id)
         const created = writeSteps(input.id, input.steps)
         writeDetails(input, created)
         writeAudit(actorUsername, 'category_create', '', '', input.id, input.name)

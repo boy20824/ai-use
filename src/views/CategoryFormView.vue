@@ -392,7 +392,7 @@ async function submit() {
   <PageIntro
     eyebrow="工作台"
     :title="isEdit ? '編輯案件範本' : '新增案件範本'"
-    description="名稱必填且不可重複。基本資料（姓名、日期）會固定出現在流程第一步。這裡的步驟可以寫說明，並從範本庫選取要在該步驟產生的文件。"
+    description="名稱必填且不可重複。日期與基本 SOP 手動新增的欄位顯示在基本資料；範本欄位在使用它的步驟填寫。這裡的步驟可以寫說明，並從範本庫選取要在該步驟產生的文件。"
   >
     <RouterLink
       :to="isEdit ? `/categories/${editingId}` : '/categories'"
