@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { PhotoBlockError } from './photoBlocks.ts'
 import { mkdirSync, openSync, writeFileSync, fsyncSync, closeSync } from 'node:fs'
 import { releaseNotes } from './releaseNotes.ts'
 import cookie from '@fastify/cookie'
@@ -1451,8 +1452,13 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       storedBytes = Buffer.from(normalized.data)
       formatNotices = normalized.notices
       placeholders = listPlaceholders(storedBytes, zipLimits)
-    } catch {
-      return fail(reply, 400, 'bad-upload', '無法讀取這份 Word 範本。')
+    } catch (cause) {
+      return fail(
+        reply,
+        400,
+        'bad-upload',
+        cause instanceof PhotoBlockError ? cause.message : '無法讀取這份 Word 範本。',
+      )
     }
 
     const record = {

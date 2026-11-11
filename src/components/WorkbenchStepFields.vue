@@ -11,6 +11,7 @@ defineProps<{
   prefix: string
   missing: string[]
   templates: OverviewTemplate[]
+  photoCells?: Record<string, number>
   busy: boolean
   message: string
   messageTone: 'ok' | 'warn'
@@ -51,6 +52,7 @@ const emit = defineEmits<{
         v-for="item in templates"
         :key="item.id"
         class="flex items-center justify-between gap-3 px-4 py-3"
+        :class="{ 'flex-wrap': !!photoCells?.[item.id] }"
       >
         <span class="min-w-0">
           <span class="block break-all text-sm font-medium text-ink">{{
@@ -69,6 +71,7 @@ const emit = defineEmits<{
         >
           產生
         </button>
+        <slot name="photos" :template-id="item.id" />
       </li>
     </ul>
   </div>
