@@ -1,3 +1,4 @@
+import { hasPdfHeader, maxPdfUploadBytes, pdfMimeType } from '../../shared/templateUpload.ts'
 import path from 'node:path'
 import { PhotoBlockError } from './photoBlocks.ts'
 import { mkdirSync, openSync, writeFileSync, fsyncSync, closeSync } from 'node:fs'
@@ -332,6 +333,7 @@ function publicCategory(category: CategoryRecord) {
 function publicTemplate(template: TemplateRecord) {
   return {
     id: template.id,
+    kind: template.kind,
     fileName: template.fileName,
     mimeType: template.mimeType,
     sizeBytes: template.sizeBytes,
@@ -552,9 +554,9 @@ function csrfOk(request: FastifyRequest) {
   return tokensMatch(cookieToken, header)
 }
 
-function contentDisposition(fileName: string) {
+function contentDisposition(fileName: string, disposition: 'attachment' | 'inline' = 'attachment') {
   const ascii = fileName.replace(/[^\w.\-]+/g, '_') || 'template.docx'
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
 }
 
 function requestId(request: FastifyRequest): unknown {
@@ -678,7 +680,12 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     },
     credentials: true,
   })
-  await app.register(multipart, { limits: { fileSize: config.maxUploadBytes, files: 1 } })
+  await app.register(multipart, {
+    limits: {
+      fileSize: Math.max(config.maxUploadBytes, config.maxPdfUploadBytes ?? maxPdfUploadBytes),
+      files: 1,
+    },
+  })
 
   app.addHook('onRequest', async (request, reply) => {
     const pathOnly = request.url.split('?')[0] ?? ''
@@ -690,6 +697,14 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       setCsrfCookie(reply, config, randomBytes(32).toString('hex'))
     }
     if (!mutatingMethods.has(request.method)) return
+    if (
+      !request.authUser &&
+      ((request.method === 'POST' && pathOnly === '/api/templates') ||
+        (request.method === 'PUT' && /^\/api\/templates\/[^/]+\/file$/.test(pathOnly)))
+    ) {
+      requireUser(request, reply)
+      return
+    }
     if (!originAllowed(request, config)) {
       return fail(reply, 403, 'csrf', '這個來源不能變更資料。')
     }
@@ -1396,14 +1411,25 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     if (!user) return
     const parsed = templateIdSchema.safeParse(requestId(request))
     if (!parsed.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
+    const query = z
+      .object({ inline: z.literal('1').optional(), disposition: z.literal('inline').optional() })
+      .strict()
+      .safeParse(request.query)
+    if (!query.success)
+      return fail(reply, 400, 'invalid-input', '預覽參數只接受 inline=1 或 disposition=inline。')
+    const inline = query.data.inline === '1' || query.data.disposition === 'inline'
     const template = queries.getTemplateFile(parsed.data)
     const data = template
-      ? readTemplateBytes(config.uploadDir, template.id, template.data)
+      ? readTemplateBytes(config.uploadDir, template.id, template.data, template.kind)
       : undefined
     if (!template || !data) return fail(reply, 404, 'not-found', '找不到這份範本。')
     return reply
-      .header('content-type', template.mimeType)
-      .header('content-disposition', contentDisposition(template.fileName))
+      .header('content-type', template.kind === 'pdf' ? pdfMimeType : template.mimeType)
+      .header('x-content-type-options', 'nosniff')
+      .header(
+        'content-disposition',
+        contentDisposition(template.fileName, inline ? 'inline' : 'attachment'),
+      )
       .send(data)
   })
 
@@ -1419,7 +1445,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     )
       return fail(reply, 404, 'not-found', '找不到範本。')
     const file = await request.file()
-    if (!file) return fail(reply, 400, 'invalid-input', '請選擇 .docx 檔案。')
+    if (!file) return fail(reply, 400, 'invalid-input', '請選擇 .docx 或 .pdf 檔案。')
     const stepField = file.fields.stepId
     const rawStep =
       stepField && typeof stepField === 'object' && 'value' in stepField ? stepField.value : ''
@@ -1434,38 +1460,68 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       linkedCategoryId = step.categoryId
     }
     const fileName = sanitizeTemplateFileName(file.filename)
-    if (!fileName || !isAllowedDocxMime(file.mimetype)) {
-      return fail(reply, 400, 'bad-upload', '只接受 Word .docx 範本。')
-    }
-
-    const data = await file.toBuffer()
-    if (!hasZipHeader(data)) return fail(reply, 400, 'bad-upload', '檔案內容不是 Word 文件。')
-    let placeholders: string[]
-    let storedBytes = data
-    let formatNotices: string[] = []
-    try {
-      const zipLimits = {
-        maxEntries: config.maxZipEntries,
-        maxCompressedBytes: config.maxUploadBytes,
-        maxUncompressedBytes: config.maxZipUncompressedBytes,
-      }
-      const normalized = normalizeDocx(data, zipLimits)
-      storedBytes = Buffer.from(normalized.data)
-      formatNotices = normalized.notices
-      placeholders = listPlaceholders(storedBytes, zipLimits)
-    } catch (cause) {
+    if (!fileName) return fail(reply, 400, 'bad-upload', '只接受 .docx 或 .pdf 範本。')
+    const kind = fileName.toLowerCase().endsWith('.pdf') ? ('pdf' as const) : ('docx' as const)
+    if (
+      kind === 'pdf'
+        ? file.mimetype.toLowerCase() !== pdfMimeType
+        : !isAllowedDocxMime(file.mimetype)
+    )
       return fail(
         reply,
         400,
         'bad-upload',
-        cause instanceof PhotoBlockError ? cause.message : '無法讀取這份 Word 範本。',
+        kind === 'pdf' ? 'PDF 必須使用 application/pdf MIME。' : 'Word MIME 不正確。',
       )
+    const previous = replacing ? queries.getTemplateFile(replaceId) : null
+    if (previous && previous.kind !== kind)
+      return fail(reply, 400, 'bad-upload', '替換檔案必須維持相同類型（Word 或 PDF）。')
+    const data = await file.toBuffer()
+    const limit =
+      kind === 'pdf' ? (config.maxPdfUploadBytes ?? maxPdfUploadBytes) : config.maxUploadBytes
+    if (data.byteLength > limit)
+      return fail(
+        reply,
+        413,
+        'payload-too-large',
+        `${kind === 'pdf' ? 'PDF' : 'Word'} 超過大小上限（${limit} bytes）。`,
+      )
+    let placeholders: string[] = []
+    let storedBytes = data
+    let formatNotices: string[] = []
+    if (kind === 'pdf') {
+      if (!hasPdfHeader(data))
+        return fail(reply, 400, 'bad-upload', '檔案內容不是 PDF：檔頭必須為 %PDF-。')
+    } else {
+      if (!hasZipHeader(data)) return fail(reply, 400, 'bad-upload', '檔案內容不是 Word 文件。')
+      try {
+        const zipLimits = {
+          maxEntries: config.maxZipEntries,
+          maxCompressedBytes: config.maxUploadBytes,
+          maxUncompressedBytes: config.maxZipUncompressedBytes,
+        }
+        const normalized = normalizeDocx(data, zipLimits)
+        storedBytes = Buffer.from(normalized.data)
+        formatNotices = normalized.notices
+        placeholders = listPlaceholders(storedBytes, zipLimits)
+      } catch (cause) {
+        return fail(
+          reply,
+          400,
+          'bad-upload',
+          cause instanceof PhotoBlockError ? cause.message : '無法讀取這份 Word 範本。',
+        )
+      }
     }
 
     const record = {
       id: replacing ? replaceId : randomBytes(16).toString('hex'),
       fileName,
-      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      kind,
+      mimeType:
+        kind === 'pdf'
+          ? pdfMimeType
+          : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       sizeBytes: storedBytes.byteLength,
       addedAt: replacing ? new Date().toISOString() : stamp(),
       placeholders,
@@ -1473,9 +1529,8 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       usages: [],
       data: storedBytes,
     }
-    const previous = replacing ? queries.getTemplateFile(record.id) : null
     const previousBytes = previous
-      ? readTemplateBytes(config.uploadDir, record.id, previous.data)
+      ? readTemplateBytes(config.uploadDir, record.id, previous.data, previous.kind)
       : undefined
     if (
       !queries.templateQuota(
@@ -1489,14 +1544,14 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       )
     )
       return fail(reply, 429, 'quota-exceeded', '範本儲存配額已滿，請先清理既有範本。')
-    writeTemplateFile(config.uploadDir, record.id, storedBytes)
+    writeTemplateFile(config.uploadDir, record.id, storedBytes, kind)
     try {
       if (replacing) queries.replaceTemplate(record)
       else queries.insertTemplate(record, linkedStepId ?? undefined)
       queries.setTemplateOwner(record.id, user.id)
     } catch (error) {
-      if (previousBytes) writeTemplateFile(config.uploadDir, record.id, previousBytes)
-      else removeTemplateFile(config.uploadDir, record.id)
+      if (previousBytes) writeTemplateFile(config.uploadDir, record.id, previousBytes, kind)
+      else removeTemplateFile(config.uploadDir, record.id, kind)
       throw error
     }
     queries.insertAudit(user.username, 'upload', record.id, record.fileName, linkedCategoryId)
@@ -1524,7 +1579,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       .map((item) => `${item.categoryName} → ${item.stepBody}`)
       .join('、')
     queries.deleteTemplate(parsed.data)
-    removeTemplateFile(config.uploadDir, parsed.data)
+    removeTemplateFile(config.uploadDir, parsed.data, existing.kind)
     queries.insertAudit(
       user.username,
       'delete',

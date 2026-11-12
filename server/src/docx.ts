@@ -25,11 +25,11 @@ export function sanitizeTemplateFileName(input: string): string | null {
   if (!cleaned || cleaned === '.' || cleaned === '..' || cleaned.includes('..')) return null
   if (cleaned.length > 180) return null
   if (
-    !/^[^\s/\\][^/\\]*\.docx$/i.test(cleaned) &&
-    !/^[\u4e00-\u9fff\w .()\-]+\.docx$/i.test(cleaned)
+    !/^[^\s/\\][^/\\]*\.(docx|pdf)$/i.test(cleaned) &&
+    !/^[\u4e00-\u9fff\w .()\-]+\.(docx|pdf)$/i.test(cleaned)
   ) {
     return null
   }
-  if (!cleaned.toLowerCase().endsWith('.docx')) return null
+  if (!/\.(docx|pdf)$/i.test(cleaned)) return null
   return cleaned
 }

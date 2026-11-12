@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { fieldMappingIssues } from '@/workbench/fieldMapping'
 import StepFields from '@/components/StepFields.vue'
+import ReferenceDocuments from '@/components/ReferenceDocuments.vue'
 import WorkbenchStepFields from '@/components/WorkbenchStepFields.vue'
 import PhotoBlockFields from '@/components/PhotoBlockFields.vue'
 import { readPhotoBlock } from '../../server/src/docxXml'
@@ -286,8 +287,9 @@ async function renderOne(context: GenerationContext) {
   const filled = filledContext(context, values.value)
   if (!filled) throw new Error('invalid-date')
   const template = templates.byId(id)
+  if (!template || template.kind === 'pdf') throw new Error('missing-template')
   const bytes = await templates.bytesFor(id)
-  if (!template || !bytes) throw new Error('missing-template')
+  if (!bytes) throw new Error('missing-template')
   const draft = photoDrafts.value[id]
   if (
     photoCells.value[id] &&
@@ -339,7 +341,7 @@ async function produceStep(stepId: string, templateIds: string[], index: number)
   messageStepId.value = stepId
   const rendered: { name: string; data: Uint8Array }[] = []
   const failed: string[] = []
-  for (const templateId of templateIds) {
+  for (const templateId of templateIds.filter((id) => templates.byId(id)?.kind !== 'pdf')) {
     try {
       const context = contexts.value.find((item) => item.id === contextKey(stepId, templateId))
       if (!context) throw new Error('missing-context')
@@ -371,6 +373,12 @@ async function produceStep(stepId: string, templateIds: string[], index: number)
 }
 
 const categoryTemplateIds = computed(() => dedupedIds(visibleSteps.value))
+const referenceTemplates = computed(() =>
+  categoryTemplateIds.value.flatMap((id) => {
+    const item = templates.byId(id)
+    return item?.kind === 'pdf' ? [item] : []
+  }),
+)
 
 const overviewList = computed(() =>
   generationContexts(visibleSteps.value, temporaryIds.value, (id) => templates.byId(id)),
@@ -455,7 +463,7 @@ const additionChoices = computed(() => {
   const linked = new Set(categoryTemplateIds.value)
   const query = pickerQuery.value.trim().toLocaleLowerCase()
   return templates.items.filter((item) => {
-    if (linked.has(item.id)) return false
+    if (item.kind === 'pdf' || linked.has(item.id)) return false
     if (!query) return true
     return displayFileName(item.fileName).toLocaleLowerCase().includes(query)
   })
@@ -923,6 +931,7 @@ onUnmounted(clearDraft)
               >
             </li>
           </ol>
+          <ReferenceDocuments :templates="referenceTemplates" />
           <div class="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
             <div>
               <div class="mb-3 flex flex-wrap items-center justify-between gap-3">

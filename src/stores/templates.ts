@@ -1,12 +1,8 @@
+import { validateTemplateFile } from '@/services/templateUpload'
+import { pdfMimeType } from '../../shared/templateUpload'
 import { apiErrorMessage, apiRequest } from '@/services/api'
 import { docxZipLimits, normalizeDocx, splitFormatNotice } from '../../server/src/docxXml'
-import {
-  hasZipHeader,
-  listPlaceholders,
-  maxTemplateBytes,
-  safeFileName,
-  templateMimeType,
-} from '@/services/docxTemplates'
+import { listPlaceholders, templateMimeType } from '@/services/docxTemplates'
 import {
   createTemplateRepository,
   templateStorageMode,
@@ -32,11 +28,12 @@ export interface AddTemplatesResult {
 function toSummary(record: StoredTemplate): TemplateSummary {
   return {
     id: record.id,
+    kind: record.kind ?? 'docx',
     fileName: record.fileName,
     mimeType: record.mimeType,
     sizeBytes: record.sizeBytes,
     addedAt: record.addedAt,
-    placeholders: [...record.placeholders],
+    placeholders: record.kind === 'pdf' ? [] : [...record.placeholders],
     origin: record.origin,
     usages: record.usages.map((usage) => ({ ...usage })),
   }
@@ -123,26 +120,20 @@ export const useTemplateStore = defineStore('templates', () => {
     let added = 0
 
     for (const file of accepted) {
-      const fileName = safeFileName(file.name)
-      if (!fileName.toLowerCase().endsWith('.docx')) {
-        rejected.push(`${fileName || '未命名檔案'} 不是 .docx`)
+      let validated: Awaited<ReturnType<typeof validateTemplateFile>>
+      try {
+        validated = await validateTemplateFile(file)
+      } catch (cause) {
+        rejected.push(cause instanceof Error ? cause.message : '無法讀取檔案。')
         continue
       }
-      if (file.size > maxTemplateBytes) {
-        rejected.push(`${fileName} 超過 8 MB`)
-        continue
-      }
-      const data = await file.arrayBuffer()
-      if (!hasZipHeader(data)) {
-        rejected.push(`${fileName} 不是有效的 Word 檔`)
-        continue
-      }
+      const { fileName, kind, data } = validated
       let payload = data
       let sizeBytes = data.byteLength
-      let placeholders: string[]
+      let placeholders: string[] = []
       const localNotices: string[] = []
       try {
-        if (templateStorageMode() === 'indexeddb') {
+        if (kind === 'docx' && templateStorageMode() === 'indexeddb') {
           const normalized = normalizeDocx(new Uint8Array(data), docxZipLimits)
           localNotices.push(...normalized.notices)
           const copy = new Uint8Array(normalized.data.byteLength)
@@ -150,7 +141,7 @@ export const useTemplateStore = defineStore('templates', () => {
           payload = copy.buffer
           sizeBytes = copy.byteLength
           placeholders = listPlaceholders(copy)
-        } else {
+        } else if (kind === 'docx') {
           placeholders = listPlaceholders(data)
         }
       } catch (cause) {
@@ -166,7 +157,8 @@ export const useTemplateStore = defineStore('templates', () => {
           {
             id: crypto.randomUUID(),
             fileName,
-            mimeType: templateMimeType,
+            kind,
+            mimeType: kind === 'pdf' ? pdfMimeType : templateMimeType,
             sizeBytes,
             addedAt: formatStamp(new Date()),
             placeholders,
@@ -196,9 +188,10 @@ export const useTemplateStore = defineStore('templates', () => {
   }
 
   async function replace(id: string, file: File) {
-    if (!safeFileName(file.name).toLowerCase().endsWith('.docx') || file.size > maxTemplateBytes)
-      throw new Error('請選擇 8 MB 以內的 .docx。')
-    listPlaceholders(await file.arrayBuffer())
+    const { kind, data } = await validateTemplateFile(file)
+    if (kind !== (byId(id)?.kind ?? 'docx'))
+      throw new Error('替換檔案必須維持相同類型（Word 或 PDF）。')
+    if (kind === 'docx') listPlaceholders(data)
     const form = new FormData()
     form.append('file', file)
     const response = await apiRequest(`/api/templates/${encodeURIComponent(id)}/file`, {

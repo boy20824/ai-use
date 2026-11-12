@@ -3,6 +3,7 @@ import { displayFileName } from '@/utils/fileName'
 import { isDerivedDateTag, parseRocDate } from '@/utils/rocDate'
 
 export interface OverviewTemplate {
+  kind?: 'docx' | 'pdf'
   id: string
   fileName: string
   placeholders: string[]
@@ -36,7 +37,7 @@ export function overviewCatalog(
   const templates: OverviewTemplate[] = []
   for (const id of ids) {
     const item = lookup(id)
-    if (item) templates.push(item)
+    if (item && item.kind !== 'pdf') templates.push(item)
   }
   return templates
 }
@@ -72,8 +73,14 @@ export function manualFieldsFromPlaceholders(
   return names
 }
 
-export function inputFields(templates: { placeholders: string[] }[]): string[] {
-  return manualFieldsFromPlaceholders(templates.flatMap((template) => template.placeholders))
+export function inputFields(
+  templates: { kind?: 'docx' | 'pdf'; placeholders: string[] }[],
+): string[] {
+  return manualFieldsFromPlaceholders(
+    templates
+      .filter((template) => template.kind !== 'pdf')
+      .flatMap((template) => template.placeholders),
+  )
 }
 
 export function valuesForFields(

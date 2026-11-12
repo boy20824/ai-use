@@ -18,6 +18,7 @@ export async function ensureSampleTemplates(repository: TemplateRepository) {
   if (!response.ok) return
   const data = await response.arrayBuffer()
   await repository.put({
+    kind: 'docx',
     id: sampleTemplateId,
     fileName: sampleTemplateFileName,
     mimeType: templateMimeType,

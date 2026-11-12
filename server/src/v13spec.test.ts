@@ -150,6 +150,7 @@ describe('v1.3 workflow spec', () => {
       migrate(db)
       const q = createQueries(db)
       q.insertTemplate({
+        kind: 'docx',
         id: 'document',
         fileName: 'mock.docx',
         mimeType: 'application/octet-stream',

@@ -3,9 +3,11 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, type App } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import CategoryFormView from './CategoryFormView.vue'
+import type { TemplateSummary } from '@/storage'
 import type { CaseCategory } from '@/types/domain'
 
 const mocks = vi.hoisted(() => ({
+  templates: [] as TemplateSummary[],
   create: vi.fn(async () => ({ id: 'created' })),
   byId: vi.fn<() => CaseCategory | undefined>(() => undefined),
 }))
@@ -13,7 +15,12 @@ vi.mock('@/stores/categories', () => ({
   useCategoryStore: () => ({ ready: true, byId: mocks.byId, create: mocks.create }),
 }))
 vi.mock('@/stores/templates', () => ({
-  useTemplateStore: () => ({ items: [], byId: () => undefined }),
+  useTemplateStore: () => ({
+    get items() {
+      return mocks.templates
+    },
+    byId: (id: string) => mocks.templates.find((item) => item.id === id),
+  }),
 }))
 vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ canEditCategory: true }),
@@ -27,6 +34,7 @@ afterEach(() => {
   host?.remove()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  mocks.templates = []
   mocks.create.mockClear()
   mocks.byId.mockReset()
   if (execCommandDescriptor) Object.defineProperty(document, 'execCommand', execCommandDescriptor)
@@ -192,4 +200,38 @@ it('shows a manual-copy message when both clipboard methods fail', async () => {
   await nextTick()
   expect(host.textContent).toContain('無法自動複製')
   expect(host.textContent).not.toContain('已複製')
+})
+
+it('offers PDF reference attachments in the step picker with PDF upload accepted', async () => {
+  mocks.templates = [
+    {
+      kind: 'pdf',
+      id: 'mock-pdf',
+      fileName: '作業規定（Mock）.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 64,
+      addedAt: '',
+      placeholders: [],
+      origin: 'upload',
+      usages: [],
+    },
+  ]
+  await mountForm()
+  await type('#category-name', 'Mock PDF')
+  await submit()
+  await submit()
+  button('新增步驟').click()
+  await nextTick()
+  button('從範本庫選取').click()
+  await nextTick()
+  const label = [...host.querySelectorAll('label')].find((item) =>
+    item.textContent?.includes('作業規定（Mock）.pdf'),
+  )!
+  expect(label.textContent).toContain('參考文件')
+  const checkbox = label.querySelector<HTMLInputElement>('input')!
+  checkbox.checked = true
+  checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+  await nextTick()
+  expect(checkbox.checked).toBe(true)
+  expect(host.querySelector('input[type="file"]')?.getAttribute('accept')).toContain('.pdf')
 })

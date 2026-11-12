@@ -3,6 +3,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import { categoryGroups } from '@/config/app'
 import type { CategoryGroup } from '@/types/domain'
 import { downloadBytes } from '@/utils/download'
+import { previewPdf } from '@/services/pdfPreview'
 import { templateMimeType } from '@/services/docxTemplates'
 import EmptyState from '@/components/EmptyState.vue'
 import FileDropzone from '@/components/FileDropzone.vue'
@@ -69,10 +70,23 @@ async function downloadTemplate(item: TemplateSummary) {
   try {
     const bytes = await templates.bytesFor(item.id)
     if (!bytes) throw new Error('無法讀取範本檔案。')
-    downloadBytes(new Uint8Array(bytes), displayFileName(item.fileName), templateMimeType)
+    downloadBytes(
+      new Uint8Array(bytes),
+      displayFileName(item.fileName),
+      item.mimeType ?? templateMimeType,
+    )
   } catch (cause) {
     feedbackTone.value = 'warn'
     feedback.value = cause instanceof Error ? cause.message : '無法下載範本。'
+  }
+}
+
+async function previewTemplate(item: TemplateSummary) {
+  try {
+    await previewPdf(item.id)
+  } catch (cause) {
+    feedbackTone.value = 'warn'
+    feedback.value = cause instanceof Error ? cause.message : '無法預覽 PDF。'
   }
 }
 
@@ -154,7 +168,7 @@ async function onFiles(files: File[]) {
   }
   if (result.added === 0) {
     feedbackTone.value = 'warn'
-    feedback.value = result.rejected[0] ?? '沒有可保存的 .docx 範本。'
+    feedback.value = result.rejected[0] ?? '沒有可保存的 Word 或 PDF 範本。'
     return
   }
   feedbackTone.value =
@@ -236,9 +250,9 @@ async function onFiles(files: File[]) {
         compact
         :enabled="true"
         :disabled-reason="disabledReason"
-        title="上傳 .docx 到範本庫"
+        title="上傳 Word 或 PDF 到範本庫"
         hint="檔案會存在服務上的範本庫。產生文件時填入的欄位不會被保存。"
-        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        accept=".pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         @select="onFiles"
       />
     </div>
@@ -248,7 +262,7 @@ async function onFiles(files: File[]) {
     <EmptyState
       v-if="templates.ready && visible.length === 0 && templates.total === 0"
       title="範本庫還沒有文件"
-      description="具有維護權限的使用者上傳 .docx 後，可在案件範本的工作台按「從範本庫選取」連結過來。"
+      description="具有維護權限的使用者上傳 Word 或 PDF 後，可在案件範本的工作台按「從範本庫選取」連結過來。"
     >
       <RouterLink to="/categories" class="btn-primary"> 前往案件範本 </RouterLink>
     </EmptyState>
@@ -284,11 +298,15 @@ async function onFiles(files: File[]) {
               <span class="entry-icon"><AppIcon /></span>
               <div>
                 <p class="break-all font-semibold text-ink">{{ displayFileName(item.fileName) }}</p>
+                <span class="rounded border border-edge px-1.5 text-xs">{{
+                  item.kind === 'pdf' ? 'PDF' : 'Word'
+                }}</span>
                 <p class="mt-1 text-xs text-ink-muted">{{ formatBytes(item.sizeBytes) }}</p>
               </div>
             </td>
             <td class="template-fields max-w-48 px-4 py-4 text-xs leading-6 text-ink-muted">
-              <template v-if="item.placeholders.length > 0">
+              <span v-if="item.kind === 'pdf'">參考文件</span>
+              <template v-else-if="item.placeholders.length > 0">
                 <span
                   v-for="key in item.placeholders"
                   :key="key"
@@ -325,12 +343,20 @@ async function onFiles(files: File[]) {
             <td class="template-actions px-4 py-4">
               <div class="flex flex-wrap items-center gap-2">
                 <button
+                  v-if="item.kind === 'pdf'"
+                  type="button"
+                  class="btn-secondary"
+                  @click="previewTemplate(item)"
+                >
+                  預覽
+                </button>
+                <button
                   type="button"
                   class="focus-control download-template"
                   :aria-label="`下載 ${displayFileName(item.fileName)}`"
                   @click="downloadTemplate(item)"
                 >
-                  <AppIcon name="download" />
+                  <AppIcon name="download" /><span v-if="item.kind === 'pdf'">下載</span>
                 </button>
                 <button
                   v-if="session.canUpload"
@@ -342,9 +368,10 @@ async function onFiles(files: File[]) {
                   替換
                 </button>
                 <label v-if="replacing === item.id" class="text-xs text-ink-muted"
-                  >選擇新版 .docx<input
+                  >選擇新版 {{ item.kind === 'pdf' ? '.pdf' : '.docx'
+                  }}<input
                     type="file"
-                    accept=".docx"
+                    :accept="item.kind === 'pdf' ? '.pdf,application/pdf' : '.docx'"
                     :disabled="replacementBusy"
                     class="block max-w-52"
                     @change="replaceFile"

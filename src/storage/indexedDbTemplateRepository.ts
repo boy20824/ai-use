@@ -114,11 +114,12 @@ function normalize(
     : usages
   return {
     id: row.id,
+    kind: row.kind ?? 'docx',
     fileName: row.fileName,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
     addedAt: row.addedAt,
-    placeholders: Array.isArray(row.placeholders) ? row.placeholders : [],
+    placeholders: row.kind !== 'pdf' && Array.isArray(row.placeholders) ? row.placeholders : [],
     origin: row.origin,
     usages: next,
     data: row.data,

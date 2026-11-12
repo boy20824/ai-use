@@ -16,6 +16,8 @@ export function createApiTemplateRepository(): TemplateRepository {
       )
       return templates.map((item) => ({
         ...item,
+        kind: item.kind ?? 'docx',
+        placeholders: item.kind === 'pdf' ? [] : item.placeholders,
         usages: item.usages ?? [],
         data: new ArrayBuffer(0),
       }))
@@ -25,10 +27,15 @@ export function createApiTemplateRepository(): TemplateRepository {
       if (response.status === 404) return null
       if (!response.ok) throw new Error(await apiErrorMessage(response, '無法下載範本。'))
       const data = await response.arrayBuffer()
+      const mimeType = response.headers.get('content-type') ?? templateMimeType
+      const kind = mimeType === 'application/pdf' ? 'pdf' : 'docx'
+      const disposition = response.headers.get('content-disposition') ?? ''
+      const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
       return {
         id,
-        fileName: 'template.docx',
-        mimeType: response.headers.get('content-type') ?? templateMimeType,
+        kind,
+        fileName: encodedName ? decodeURIComponent(encodedName) : `template.${kind}`,
+        mimeType,
         sizeBytes: data.byteLength,
         addedAt: '',
         placeholders: [],

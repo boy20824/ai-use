@@ -68,6 +68,7 @@ export function seedReferenceData(
   const data = readFileSync(samplePath)
   writeTemplateFile(uploadDir, sampleTemplateId, data)
   queries.insertTemplate({
+    kind: 'docx',
     id: sampleTemplateId,
     fileName: '欄位示範範本.docx',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

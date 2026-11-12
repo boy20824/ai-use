@@ -9,6 +9,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { buildApp } from './app.ts'
 import type { AppConfig, SeedPasswords } from './config.ts'
 import { cookieSecureFromEnv } from './config.ts'
+import { buildMockPdf } from '../../shared/mockPdfFixture'
+import { templateFilePath } from './files.ts'
 import { sanitizeTemplateFileName } from './docx.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
 import { seedReferenceData } from './seed.ts'
@@ -133,6 +135,76 @@ describe('security controls', () => {
   })
   afterAll(() => {
     rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it('requires authentication for PDF upload and preview and preserves manager and administrator permissions', async () => {
+    const { app, db } = await boot()
+    databases.push(db)
+    try {
+      const file = multipart('作業規定（Mock）.pdf', 'application/pdf', Buffer.from(buildMockPdf()))
+      const upload = (credentials?: ReturnType<typeof auth>) =>
+        app.inject({
+          method: 'POST',
+          url: '/api/templates',
+          cookies: credentials?.cookies,
+          headers: { ...file.headers, ...credentials?.headers },
+          payload: file.payload,
+        })
+      expect((await upload()).statusCode).toBe(401)
+      const viewer = auth(await login(app, 'viewer', passwords.viewer))
+      expect((await upload(viewer)).statusCode).toBe(403)
+      db.prepare('UPDATE users SET can_manage_categories = 1 WHERE username = ?').run('clerk')
+      const manager = auth(await login(app, 'clerk', passwords.clerk))
+      const uploaded = await upload(manager)
+      expect(uploaded.statusCode).toBe(201)
+      const templateId = uploaded.json().template.id
+      const category = await app.inject({
+        method: 'POST',
+        url: '/api/categories',
+        ...manager,
+        payload: {
+          name: 'Mock PDF',
+          summary: '',
+          steps: [{ body: 'Mock', templateIds: [templateId] }],
+        },
+      })
+      expect(category.statusCode).toBe(201)
+      expect(category.json().category.steps[0].templateIds).toEqual([templateId])
+      for (const suffix of ['', '?inline=1']) {
+        const url = `/api/templates/${templateId}/file${suffix}`
+        expect((await app.inject({ url })).statusCode).toBe(401)
+        const response = await app.inject({ url, cookies: viewer.cookies })
+        expect(response.statusCode).toBe(200)
+        expect(response.headers['x-content-type-options']).toBe('nosniff')
+        const policy = String(response.headers['content-security-policy'])
+        expect(policy).toContain("default-src 'none'")
+        expect(policy).toContain("script-src 'self'")
+        expect(policy).toContain("object-src 'none'")
+        expect(policy).not.toMatch(/blob:|frame-src|unsafe-inline/)
+      }
+      expect(
+        (
+          await app.inject({
+            method: 'PUT',
+            url: `/api/templates/${templateId}/file`,
+            ...viewer,
+            headers: { ...viewer.headers, ...file.headers },
+            payload: file.payload,
+          })
+        ).statusCode,
+      ).toBe(403)
+      expect(
+        (await app.inject({ method: 'DELETE', url: `/api/templates/${templateId}`, ...manager }))
+          .statusCode,
+      ).toBe(403)
+      const admin = auth(await login(app, 'admin', passwords.admin))
+      expect(
+        (await app.inject({ method: 'DELETE', url: `/api/templates/${templateId}`, ...admin }))
+          .statusCode,
+      ).toBe(204)
+    } finally {
+      await app.close()
+    }
   })
 
   it('rejects incorrect current passwords and short new passwords without changing credentials', async () => {
@@ -592,6 +664,13 @@ describe('security controls', () => {
     expect(sanitizeTemplateFileName('../secret.docx')).toBe('secret.docx')
     expect(sanitizeTemplateFileName('..\\..\\windows.docx')).toBe('windows.docx')
     expect(sanitizeTemplateFileName('..docx')).toBeNull()
+    expect(sanitizeTemplateFileName('作業規定（Mock）.pdf')).toBe('作業規定（Mock）.pdf')
+    expect(sanitizeTemplateFileName('../Mock.pdf')).toBe('Mock.pdf')
+    expect(sanitizeTemplateFileName('..pdf')).toBeNull()
+    expect(sanitizeTemplateFileName('Mock..pdf')).toBeNull()
+    expect(() => templateFilePath('/tmp/mock-uploads', '../Mock', 'pdf')).toThrow()
+    expect(() => templateFilePath('/tmp/mock-uploads', '../Mock')).toThrow()
+    expect(() => templateFilePath('/tmp/mock-uploads', 'Mock', '../pdf' as 'pdf')).toThrow()
   })
 
   it('sends a strict content security policy and an origin allowlist', async () => {
@@ -601,6 +680,8 @@ describe('security controls', () => {
     const policy = String(response.headers['content-security-policy'])
     expect(policy).toContain("default-src 'none'")
     expect(policy).toContain("script-src 'self'")
+    expect(policy).toContain("object-src 'none'")
+    expect(policy).not.toMatch(/(?:^|;)\s*frame-src/)
     // Local splitter previews must work with the deployed policy, without broadening it.
     expect(
       policy
