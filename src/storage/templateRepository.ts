@@ -9,6 +9,7 @@ export interface TemplateUsage {
 }
 
 export interface TemplateSummary {
+  kind: 'docx' | 'pdf'
   id: string
   fileName: string
   mimeType: string

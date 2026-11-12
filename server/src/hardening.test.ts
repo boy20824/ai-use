@@ -429,6 +429,7 @@ it('enforces account/global quotas, bounded pages, and keeps shared reading', as
   expect((await app.inject({ url: '/api/templates?limit=101', ...admin })).statusCode).toBe(400)
   expect((await app.inject({ url: '/api/feedback?offset=-1', ...admin })).statusCode).toBe(400)
   const record = {
+    kind: 'docx' as const,
     id: 't',
     fileName: 't.docx',
     mimeType: 'application/zip',

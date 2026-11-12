@@ -288,11 +288,17 @@ async function upload(files: File[]) {
           <legend>關聯文件（沿用範本庫）</legend>
           <label v-for="t in templates.items" :key="t.id" class="block"
             ><input v-model="templateIds" type="checkbox" :value="t.id" />
-            {{ displayFileName(t.fileName) }}</label
+            {{ displayFileName(t.fileName)
+            }}<span v-if="t.kind === 'pdf'" class="ml-2 text-xs text-ink-muted"
+              >參考文件</span
+            ></label
           >
           <ol>
             <li v-for="(id, i) in templateIds" :key="id">
-              {{ displayFileName(templates.byId(id)?.fileName ?? '範本') }}
+              {{ displayFileName(templates.byId(id)?.fileName ?? '範本')
+              }}<span v-if="templates.byId(id)?.kind === 'pdf'" class="ml-2 text-xs text-ink-muted"
+                >參考文件</span
+              >
               <button
                 v-if="i"
                 type="button"
@@ -307,9 +313,9 @@ async function upload(files: File[]) {
         <FileDropzone
           :enabled="true"
           disabled-reason=""
-          title="上傳 .docx 範本"
+          title="上傳 Word 或 PDF 範本"
           hint="存入既有範本庫"
-          accept=".docx"
+          accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
           @select="upload"
         />
         <button type="button" class="btn-secondary" @click="saveStep">儲存共用步驟</button

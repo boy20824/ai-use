@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import ReferenceDocuments from './ReferenceDocuments.vue'
 import StepFields from './StepFields.vue'
 import type { FieldDef } from '@/types/domain'
 import type { OverviewTemplate } from '@/workbench/overview'
 import { displayFileName } from '@/utils/fileName'
-defineProps<{
+const props = defineProps<{
   sharedLabels?: Record<string, string>
   fields: string[]
   values: Record<string, string>
@@ -16,6 +18,8 @@ defineProps<{
   message: string
   messageTone: 'ok' | 'warn'
 }>()
+const documents = computed(() => props.templates.filter((item) => item.kind !== 'pdf'))
+const references = computed(() => props.templates.filter((item) => item.kind === 'pdf'))
 const emit = defineEmits<{
   update: [key: string, value: string]
   generate: [templateId: string]
@@ -25,7 +29,7 @@ const emit = defineEmits<{
 </script>
 <template>
   <section
-    v-if="fields.length || templates.some((item) => photoCells?.[item.id])"
+    v-if="fields.length || documents.some((item) => photoCells?.[item.id])"
     aria-label="本步驟欄位"
     class="mt-3"
   >
@@ -39,7 +43,7 @@ const emit = defineEmits<{
       @update="(key, value) => emit('update', key, value)"
     />
     <div
-      v-for="item in templates.filter((item) => photoCells?.[item.id])"
+      v-for="item in documents.filter((item) => photoCells?.[item.id])"
       :key="item.id"
       class="mt-3"
     >
@@ -57,10 +61,11 @@ const emit = defineEmits<{
     </template>
   </p>
   <p v-if="templates.length === 0" class="mt-3 text-sm text-ink-muted">這個步驟還沒有範本。</p>
-  <div v-else class="step-documents">
+  <div v-if="documents.length" class="step-documents">
+    <h4 class="text-sm font-semibold text-ink">產出文件</h4>
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
       <button
-        v-if="templates.length > 1"
+        v-if="documents.length > 1"
         type="button"
         class="btn-primary"
         :disabled="busy || missing.length > 0"
@@ -71,7 +76,7 @@ const emit = defineEmits<{
     </div>
     <ul class="step-template-list divide-y divide-edge">
       <li
-        v-for="item in templates"
+        v-for="item in documents"
         :key="item.id"
         class="flex items-center justify-between gap-3 px-4 py-3"
         :class="{ 'flex-wrap': !!photoCells?.[item.id] }"
@@ -96,6 +101,7 @@ const emit = defineEmits<{
       </li>
     </ul>
   </div>
+  <ReferenceDocuments :templates="references" />
   <p
     v-if="message"
     class="mt-3 rounded-control px-3 py-2 text-sm leading-6"

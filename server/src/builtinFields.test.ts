@@ -47,7 +47,7 @@ function existing() {
     "INSERT INTO base_step_refs(category_id, step_id, sort_order) VALUES ('absent', 's', 0)",
   ).run()
   db.prepare(
-    "INSERT INTO templates VALUES ('t', 'Mock.docx', 'mock/docx', 4, 'old', '[\"姓名\"]', 'upload', ?)",
+    "INSERT INTO templates (id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data) VALUES ('t', 'Mock.docx', 'mock/docx', 4, 'old', '[\"姓名\"]', 'upload', ?)",
   ).run(Buffer.from('Mock'))
   db.prepare("INSERT INTO step_templates VALUES ('s', 't', 0)").run()
   db.prepare("INSERT INTO step_parallel_settings VALUES ('s', 0)").run()

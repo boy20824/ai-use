@@ -25,7 +25,7 @@ export function generationContexts(
   const result: GenerationContext[] = []
   const append = (step: CategoryStep | null, templateId: string) => {
     const template = lookup(templateId)
-    if (!template) return
+    if (!template || template.kind === 'pdf') return
     result.push({
       ...template,
       id: contextKey(step?.id ?? null, templateId),

@@ -91,7 +91,7 @@ function attachedTemplates(stepIds?: Set<string>) {
     .flatMap((step) => step.templateIds)
     .flatMap((id) => {
       const template = templates.byId(id)
-      return template ? [template] : []
+      return template && template.kind !== 'pdf' ? [template] : []
     })
 }
 const baseTemplateFields = computed(() =>
@@ -246,7 +246,9 @@ function onStep(index: number, event: Event) {
 
 function templateName(id: string) {
   const found = templates.byId(id)
-  return found ? displayFileName(found.fileName) : '範本'
+  return found
+    ? `${displayFileName(found.fileName)}${found.kind === 'pdf' ? '（參考文件）' : ''}`
+    : '範本'
 }
 
 function pickerMatches(step: DraftStep) {
@@ -310,7 +312,7 @@ async function onUpload(index: number, files: File[]) {
   const result = await templates.addFiles(files, current.id)
   formNotice.value = result.formatNotice
   if (result.ids.length === 0) {
-    formError.value = result.rejected[0] ?? '沒有可保存的 .docx 範本。'
+    formError.value = result.rejected[0] ?? '沒有可保存的 Word 或 PDF 範本。'
     return
   }
   const next = [...steps.value]
@@ -616,7 +618,12 @@ async function submit() {
                       :checked="step.templateIds.includes(item.id)"
                       @change="toggleTemplate(index, item.id, $event)"
                     />
-                    <span class="break-all">{{ displayFileName(item.fileName) }}</span>
+                    <span class="break-all"
+                      >{{ displayFileName(item.fileName) }}
+                      <span v-if="item.kind === 'pdf'" class="text-xs text-ink-muted"
+                        >參考文件</span
+                      ></span
+                    >
                   </label>
                 </li>
               </ul>
@@ -624,9 +631,9 @@ async function submit() {
                 <FileDropzone
                   :enabled="true"
                   disabled-reason=""
-                  title="上傳 .docx 並連結到這個步驟"
+                  title="上傳 Word 或 PDF 並連結到這個步驟"
                   hint="檔案會存進範本庫，並出現在這個步驟的範本清單。"
-                  accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  accept=".pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   @select="onUpload(index, $event)"
                 />
               </div>

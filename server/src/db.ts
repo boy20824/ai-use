@@ -163,6 +163,7 @@ export interface CategoryRecord {
 }
 
 export interface TemplateRecord {
+  kind: 'docx' | 'pdf'
   id: string
   fileName: string
   mimeType: string
@@ -237,6 +238,7 @@ interface StepTemplateRow {
 }
 
 interface TemplateRow {
+  kind: 'docx' | 'pdf'
   id: string
   file_name: string
   mime_type: string
@@ -310,9 +312,10 @@ function mapTemplate(
   usages: TemplateUsage[],
   includeData: boolean,
 ): TemplateRecord {
-  const placeholders = JSON.parse(row.placeholders) as unknown
+  const placeholders = row.kind === 'pdf' ? [] : (JSON.parse(row.placeholders) as unknown)
   return {
     id: row.id,
+    kind: row.kind ?? 'docx',
     fileName: row.file_name,
     mimeType: row.mime_type,
     sizeBytes: row.size_bytes,
@@ -420,6 +423,7 @@ const templateTable = `
   CREATE TABLE IF NOT EXISTS templates (
     id TEXT PRIMARY KEY,
     file_name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'docx' CHECK (kind IN ('docx','pdf')),
     mime_type TEXT NOT NULL,
     size_bytes INTEGER NOT NULL,
     added_at TEXT NOT NULL,
@@ -550,6 +554,10 @@ export function migrate(db: AppDatabase) {
       db.exec(stepTable + linkTable)
       // Built-in IDs may contain user content: never remove rows during migration.
     }
+    if (!columnNames(db, 'templates').includes('kind'))
+      db.exec(
+        "ALTER TABLE templates ADD COLUMN kind TEXT NOT NULL DEFAULT 'docx' CHECK (kind IN ('docx','pdf'))",
+      )
     db.exec(`CREATE TABLE IF NOT EXISTS template_owners (
       template_id TEXT PRIMARY KEY REFERENCES templates(id) ON DELETE CASCADE,
       owner_id TEXT NOT NULL);
@@ -710,16 +718,16 @@ export function createQueries(db: AppDatabase) {
   const countTemplate = db.prepare('SELECT COUNT(*) AS count FROM templates WHERE id = ?')
   const insertTemplate = db.prepare(`
     INSERT INTO templates (
-      id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data, kind
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   const listTemplates = db.prepare(`
-    SELECT id, file_name, mime_type, size_bytes, added_at, placeholders, origin
+    SELECT id, file_name, mime_type, size_bytes, added_at, placeholders, origin, kind
     FROM templates
     ORDER BY added_at DESC, id DESC LIMIT ? OFFSET ?
   `)
   const listTemplatesByCategory = db.prepare(`
-    SELECT t.id, t.file_name, t.mime_type, t.size_bytes, t.added_at, t.placeholders, t.origin
+    SELECT t.id, t.file_name, t.mime_type, t.size_bytes, t.added_at, t.placeholders, t.origin, t.kind
     FROM templates t
     JOIN step_templates st ON st.template_id = t.id
     JOIN category_steps cs ON cs.id = st.step_id
@@ -728,7 +736,7 @@ export function createQueries(db: AppDatabase) {
     ORDER BY MIN(cs.sort_order), MIN(st.sort_order), t.id LIMIT ? OFFSET ?
   `)
   const getTemplateFile = db.prepare(
-    'SELECT id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data FROM templates WHERE id = ?',
+    'SELECT id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data, kind FROM templates WHERE id = ?',
   )
   const deleteTemplate = db.prepare('DELETE FROM templates WHERE id = ?')
   const listUsages = db.prepare(`
@@ -1095,15 +1103,16 @@ export function createQueries(db: AppDatabase) {
     },
     replaceTemplate(record: TemplateRecord & { data: Buffer }) {
       db.prepare(
-        'UPDATE templates SET file_name = ?, mime_type = ?, size_bytes = ?, added_at = ?, placeholders = ?, origin = ?, data = ? WHERE id = ?',
+        'UPDATE templates SET file_name = ?, mime_type = ?, size_bytes = ?, added_at = ?, placeholders = ?, origin = ?, data = ?, kind = ? WHERE id = ?',
       ).run(
         record.fileName,
         record.mimeType,
         record.sizeBytes,
         record.addedAt,
-        JSON.stringify(record.placeholders),
+        JSON.stringify(record.kind === 'pdf' ? [] : record.placeholders),
         record.origin,
         record.data,
+        record.kind ?? 'docx',
         record.id,
       )
     },
@@ -1356,9 +1365,10 @@ export function createQueries(db: AppDatabase) {
           record.mimeType,
           record.sizeBytes,
           record.addedAt,
-          JSON.stringify(record.placeholders),
+          JSON.stringify(record.kind === 'pdf' ? [] : record.placeholders),
           record.origin,
           record.data,
+          record.kind ?? 'docx',
         )
         if (stepId && !linkExists.get(stepId, record.id)) {
           const sort = nextSort.get(stepId) as { sortOrder: number }

@@ -59,6 +59,7 @@ export interface AppConfig {
   sessionTtlHours: number
   cookieSecure: boolean
   corsOrigins: string[]
+  maxPdfUploadBytes?: number
   maxUploadBytes: number
   maxZipEntries: number
   maxZipUncompressedBytes: number
@@ -263,6 +264,7 @@ export function loadConfig(): AppConfig {
     sessionTtlHours: numberEnv('SESSION_TTL_HOURS', 12),
     cookieSecure: cookieSecureFromEnv(nodeEnv, process.env.COOKIE_SECURE),
     corsOrigins: corsOriginsFromEnv(nodeEnv),
+    maxPdfUploadBytes: numberEnv('MAX_PDF_UPLOAD_BYTES', 20 * 1024 * 1024),
     maxUploadBytes: numberEnv('MAX_UPLOAD_BYTES', 8 * 1024 * 1024),
     maxZipEntries: numberEnv('MAX_ZIP_ENTRIES', 64),
     maxZipUncompressedBytes: numberEnv('MAX_ZIP_UNCOMPRESSED_BYTES', 32 * 1024 * 1024),

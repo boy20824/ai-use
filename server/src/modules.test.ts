@@ -35,7 +35,9 @@ it('maps old SQLite data twice without changing any old rows, and restores its o
     insert.run('b', 'general-assist', 1, 'B', '{}')
     insert.run('a', 'general-assist', 2, 'A', '{"order":1}')
     insert.run('multi', 'general-assist', 3, 'Shared', '{"order":2,"variantIds":["v1","v2","v1"]}')
-    db.prepare('INSERT INTO templates VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+    db.prepare(
+      'INSERT INTO templates (id, file_name, mime_type, size_bytes, added_at, placeholders, origin, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(
       't',
       'mock.docx',
       'application/octet-stream',

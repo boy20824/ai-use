@@ -7,6 +7,9 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
 import type { AppConfig, SeedPasswords } from './config.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
+import { buildMockPdf } from '../../shared/mockPdfFixture'
+import { templateFilePath } from './files.ts'
+import { existsSync, readFileSync } from 'node:fs'
 import { seedReferenceData } from './seed.ts'
 
 const passwords: SeedPasswords = {
@@ -104,8 +107,8 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   }
 }
 
-async function createApp() {
-  const config = testConfig()
+async function createApp(overrides: Partial<AppConfig> = {}) {
+  const config = testConfig(overrides)
   const db = openDatabase(':memory:')
   migrate(db)
   seedReferenceData(createQueries(db), passwords, samplePath, config.uploadDir, false)
@@ -150,6 +153,273 @@ describe('api', () => {
 
   afterAll(() => {
     rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it('stores Mock PDFs as reference documents, serves exact bytes to viewers, and cascades deletion', async () => {
+    const { app, db } = await createApp()
+    databases.push(db)
+    try {
+      const admin = authFrom(await login(app, 'admin', passwords.admin))
+      const viewer = authFrom(await login(app, 'viewer', passwords.viewer))
+      const category = await app.inject({
+        method: 'POST',
+        url: '/api/categories',
+        ...admin,
+        payload: { name: 'Mock PDF', summary: '', steps: [{ body: 'Mock step', templateIds: [] }] },
+      })
+      expect(category.statusCode).toBe(201)
+      const { id: categoryId, steps } = category.json().category
+      const data = buildMockPdf()
+      const upload = multipart(
+        { stepId: steps[0].id },
+        { name: '作業規定（Mock）.pdf', type: 'application/pdf', data },
+      )
+      const uploaded = await app.inject({
+        method: 'POST',
+        url: '/api/templates',
+        cookies: admin.cookies,
+        headers: { ...admin.headers, ...upload.headers },
+        payload: upload.payload,
+      })
+      expect(uploaded.statusCode).toBe(201)
+      const template = uploaded.json().template
+      expect(template).toMatchObject({
+        kind: 'pdf',
+        fileName: '作業規定（Mock）.pdf',
+        mimeType: 'application/pdf',
+        placeholders: [],
+        sizeBytes: data.length,
+      })
+      expect(uploaded.json().formatNotices).toEqual([])
+      const list = await app.inject({
+        url: `/api/templates?categoryId=${categoryId}`,
+        cookies: viewer.cookies,
+      })
+      expect(list.json().templates).toEqual([
+        expect.objectContaining({ id: template.id, kind: 'pdf', placeholders: [] }),
+      ])
+      for (const query of ['', '?inline=1', '?disposition=inline']) {
+        const url = `/api/templates/${template.id}/file${query}`
+        expect((await app.inject({ url })).statusCode).toBe(401)
+        const file = await app.inject({ url, cookies: viewer.cookies })
+        expect(file.statusCode).toBe(200)
+        expect(file.headers['content-disposition']).toMatch(query ? /^inline;/ : /^attachment;/)
+        expect(file.headers['content-disposition']).toContain(encodeURIComponent(template.fileName))
+        expect(file.headers['content-type']).toBe('application/pdf')
+        expect(file.headers['x-content-type-options']).toBe('nosniff')
+        expect(file.rawPayload).toEqual(Buffer.from(data))
+      }
+      for (const query of [
+        '?inline=0',
+        '?inline=anything',
+        '?disposition=attachment',
+        '?disposition=anything',
+        '?inline=1&inline=1',
+      ]) {
+        expect(
+          (
+            await app.inject({
+              url: `/api/templates/${template.id}/file${query}`,
+              cookies: viewer.cookies,
+            })
+          ).statusCode,
+        ).toBe(400)
+      }
+      const attached = await app.inject({
+        url: `/api/categories/${categoryId}`,
+        cookies: viewer.cookies,
+      })
+      expect(attached.json().category.steps[0].templateIds).toEqual([template.id])
+      expect(
+        (await app.inject({ method: 'DELETE', url: `/api/templates/${template.id}`, ...viewer }))
+          .statusCode,
+      ).toBe(403)
+      expect(
+        (await app.inject({ method: 'DELETE', url: `/api/templates/${template.id}`, ...admin }))
+          .statusCode,
+      ).toBe(204)
+      const unlinked = await app.inject({
+        url: `/api/categories/${categoryId}`,
+        cookies: viewer.cookies,
+      })
+      expect(unlinked.json().category.steps[0].templateIds).toEqual([])
+      expect(
+        (await app.inject({ url: `/api/templates/${template.id}/file`, cookies: viewer.cookies }))
+          .statusCode,
+      ).toBe(404)
+      expect(
+        db
+          .prepare(
+            "SELECT action FROM audit_log WHERE template_id = ? AND result = 'allowed' ORDER BY id",
+          )
+          .all(template.id),
+      ).toEqual([{ action: 'upload' }, { action: 'delete' }])
+    } finally {
+      await app.close()
+    }
+  })
+
+  it.each([64, 2048])(
+    'rejects incorrect PDF magic, extension and MIME, enforces per-kind limits, and counts PDF quota bytes (Word cap %i)',
+    async (maxUploadBytes) => {
+      const data = buildMockPdf()
+      const config = testConfig({
+        maxUploadBytes,
+        maxPdfUploadBytes: data.length,
+        templateBytesGlobal: data.length,
+      })
+      const db = openDatabase(':memory:')
+      migrate(db)
+      databases.push(db)
+      seedReferenceData(createQueries(db), passwords, samplePath, config.uploadDir, false)
+      const app = await buildApp(db, config)
+      try {
+        const admin = authFrom(await login(app, 'admin', passwords.admin))
+        const post = async (name: string, type: string, bytes: Uint8Array) => {
+          const file = multipart({}, { name, type, data: bytes })
+          return app.inject({
+            method: 'POST',
+            url: '/api/templates',
+            cookies: admin.cookies,
+            headers: { ...admin.headers, ...file.headers },
+            payload: file.payload,
+          })
+        }
+        for (const [name, type, bytes] of [
+          ['Mock.pdf', 'application/pdf', new TextEncoder().encode('Mock non-PDF')],
+          ['Mock.pdf', 'application/pdf', new TextEncoder().encode(' %PDF-1.4')],
+          ['Mock.pdf', 'text/plain', data],
+          ['Mock.pdf', 'application/octet-stream', data],
+          ['Mock.docx', 'application/pdf', data],
+          ['Mock.txt', 'application/pdf', data],
+        ] as const) {
+          const rejected = await post(name, type, bytes)
+          expect(rejected.statusCode).toBe(400)
+          expect(rejected.json().message).toMatch(/PDF|MIME|docx/)
+        }
+        const tooLarge = await post(
+          'Mock.pdf',
+          'application/pdf',
+          Buffer.concat([data, Buffer.from('Mock')]),
+        )
+        expect(tooLarge.statusCode).toBe(413)
+        expect(tooLarge.json().message).toContain('大小')
+        // PDF may exceed the Word cap, but still uses a random .pdf storage path.
+        const accepted = await post('Mock.pdf', 'application/pdf', data)
+        expect(accepted.statusCode).toBe(201)
+        const id = accepted.json().template.id
+        expect(readFileSync(templateFilePath(config.uploadDir, id, 'pdf'))).toEqual(
+          Buffer.from(data),
+        )
+        expect(existsSync(templateFilePath(config.uploadDir, id))).toBe(false)
+        expect((await post('Mock.pdf', 'application/pdf', data)).statusCode).toBe(429)
+      } finally {
+        await app.close()
+      }
+    },
+  )
+
+  it('replaces reference bytes only with the same kind and keeps legacy Word paths', async () => {
+    const { app, db } = await createApp()
+    databases.push(db)
+    try {
+      const admin = authFrom(await login(app, 'admin', passwords.admin))
+      const send = async (
+        method: 'POST' | 'PUT',
+        url: string,
+        name: string,
+        type: string,
+        data: Uint8Array,
+      ) => {
+        const file = multipart({}, { name, type, data })
+        return app.inject({
+          method,
+          url,
+          cookies: admin.cookies,
+          headers: { ...admin.headers, ...file.headers },
+          payload: file.payload,
+        })
+      }
+      const data = buildMockPdf()
+      const pdf = await send('POST', '/api/templates', 'Mock.pdf', 'application/pdf', data)
+      const wordMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      const docx = await send(
+        'POST',
+        '/api/templates',
+        'Mock.docx',
+        wordMime,
+        buildDocx('{{MockField}}'),
+      )
+      expect(pdf.statusCode).toBe(201)
+      expect(docx.statusCode).toBe(201)
+      expect(docx.json().template).toMatchObject({ kind: 'docx', placeholders: ['MockField'] })
+      const pdfUrl = `/api/templates/${pdf.json().template.id}/file`
+      const docxUrl = `/api/templates/${docx.json().template.id}/file`
+      expect((await send('PUT', pdfUrl, 'Mock.docx', wordMime, buildDocx('Mock'))).statusCode).toBe(
+        400,
+      )
+      expect((await send('PUT', docxUrl, 'Mock.pdf', 'application/pdf', data)).statusCode).toBe(400)
+      const replacement = Buffer.concat([data, Buffer.from('% Mock replacement\n')])
+      expect(
+        (await send('PUT', pdfUrl, 'Mock-new.pdf', 'application/pdf', replacement)).statusCode,
+      ).toBe(200)
+      expect((await app.inject({ url: pdfUrl, cookies: admin.cookies })).rawPayload).toEqual(
+        replacement,
+      )
+      expect(
+        (await send('PUT', docxUrl, 'Mock-new.docx', wordMime, buildDocx('{{MockNew}}')))
+          .statusCode,
+      ).toBe(200)
+      const file = await app.inject({ url: docxUrl, cookies: admin.cookies })
+      expect(file.statusCode).toBe(200)
+      expect(file.headers['content-type']).toBe(wordMime)
+      expect(file.headers['x-content-type-options']).toBe('nosniff')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('adds kind to existing SQLite rows without altering legacy Word bytes or links', () => {
+    const db = openDatabase(':memory:')
+    migrate(db)
+    databases.push(db)
+    const q = createQueries(db)
+    const data = Buffer.from(buildDocx('{{MockField}}'))
+    q.insertTemplate({
+      kind: 'docx',
+      id: 'mock-legacy',
+      fileName: 'Mock.docx',
+      mimeType: 'application/zip',
+      sizeBytes: data.length,
+      addedAt: 'Mock',
+      placeholders: ['MockField'],
+      origin: 'upload',
+      usages: [],
+      data,
+    })
+    q.createCategory(
+      {
+        id: 'mock-category',
+        code: '',
+        name: 'Mock',
+        summary: '',
+        updatedAt: 'Mock',
+        steps: [{ id: 'mock-step', body: 'Mock', templateIds: ['mock-legacy'] }],
+      },
+      'Mock',
+    )
+    db.exec('ALTER TABLE templates DROP COLUMN kind')
+    migrate(db)
+    migrate(db)
+    expect(createQueries(db).getTemplateFile('mock-legacy')).toMatchObject({
+      kind: 'docx',
+      data,
+      placeholders: ['MockField'],
+    })
+    expect(createQueries(db).getCategory('mock-category')!.steps[0]!.templateIds).toEqual([
+      'mock-legacy',
+    ])
+    expect(() => db.prepare('UPDATE templates SET kind = ?').run('other')).toThrow()
   })
 
   it('limits requests per IP across routes and resets after one minute', async () => {
