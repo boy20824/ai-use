@@ -172,6 +172,11 @@ const categoryBodySchema = z
   })
   .strict()
 
+const categoryUpdateSchema = categoryBodySchema
+  .partial({ name: true })
+  .extend({ builtinFields: z.object({ 姓名: z.boolean() }).strict().optional() })
+  .refine((data) => data.name !== undefined || data.builtinFields !== undefined)
+
 const personNameSchema = z
   .string()
   .trim()
@@ -411,7 +416,11 @@ function templateListError(queries: AppQueries, steps: StepInput[]): string | nu
   return null
 }
 
-function categoryExtras(queries: AppQueries, id: string, data: z.infer<typeof categoryBodySchema>) {
+function categoryExtras(
+  queries: AppQueries,
+  id: string,
+  data: z.infer<typeof categoryUpdateSchema>,
+) {
   const existing = queries.getCategory(id)
   const variants = (data.variants ?? existing?.variants ?? []).map((v) => ({
     ...v,
@@ -979,12 +988,13 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       if (!user) return
       const id = categoryIdSchema.safeParse(requestId(request))
       if (!id.success) return fail(reply, 400, 'invalid-input', '輸入格式不正確。')
-      const parsed = categoryBodySchema.safeParse(request.body)
+      const parsed = categoryUpdateSchema.safeParse(request.body)
       if (!parsed.success)
         return fail(reply, 400, 'invalid-input', categoryInputMessage(parsed.error))
       const existing = queries.getCategory(id.data)
       if (!existing) return fail(reply, 404, 'not-found', '找不到這個勤務流程。')
-      if (queries.nameTaken(parsed.data.name, id.data)) {
+      const name = parsed.data.name ?? existing.name
+      if (queries.nameTaken(name, id.data)) {
         return fail(reply, 409, 'conflict', '這個類別名稱已經存在。')
       }
       const steps = normalizeSteps(queries, id.data, parsed.data.steps ?? existing.steps)
@@ -997,11 +1007,12 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
         {
           id: id.data,
           code: existing.code,
-          name: parsed.data.name,
+          name,
           summary: parsed.data.summary ?? existing.summary,
           updatedAt: stamp(),
           steps,
           ...extras,
+          builtinFields: parsed.data.builtinFields,
         },
         user.username,
       )

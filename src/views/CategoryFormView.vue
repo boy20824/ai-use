@@ -82,6 +82,7 @@ const group = ref<CategoryGroup>('criminal')
 const wizard = ref(1)
 const variants = ref<Variant[]>([])
 const fields = ref<FieldDef[]>([])
+const builtinName = ref(false)
 const sopScope = ref('base')
 // Explicit base definitions survive without templates. Legacy definitions retain
 // their exact base-template classification; never infer ownership from labels.
@@ -104,38 +105,45 @@ const baseTemplateFields = computed(() =>
 const legacyFields = computed(() =>
   fields.value.filter(
     (field) =>
+      fieldKey(field) !== '日期' &&
       field.scope !== 'base' &&
       existing.value?.fields?.some((saved) => saved.id === field.id) &&
       !baseTemplateFields.value.includes(field.key),
   ),
 )
 const manualFields = computed(() =>
-  fields.value.filter((field) => !legacyFields.value.includes(field)),
+  fields.value.filter((field) => fieldKey(field) !== '日期' && !legacyFields.value.includes(field)),
 )
 const legacyIssues = computed(() => fieldMappingIssues(legacyFields.value, attachedTemplates()))
-const scenarioKeys = computed(() =>
-  inputFields(
-    attachedTemplates(
-      new Set(
-        existing.value?.modules?.flatMap((module) => module.steps.map((ref) => ref.stepId)) ?? [],
-      ),
-    ),
-  ),
-)
-function removeField(field: FieldDef) {
-  // A shared base/scenario definition is still an explicit legacy mapping.
+function removeField(key: string, field?: FieldDef) {
+  if (key === '日期' || !session.canEditCategory) return
+  const attachedStepIds = isEdit.value
+    ? new Set([
+        ...(existing.value?.baseSteps ?? []).map((ref) => ref.stepId),
+        ...(existing.value?.modules ?? []).flatMap((module) =>
+          module.steps.map((ref) => ref.stepId),
+        ),
+      ])
+    : undefined
+  const usedBy = new Set(
+    attachedTemplates(attachedStepIds)
+      .filter((template) => template.placeholders.some((placeholder) => placeholder.trim() === key))
+      .map((template) => template.id),
+  ).size
   if (
-    existing.value?.fields?.some((saved) => saved.id === field.id) &&
-    scenarioKeys.value.includes(field.key)
+    usedBy &&
+    !window.confirm(`有 ${usedBy} 份範本使用 {{${key}}}，移除後會改成在使用它的步驟內填寫`)
   )
     return
-  fields.value = fields.value.filter((entry) => entry !== field)
+  fields.value = fields.value.filter((entry) => (field ? entry !== field : fieldKey(entry) !== key))
+  if (key === '姓名') builtinName.value = false
 }
 const summary = ref('')
 const steps = ref<DraftStep[]>([])
 const populated = ref(false)
 let loadedCategoryId = ''
 let loadedFields = '[]'
+let loadedBuiltinName = false
 const saving = ref(false)
 const formError = ref('')
 const formNotice = ref('')
@@ -170,8 +178,11 @@ function fillFrom(category: CaseCategory) {
   // Step/module saves reload the same category while manual definitions are still unsaved.
   if (loadedCategoryId !== category.id || JSON.stringify(fields.value) === loadedFields)
     fields.value = incomingFields
+  if (loadedCategoryId !== category.id || builtinName.value === loadedBuiltinName)
+    builtinName.value = category.builtinFields?.['姓名'] === true
   loadedCategoryId = category.id
   loadedFields = JSON.stringify(incomingFields)
+  loadedBuiltinName = category.builtinFields?.['姓名'] === true
   summary.value = category.summary
   steps.value = category.steps.map((step) => ({
     key: step.id,
@@ -213,6 +224,7 @@ watch(
       group.value = 'criminal'
       variants.value = []
       fields.value = []
+      builtinName.value = false
       wizard.value = 1
       summary.value = ''
       steps.value = []
@@ -367,6 +379,7 @@ async function submit() {
     fields: mappedFields,
     summary: summary.value.trim(),
     steps: prepared,
+    ...(isEdit.value ? { builtinFields: { 姓名: builtinName.value } } : {}),
   }
   if (!input.name) {
     formError.value = '請填寫流程名稱。'
@@ -646,6 +659,26 @@ async function submit() {
       </fieldset>
       <fieldset v-if="sopScope === 'base'" class="mt-6" aria-label="基本 SOP 細項欄位">
         <legend class="font-semibold">基本 SOP 細項欄位</legend>
+        <div class="mt-3 flex flex-wrap items-center gap-3" aria-label="系統日期欄位">
+          <span>日期</span>
+          <button type="button" class="btn-ghost text-sm" disabled>移除欄位</button>
+          <span class="text-xs text-ink-muted">日期為系統必要欄位</span>
+        </div>
+        <div
+          v-if="builtinName && !fields.some((field) => fieldKey(field) === '姓名')"
+          class="mt-3 flex items-center gap-3"
+          aria-label="內建姓名欄位"
+        >
+          <span>姓名</span>
+          <code v-text="'{{姓名}}'" />
+          <button
+            type="button"
+            class="btn-ghost text-sm text-tone-danger-ink"
+            @click="removeField('姓名')"
+          >
+            移除欄位
+          </button>
+        </div>
         <div v-for="field in manualFields" :key="field.id" class="mt-3 grid gap-2 sm:grid-cols-4">
           <input
             v-model="field.name"
@@ -673,11 +706,8 @@ async function submit() {
           <button
             type="button"
             class="btn-ghost text-sm text-tone-danger-ink"
-            :disabled="
-              !!existing?.fields?.some((saved) => saved.id === field.id) &&
-              scenarioKeys.includes(field.key)
-            "
-            @click="removeField(field)"
+            :disabled="fieldKey(field) === '日期'"
+            @click="removeField(fieldKey(field), field)"
           >
             移除欄位
           </button>
@@ -700,7 +730,7 @@ async function submit() {
           範本欄位寫法：{{
             fieldKeyHint
           }}。已儲存的欄位鍵固定，修改名稱只改顯示文字。手動新增只用於基本 SOP；基本 SOP
-          手動欄位不需先關聯範本，相同欄位鍵共用基本值。與情境共用的既有定義保留，不提供移除。只儲存欄位定義。
+          手動欄位不需先關聯範本，相同欄位鍵共用基本值。日期為系統必要欄位；其他欄位若仍被範本使用，確認移除後改在使用它的步驟內填寫。只儲存欄位定義。
         </p>
       </fieldset>
       <p v-if="sopScope !== 'base'" class="mt-4 text-sm text-ink-muted">
@@ -715,6 +745,13 @@ async function submit() {
           <li v-for="field in legacyFields" :key="field.id">
             {{ field.name ?? field.key }} · <code v-text="'{{' + field.key + '}}'" /> ·
             {{ field.type }}
+            <button
+              type="button"
+              class="btn-ghost text-sm text-tone-danger-ink"
+              @click="removeField(fieldKey(field), field)"
+            >
+              移除欄位
+            </button>
           </li>
         </ul>
         <p

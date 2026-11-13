@@ -182,6 +182,7 @@ export interface StepInput extends StepDetails {
 }
 
 export interface CategoryInput {
+  builtinFields?: Record<string, boolean>
   group?: CategoryGroup
   variants?: VariantRecord[]
   fields?: FieldDefRecord[]
@@ -1315,6 +1316,12 @@ export function createQueries(db: AppDatabase) {
           input.id,
         )
         if (result.changes === 0) return false
+        if (input.builtinFields?.['姓名'] !== undefined)
+          db.prepare(
+            `INSERT INTO category_builtin_fields(category_id, field_key, enabled)
+            VALUES (?, '姓名', ?)
+            ON CONFLICT(category_id, field_key) DO UPDATE SET enabled = excluded.enabled`,
+          ).run(input.id, input.builtinFields['姓名'] ? 1 : 0)
         const parallelChanges = input.steps.filter((step) => {
           const previous = db
             .prepare(

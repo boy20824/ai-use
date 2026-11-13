@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { fieldMappingIssues } from '@/workbench/fieldMapping'
 import StepFields from '@/components/StepFields.vue'
+import StepDateField from '@/components/StepDateField.vue'
 import ReferenceDocuments from '@/components/ReferenceDocuments.vue'
 import WorkbenchStepFields from '@/components/WorkbenchStepFields.vue'
 import PhotoBlockFields from '@/components/PhotoBlockFields.vue'
@@ -59,6 +60,7 @@ const templates = useTemplateStore()
 const session = useSessionStore()
 const workbench = ref<HTMLElement | null>(null)
 const values = ref<Record<string, string>>(initialDraftValues())
+const stepDateOverrides = ref<Record<string, string>>({})
 const defaultedFields = new Set<string>()
 const draftGeneration = ref(0)
 const photoDrafts = ref<PhotoDrafts>({})
@@ -169,24 +171,41 @@ function localFields(stepId: string) {
 function setField(key: string, value: string) {
   values.value[key] = value
 }
-function stepMissing(stepId: string) {
-  return missingContextFields(contextsFor(stepId), values.value)
+function setStepDateOverride(stepId: string, value: string | undefined) {
+  if (value === undefined) delete stepDateOverrides.value[stepId]
+  else stepDateOverrides.value[stepId] = value
 }
-async function focusField(key: string) {
+function stepMissing(stepId: string) {
+  return missingContextFields(contextsFor(stepId), values.value, stepDateOverrides.value)
+}
+async function focusField(key: string, stepId?: string) {
   const name = key === '日期格式' ? '日期' : key
+  const overrideStep = name === '日期' && stepId && Object.hasOwn(stepDateOverrides.value, stepId)
   // Switch to the first workflow occurrence even when called from the overview/sidebar.
   const inBase = fieldNames.value.includes(name)
   const step = visibleSteps.value.find((step) => localFields(step.id).includes(name))
-  if (inBase || step) tab.value = 'steps'
+  if (inBase || step || overrideStep) tab.value = 'steps'
   await nextTick()
-  const field = [
-    ...(workbench.value?.querySelectorAll<HTMLElement>('[data-field-key]') ?? []),
-  ].find((el) => el.dataset.fieldKey === name)
+  const field = overrideStep
+    ? [...(workbench.value?.querySelectorAll<HTMLElement>('[data-step-date-key]') ?? [])].find(
+        (el) => el.dataset.stepDateKey === `step-${stepId}`,
+      )
+    : [...(workbench.value?.querySelectorAll<HTMLElement>('[data-field-key]') ?? [])].find(
+        (el) => el.dataset.fieldKey === name,
+      )
   for (let ancestor = field?.parentElement; ancestor; ancestor = ancestor.parentElement) {
     if (ancestor instanceof HTMLDetailsElement) ancestor.open = true
   }
   field?.scrollIntoView({ block: 'center' })
-  field?.querySelector<HTMLElement>('input, select')?.focus({ preventScroll: true })
+  field
+    ?.querySelector<HTMLElement>(overrideStep ? 'select' : 'input, select')
+    ?.focus({ preventScroll: true })
+}
+function focusOverviewField(key: string) {
+  const context = checkedOverview.value.find((context) =>
+    missingContextFields([context], values.value, stepDateOverrides.value).includes(key),
+  )
+  return focusField(key, context?.stepId ?? undefined)
 }
 function canGenerateStep(stepId: string) {
   return !busy.value && photoProcessing.value.size === 0 && stepMissing(stepId).length === 0
@@ -252,6 +271,7 @@ function clearDraft() {
   printStep.value = null
   defaultedFields.clear()
   values.value = initialDraftValues()
+  stepDateOverrides.value = {}
   draftGeneration.value++
   photoDrafts.value = {}
   photoProcessing.value.clear()
@@ -284,7 +304,7 @@ function templatesFor(step: CategoryStep) {
 async function renderOne(context: GenerationContext) {
   await photoMetadataLoading
   const id = context.templateId
-  const filled = filledContext(context, values.value)
+  const filled = filledContext(context, values.value, stepDateOverrides.value)
   if (!filled) throw new Error('invalid-date')
   const template = templates.byId(id)
   if (!template || template.kind === 'pdf') throw new Error('missing-template')
@@ -444,7 +464,9 @@ const overviewGroups = computed(() => {
       ),
     }))
 })
-const overviewMissing = computed(() => missingContextFields(checkedOverview.value, values.value))
+const overviewMissing = computed(() =>
+  missingContextFields(checkedOverview.value, values.value, stepDateOverrides.value),
+)
 const canGenerateOverview = computed(
   () =>
     checkedOverview.value.length > 0 &&
@@ -879,6 +901,7 @@ onUnmounted(clearDraft)
                 </p>
                 <WorkbenchStepFields
                   :fields="localFields(step.id)"
+                  :date-override="stepDateOverrides[step.id]"
                   :shared-labels="sharedLabels"
                   :values="values"
                   :definitions="category.fields"
@@ -890,7 +913,8 @@ onUnmounted(clearDraft)
                   :message="messageStepId === step.id ? message : ''"
                   :message-tone="messageTone"
                   @update="setField"
-                  @focus-field="focusField"
+                  @update-date-override="setStepDateOverride(step.id, $event)"
+                  @focus-field="focusField($event, step.id)"
                   @generate="(id) => produceOne(step.id, id)"
                   @generate-all="produceStep(step.id, step.templateIds, index)"
                 >
@@ -1028,7 +1052,7 @@ onUnmounted(clearDraft)
                 共用欄位只填一次，步驟專屬欄位分開填寫。日期與範本步驟共用，預設為台北今天。{{
                   yearToken
                 }}、{{ monthToken }}、{{ dayToken }}、{{ dateToken }}、{{ dateSlashToken }}
-                都跟這個日期走，不會另外出現輸入欄。
+                預設跟這個日期走，可在本步驟欄位切換成不同日期。
               </p>
               <p v-if="overviewFields.length === 0" class="mt-4 text-sm text-ink-muted">
                 勾選文件後，這裡會列出要填的欄位。
@@ -1062,6 +1086,17 @@ onUnmounted(clearDraft)
                 class="mt-4"
               >
                 <p class="text-sm font-medium">{{ group.context.stepTitle }}：本步驟欄位</p>
+                <StepDateField
+                  v-if="
+                    group.context.stepId !== null &&
+                    inputFields(
+                      checkedOverview.filter((item) => item.stepId === group.context.stepId),
+                    ).includes('日期')
+                  "
+                  :shared-date="dateValue"
+                  :override="stepDateOverrides[group.context.stepId]"
+                  @update="setStepDateOverride(group.context.stepId!, $event)"
+                />
                 <StepFields
                   :fields="group.fields"
                   :shared-labels="sharedLabels"
@@ -1108,7 +1143,7 @@ onUnmounted(clearDraft)
                       :key="key"
                       type="button"
                       class="focus-control mr-2 underline"
-                      @click="focusField(key)"
+                      @click="focusOverviewField(key)"
                     >
                       {{ key }}
                     </button>
@@ -1186,6 +1221,7 @@ onUnmounted(clearDraft)
               </button>
               <WorkbenchStepFields
                 :fields="localFields(step.id)"
+                :date-override="stepDateOverrides[step.id]"
                 :shared-labels="sharedLabels"
                 :values="values"
                 :definitions="category.fields"
@@ -1197,7 +1233,8 @@ onUnmounted(clearDraft)
                 :message="messageStepId === step.id ? message : ''"
                 :message-tone="messageTone"
                 @update="setField"
-                @focus-field="focusField"
+                @update-date-override="setStepDateOverride(step.id, $event)"
+                @focus-field="focusField($event, step.id)"
                 @generate="(id) => produceOne(step.id, id)"
                 @generate-all="
                   produceStep(

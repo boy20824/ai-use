@@ -2,13 +2,16 @@
 import { computed } from 'vue'
 import ReferenceDocuments from './ReferenceDocuments.vue'
 import StepFields from './StepFields.vue'
+import StepDateField from './StepDateField.vue'
 import type { FieldDef } from '@/types/domain'
 import type { OverviewTemplate } from '@/workbench/overview'
+import { inputFields } from '@/workbench/overview'
 import { displayFileName } from '@/utils/fileName'
 const props = defineProps<{
   sharedLabels?: Record<string, string>
   fields: string[]
   values: Record<string, string>
+  dateOverride?: string
   definitions?: FieldDef[]
   prefix: string
   missing: string[]
@@ -22,6 +25,7 @@ const documents = computed(() => props.templates.filter((item) => item.kind !== 
 const references = computed(() => props.templates.filter((item) => item.kind === 'pdf'))
 const emit = defineEmits<{
   update: [key: string, value: string]
+  updateDateOverride: [value: string | undefined]
   generate: [templateId: string]
   generateAll: []
   focusField: [key: string]
@@ -29,11 +33,22 @@ const emit = defineEmits<{
 </script>
 <template>
   <section
-    v-if="fields.length || documents.some((item) => photoCells?.[item.id])"
+    v-if="
+      fields.length ||
+      inputFields(documents).includes('日期') ||
+      documents.some((item) => photoCells?.[item.id])
+    "
     aria-label="本步驟欄位"
     class="mt-3"
   >
     <h4 class="text-sm font-semibold text-ink">本步驟欄位</h4>
+    <StepDateField
+      v-if="inputFields(documents).includes('日期')"
+      :data-step-date-key="prefix"
+      :shared-date="values['日期'] ?? ''"
+      :override="dateOverride"
+      @update="emit('updateDateOverride', $event)"
+    />
     <StepFields
       :fields="fields"
       :values="values"

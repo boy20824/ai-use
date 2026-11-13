@@ -9,10 +9,16 @@ import type { CaseCategory } from '@/types/domain'
 const mocks = vi.hoisted(() => ({
   templates: [] as TemplateSummary[],
   create: vi.fn(async () => ({ id: 'created' })),
+  update: vi.fn(async () => {}),
   byId: vi.fn<() => CaseCategory | undefined>(() => undefined),
 }))
 vi.mock('@/stores/categories', () => ({
-  useCategoryStore: () => ({ ready: true, byId: mocks.byId, create: mocks.create }),
+  useCategoryStore: () => ({
+    ready: true,
+    byId: mocks.byId,
+    create: mocks.create,
+    update: mocks.update,
+  }),
 }))
 vi.mock('@/stores/templates', () => ({
   useTemplateStore: () => ({
@@ -20,6 +26,7 @@ vi.mock('@/stores/templates', () => ({
       return mocks.templates
     },
     byId: (id: string) => mocks.templates.find((item) => item.id === id),
+    reload: async () => {},
   }),
 }))
 vi.mock('@/stores/session', () => ({
@@ -36,6 +43,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   mocks.templates = []
   mocks.create.mockClear()
+  mocks.update.mockClear()
   mocks.byId.mockReset()
   if (execCommandDescriptor) Object.defineProperty(document, 'execCommand', execCommandDescriptor)
   else Reflect.deleteProperty(document, 'execCommand')
@@ -235,3 +243,100 @@ it('offers PDF reference attachments in the step picker with PDF upload accepted
   expect(checkbox.checked).toBe(true)
   expect(host.querySelector('input[type="file"]')?.getAttribute('accept')).toContain('.pdf')
 })
+
+it.each(['manual', 'builtin', 'both'])(
+  'locks the system date and confirms moving %s name from base to using steps',
+  async (mode) => {
+    mocks.byId.mockReturnValue({
+      id: 'existing',
+      name: 'Mock removal',
+      summary: '',
+      updatedAt: '',
+      templateCount: 3,
+      builtinFields: { 姓名: mode !== 'manual' },
+      fields: [
+        { id: 'date', key: '日期', type: 'text', scope: 'base' },
+        ...(mode !== 'builtin'
+          ? [
+              {
+                id: 'name',
+                key: '姓名',
+                name: 'Mock 員警姓名',
+                type: 'text' as const,
+                scope: 'base' as const,
+              },
+            ]
+          : []),
+        { id: 'unused', key: 'MockUnused', type: 'text', scope: 'base' },
+      ],
+      steps: [
+        { id: 'base', body: 'Mock base', templateIds: ['doc1', 'pdf'] },
+        { id: 'scenario', body: 'Mock scenario', templateIds: ['doc1', 'doc2'] },
+        { id: 'unused-step', body: 'Mock unreferenced', templateIds: ['unattached'] },
+      ],
+      baseSteps: [{ stepId: 'base', sortOrder: 0 }],
+      modules: [
+        {
+          id: 'module',
+          categoryId: 'existing',
+          name: 'Mock module',
+          sortOrder: 0,
+          steps: [{ stepId: 'scenario', sortOrder: 0 }],
+        },
+      ],
+    })
+    mocks.templates = ['doc1', 'doc2', 'pdf', 'unattached'].map((id) => ({
+      id,
+      kind: id === 'pdf' ? 'pdf' : 'docx',
+      fileName: `${id}.mock`,
+      mimeType: 'mock/docx',
+      sizeBytes: 0,
+      addedAt: '',
+      origin: 'upload',
+      usages: [],
+      placeholders: ['姓名', '姓名'],
+    }))
+    await mountForm('/categories/existing/edit')
+    await submit()
+    await submit()
+    const dateRow = host.querySelector('[aria-label="系統日期欄位"]')!
+    expect(dateRow.textContent).toContain('日期為系統必要欄位')
+    expect(dateRow.querySelector('button')!.disabled).toBe(true)
+    expect(host.querySelectorAll('[aria-label="系統日期欄位"]')).toHaveLength(1)
+    const removeName = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) =>
+        button.textContent?.trim() === '移除欄位' &&
+        button.parentElement?.textContent?.includes('{{姓名}}'),
+    )!
+    expect(removeName.disabled).toBe(false)
+    const confirm = vi.fn(() => false)
+    vi.stubGlobal('confirm', confirm)
+    removeName.click()
+    await nextTick()
+    expect(confirm).toHaveBeenCalledWith(
+      '有 2 份範本使用 {{姓名}}，移除後會改成在使用它的步驟內填寫',
+    )
+    expect(removeName.isConnected).toBe(true)
+    confirm.mockReturnValue(true)
+    removeName.click()
+    await nextTick()
+    expect(removeName.isConnected).toBe(false)
+    const unused = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) =>
+        button.textContent?.trim() === '移除欄位' &&
+        button.parentElement?.textContent?.includes('{{MockUnused}}'),
+    )!
+    unused.click()
+    await nextTick()
+    expect(confirm).toHaveBeenCalledTimes(2)
+    await submit()
+    expect(mocks.update).toHaveBeenCalledWith(
+      'existing',
+      expect.objectContaining({
+        builtinFields: { 姓名: false },
+        fields: [expect.objectContaining({ key: '日期' })],
+      }),
+    )
+    expect(JSON.stringify(mocks.update.mock.calls)).not.toMatch(/stepDateOverrides|values/)
+  },
+)

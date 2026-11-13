@@ -1209,6 +1209,47 @@ it('returns built-in settings on category APIs, permits manual name and base fie
     姓名: true,
   })
   expect(
-    (await request(app, user, 'PATCH', url, { builtinFields: { 姓名: true } })).statusCode,
+    (await request(app, user, 'PATCH', url, { builtinFields: { 日期: false } })).statusCode,
   ).toBe(400)
+  const viewer = await login(app, 'viewer')
+  const disableName = { builtinFields: { 姓名: false } }
+  expect((await request(app, viewer, 'PATCH', url, disableName)).statusCode).toBe(403)
+  expect(
+    (
+      await app.inject({
+        method: 'PATCH',
+        url,
+        payload: disableName,
+        headers: {
+          origin,
+          'x-csrf-token': viewer.headers['x-csrf-token'],
+          cookie: `csrf=${viewer.cookies.csrf}`,
+        },
+      })
+    ).statusCode,
+  ).toBe(401)
+  expect((await request(app, user, 'PATCH', url, disableName)).statusCode).toBe(200)
+  expect((await request(app, user, 'GET', url)).json().category.builtinFields).toEqual({
+    姓名: false,
+  })
+  expect(
+    db
+      .prepare(
+        'SELECT enabled FROM category_builtin_fields WHERE category_id = ? AND field_key = ?',
+      )
+      .get(c.id, '姓名'),
+  ).toEqual({ enabled: 0 })
+  expect(
+    db
+      .prepare(
+        "SELECT action, actor_username AS actor FROM audit_log WHERE category_id = ? AND action = 'category_update' ORDER BY id DESC LIMIT 1",
+      )
+      .get(c.id),
+  ).toEqual({ action: 'category_update', actor: 'clerk' })
+  expect(
+    (await request(app, admin, 'PATCH', url, { builtinFields: { 姓名: true } })).statusCode,
+  ).toBe(200)
+  expect((await request(app, admin, 'GET', url)).json().category.builtinFields).toEqual({
+    姓名: true,
+  })
 })

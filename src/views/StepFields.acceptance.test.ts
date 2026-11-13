@@ -285,7 +285,18 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   await input(host.querySelector('[aria-label="欄位名稱"]')!, 'Mock X label')
   expect(host.querySelector('code')?.textContent).toBe('{{X}}')
   // The exact X mapping is used by both base and scenario documents.
-  expect(button('移除欄位').disabled).toBe(true)
+  const remove = button('移除欄位', host.querySelector('[aria-label="欄位名稱"]')!.parentElement!)
+  expect(remove.disabled).toBe(false)
+  const confirm = vi.fn(() => false)
+  vi.stubGlobal('confirm', confirm)
+  remove.click()
+  await settle()
+  expect(confirm).toHaveBeenCalledWith('有 2 份範本使用 {{X}}，移除後會改成在使用它的步驟內填寫')
+  expect(host.querySelector('[aria-label="欄位名稱"]')).not.toBeNull()
+  confirm.mockReturnValue(true)
+  remove.click()
+  await settle()
+  expect(host.querySelector('[aria-label="欄位名稱"]')).toBeNull()
   snapshot('maintainer-reopened')
   await submit()
   expect(saved.fields?.find((field) => field.id === 'legacy-y')).toEqual({
@@ -295,7 +306,8 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
     type: 'number',
   })
   await settle()
-  expect(host.querySelector('.basic-data-row')?.textContent).toContain('X')
+  expect(saved.fields?.some((field) => field.key === 'X')).toBe(false)
+  expect(host.querySelector('.basic-data-row')?.textContent).not.toContain('Mock X label')
   expect(host.querySelector('.basic-data-row')?.textContent).not.toContain('Mock Y label')
   expect(host.querySelector('#step-d-0')).toBeNull()
   await check(host.querySelector('[aria-label="情境模組選擇"] input[value="m"]')!, true)
@@ -303,7 +315,7 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   expect(row('D Mock').querySelector('input[type="number"]')).not.toBeNull()
   expect(host.querySelector('#step-f-0')).toBeNull()
   expect(host.querySelector('.basic-data-row input[placeholder="請輸入姓名"]')).toBeNull()
-  await field(host.querySelector('.basic-data-row')!, 'Mock X label', 'Mock Shared X')
+  await field(row('Base Mock'), 'X', 'Mock Shared X')
   const dates = host.querySelectorAll('.basic-data-row select')
   for (const [i, value] of ['115', '11', '7'].entries()) {
     ;(dates[i] as HTMLSelectElement).value = value

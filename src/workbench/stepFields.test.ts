@@ -175,3 +175,33 @@ it('omits 案次編號 from base fields, context values and missing prompts', ()
   expect(missingContextFields(contexts, { 案次編號: '' })).toEqual([])
   expect(contextValues(contexts[0]!, { 案次編號: '舊值（Mock）' })).toEqual({})
 })
+
+it('renders all ROC tags from the step override in actual DOCX and ZIP while other steps follow the top date (addon 4–6)', async () => {
+  const { contexts } = fixture()
+  const draft = { ...values, 日期: '115/11/13' }
+  const overrides: Record<string, string> = { s2: '115/10/01' }
+  const source = buildDocx({
+    document: wordDocument(
+      paragraph(run(kaiBoldRPr, '{{日期}}|{{日期_民國}}|{{年}}|{{月}}|{{日}}')),
+    ),
+  })
+  const selected = contexts.filter((c) => ['a', 'b'].includes(c.templateId))
+  const files = selected.map((context) => ({
+    name: `${context.stepId}.docx`,
+    data: renderDocx(source, filledContext(context, draft, overrides)!),
+  }))
+  const zip = await JSZip.loadAsync(await (await zipGeneratedFiles(files)).arrayBuffer())
+  const text = async (name: string) =>
+    new PizZip(await zip.file(name)!.async('uint8array')).file('word/document.xml')!.asText()
+  expect(await text('s2.docx')).toContain('115年10月1日|115/10/1|115|10|1')
+  expect(await text('s5.docx')).toContain('115年11月13日|115/11/13|115|11|13')
+  overrides.s2 = '115/2/30'
+  expect(missingContextFields(selected, draft, overrides)).toEqual(['日期格式'])
+  expect(filledContext(selected[0]!, draft, overrides)).toBeNull()
+  expect(missingContextFields([selected[1]!], draft, overrides)).toEqual([])
+  overrides.s2 = ''
+  expect(missingContextFields([selected[0]!], draft, overrides)).toEqual(['日期'])
+  delete overrides.s2
+  expect(filledContext(selected[0]!, draft, overrides)!['日期_民國']).toBe('115/11/13')
+  expect(draft['日期']).toBe('115/11/13')
+})

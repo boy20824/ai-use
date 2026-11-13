@@ -70,6 +70,7 @@ export interface CategoryStepInput extends StepDetails {
 }
 
 export interface CategoryInput {
+  builtinFields?: { 姓名: boolean }
   group?: CategoryGroup
   variants?: Variant[]
   fields?: FieldDef[]
