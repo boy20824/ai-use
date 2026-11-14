@@ -1,4 +1,9 @@
-import { hasPdfHeader, maxPdfUploadBytes, pdfMimeType } from '../../shared/templateUpload.ts'
+import {
+  hasPdfHeader,
+  isAllowedPdfMime,
+  maxPdfUploadBytes,
+  pdfMimeType,
+} from '../../shared/templateUpload.ts'
 import path from 'node:path'
 import { PhotoBlockError } from './photoBlocks.ts'
 import { mkdirSync, openSync, writeFileSync, fsyncSync, closeSync } from 'node:fs'
@@ -1473,11 +1478,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     const fileName = sanitizeTemplateFileName(file.filename)
     if (!fileName) return fail(reply, 400, 'bad-upload', '只接受 .docx 或 .pdf 範本。')
     const kind = fileName.toLowerCase().endsWith('.pdf') ? ('pdf' as const) : ('docx' as const)
-    if (
-      kind === 'pdf'
-        ? file.mimetype.toLowerCase() !== pdfMimeType
-        : !isAllowedDocxMime(file.mimetype)
-    )
+    if (kind === 'pdf' ? !isAllowedPdfMime(file.mimetype) : !isAllowedDocxMime(file.mimetype))
       return fail(
         reply,
         400,

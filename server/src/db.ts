@@ -313,7 +313,15 @@ function mapTemplate(
   usages: TemplateUsage[],
   includeData: boolean,
 ): TemplateRecord {
-  const placeholders = row.kind === 'pdf' ? [] : (JSON.parse(row.placeholders) as unknown)
+  let placeholders: unknown = []
+  if (row.kind !== 'pdf') {
+    try {
+      placeholders = JSON.parse(row.placeholders) as unknown
+    } catch {
+      // A malformed legacy row must not prevent loading the shared library.
+      placeholders = []
+    }
+  }
   return {
     id: row.id,
     kind: row.kind ?? 'docx',

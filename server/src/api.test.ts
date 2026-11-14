@@ -155,6 +155,73 @@ describe('api', () => {
     rmSync(scratch, { recursive: true, force: true })
   })
 
+  it('accepts generic Mock upload MIME, rejects bad bytes, and lists corrupt placeholders safely', async () => {
+    const { app, db } = await createApp()
+    databases.push(db)
+    // Busboy maps a missing/empty multipart Content-Type to text/plain.
+    // Also exercise a truly empty parsed mimetype independently of that fallback.
+    app.addHook('preHandler', async (request) => {
+      if (request.headers['x-mock-empty-mime'] === '1') {
+        const file = await request.file()
+        if (file) vi.spyOn(request, 'file').mockResolvedValue({ ...file, mimetype: '' })
+      }
+    })
+    try {
+      const admin = authFrom(await login(app, 'admin', passwords.admin))
+      const send = async (name: string, type: string, data: Uint8Array) => {
+        const upload = multipart({}, { name, type: type || 'application/octet-stream', data })
+        return app.inject({
+          method: 'POST',
+          url: '/api/templates',
+          cookies: admin.cookies,
+          headers: {
+            ...admin.headers,
+            ...upload.headers,
+            ...(type === '' ? { 'x-mock-empty-mime': '1' } : {}),
+          },
+          payload: upload.payload,
+        })
+      }
+      const ids: string[] = []
+      for (const type of ['', 'application/x-zip-compressed', 'application/x-zip', 'text/plain']) {
+        const response = await send('Mock.docx', type, buildDocx('{{MockField}}'))
+        expect(response.statusCode, `${type}: ${response.body}`).toBe(201)
+        expect(response.json().template.placeholders).toEqual(['MockField'])
+        ids.push(response.json().template.id)
+      }
+      expect(
+        (await send('Mock.docx', 'application/javascript', buildDocx('Mock'))).statusCode,
+      ).toBe(400)
+      for (const type of ['', 'text/plain']) {
+        expect((await send('Mock.docx', type, Buffer.from('Mock invalid ZIP'))).statusCode).toBe(
+          400,
+        )
+        // ZIP magic alone cannot bypass the server Word parser.
+        expect(
+          (await send('Mock.docx', type, Buffer.from('PKxxMock invalid archive'))).statusCode,
+        ).toBe(400)
+        expect((await send('Mock.pdf', type, buildMockPdf())).statusCode).toBe(201)
+        expect((await send('Mock.pdf', type, Buffer.from('Mock invalid PDF'))).statusCode).toBe(400)
+      }
+      db.prepare('UPDATE templates SET placeholders = ? WHERE id = ?').run('not-json', ids[0]!)
+      db.prepare('UPDATE templates SET placeholders = ? WHERE id = ?').run(
+        '{"Mock":"value"}',
+        ids[1]!,
+      )
+      const response = await app.inject({ url: '/api/templates', cookies: admin.cookies })
+      expect(response.statusCode).toBe(200)
+      expect(response.json().templates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: ids[0], placeholders: [] }),
+          expect.objectContaining({ id: ids[1], placeholders: [] }),
+          expect.objectContaining({ id: ids[2], placeholders: ['MockField'] }),
+        ]),
+      )
+    } finally {
+      await app.close()
+    }
+  })
+
   it('stores Mock PDFs as reference documents, serves exact bytes to viewers, and cascades deletion', async () => {
     const { app, db } = await createApp()
     databases.push(db)
@@ -288,7 +355,7 @@ describe('api', () => {
         for (const [name, type, bytes] of [
           ['Mock.pdf', 'application/pdf', new TextEncoder().encode('Mock non-PDF')],
           ['Mock.pdf', 'application/pdf', new TextEncoder().encode(' %PDF-1.4')],
-          ['Mock.pdf', 'text/plain', data],
+          ['Mock.pdf', 'application/javascript', data],
           ['Mock.pdf', 'application/octet-stream', data],
           ['Mock.docx', 'application/pdf', data],
           ['Mock.txt', 'application/pdf', data],
