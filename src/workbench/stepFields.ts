@@ -82,15 +82,37 @@ export const scopeKey = (context: GenerationContext) =>
 export function contextValues(
   context: GenerationContext,
   values: Record<string, string>,
+  stepDateOverrides: Record<string, string> = {},
 ): Record<string, string> {
-  return valuesForFields(values, inputFields([context]))
+  const fields = valuesForFields(values, inputFields([context]))
+  if (
+    context.stepId !== null &&
+    Object.hasOwn(stepDateOverrides, context.stepId) &&
+    Object.hasOwn(fields, '日期')
+  )
+    fields['日期'] = stepDateOverrides[context.stepId]!
+  return fields
 }
 export function missingContextFields(
   contexts: GenerationContext[],
   values: Record<string, string>,
+  stepDateOverrides: Record<string, string> = {},
 ): string[] {
-  return missingOverviewFields(inputFields(contexts), values)
+  return [
+    ...new Set(
+      contexts.flatMap((context) =>
+        missingOverviewFields(
+          inputFields([context]),
+          contextValues(context, values, stepDateOverrides),
+        ),
+      ),
+    ),
+  ]
 }
-export function filledContext(context: GenerationContext, values: Record<string, string>) {
-  return applyRocDateFields(contextValues(context, values))
+export function filledContext(
+  context: GenerationContext,
+  values: Record<string, string>,
+  stepDateOverrides: Record<string, string> = {},
+) {
+  return applyRocDateFields(contextValues(context, values, stepDateOverrides))
 }

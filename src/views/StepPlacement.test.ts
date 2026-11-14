@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
     () => new Uint8Array(),
   ),
   download: vi.fn(),
+  downloadBlob: vi.fn(),
+  zip: vi.fn(async () => new Blob()),
+  session: { authenticated: true, canEditCategory: false, canDeleteCategory: false },
 }))
 vi.mock('@/stores/categories', () => ({
   useCategoryStore: () => ({ byId: () => mocks.category, ready: true }),
@@ -26,21 +29,25 @@ vi.mock('@/stores/templates', () => ({
   }),
 }))
 vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({
-    authenticated: true,
-    canEditCategory: false,
-    canDeleteCategory: false,
-  }),
+  useSessionStore: () => mocks.session,
 }))
 vi.mock('@/services/docxTemplates', () => ({
   renderDocx: mocks.render,
-  zipGeneratedFiles: vi.fn(),
+  zipGeneratedFiles: mocks.zip,
   templateMimeType: 'mock/docx',
 }))
-vi.mock('@/utils/download', () => ({ downloadBytes: mocks.download }))
+vi.mock('@/utils/download', () => ({
+  downloadBytes: mocks.download,
+  downloadBlob: mocks.downloadBlob,
+}))
 let app: App
 let host: HTMLDivElement
 beforeEach(() => {
+  mocks.session = reactive({
+    authenticated: true,
+    canEditCategory: false,
+    canDeleteCategory: false,
+  })
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(new Date('2026-11-10T16:30:00Z'))
   mocks.category = reactive({
@@ -83,6 +90,7 @@ afterEach(() => {
   app?.unmount()
   host?.remove()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 async function mount() {
@@ -219,6 +227,10 @@ it('shows explicit base fields and restored built-in name above, preserves enter
   await nextTick()
   expect(field(main('二'), '姓名')).toBeNull()
   expect(field(host.querySelector('.basic-data-row')!, '姓名').value).toBe('Mock 姓名')
+  mocks.category!.fields = []
+  await nextTick()
+  expect(field(host.querySelector('.basic-data-row')!, '姓名')).toBeNull()
+  expect(field(main('二'), '姓名').value).toBe('Mock 姓名')
 })
 it('hides unselected module fields without blocking generation and shares temporarily added tags (7)', async () => {
   await mount()
@@ -251,4 +263,138 @@ it('hides unselected module fields without blocking generation and shares tempor
   await click(host, '範本步驟')
   expect(field(main('二'), '案由').value).toBe('暫加共用（Mock）')
   expect(host.textContent).not.toContain('隱藏必填')
+})
+
+async function setDate(root: ParentNode, date: string[]) {
+  const selects = root.querySelectorAll<HTMLSelectElement>('select')
+  for (const [i, value] of date.entries()) {
+    selects[i]!.value = value
+    selects[i]!.dispatchEvent(new Event('change', { bubbles: true }))
+    await nextTick()
+  }
+}
+async function toggleDate(root: ParentNode, enabled: boolean) {
+  const toggle = root.querySelector<HTMLInputElement>('[data-step-date] input[role="switch"]')!
+  toggle.checked = enabled
+  toggle.dispatchEvent(new Event('change', { bubbles: true }))
+  await nextTick()
+}
+const dateParts = (root: ParentNode) =>
+  [...root.querySelectorAll<HTMLSelectElement>('[data-step-date] select')].map((el) => el.value)
+
+it('keeps independent memory-only dates across steps, parallel/overview, and all generation paths (addon 4–6)', async () => {
+  const storageWrite = vi.spyOn(Storage.prototype, 'setItem')
+  const indexedDbOpen = vi.fn()
+  const fetch = vi.fn()
+  vi.stubGlobal('indexedDB', { open: indexedDbOpen })
+  vi.stubGlobal('fetch', fetch)
+  await mount()
+  await fill(field(main('二'), '被害人姓名'), 'Mock victim')
+  await fill(field(main('二'), '姓名'), 'Mock name')
+  await fill(field(main('五'), '案由'), 'Mock reason')
+  expect(main('一').querySelector('[data-step-date]')).toBeNull()
+  expect(main('二').textContent).toContain('沿用上方日期：115/11/11')
+  await click(main('二'), '產生')
+  await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledTimes(1))
+  expect(mocks.render.mock.calls[0]![1]).toMatchObject({
+    日期: '115年11月11日',
+    日期_民國: '115/11/11',
+    年: '115',
+    月: '11',
+    日: '11',
+  })
+  await toggleDate(main('二'), true)
+  expect(dateParts(main('二'))).toEqual(['115', '11', '11'])
+  await setDate(main('二').querySelector('[data-step-date]')!, ['115', '10', '1'])
+  await setDate(host.querySelector('.basic-data-row')!, ['115', '11', '13'])
+  expect(dateParts(main('二'))).toEqual(['115', '10', '1'])
+  expect(main('五').textContent).toContain('沿用上方日期：115/11/13')
+  const parallel = host.querySelector('.parallel-work-item')!
+  await toggleDate(parallel, true)
+  expect(dateParts(main('五'))).toEqual(['115', '11', '13'])
+  await setDate(parallel.querySelector('[data-step-date]')!, ['115', '9', '2'])
+  expect(dateParts(main('五'))).toEqual(['115', '9', '2'])
+  expect(dateParts(main('二'))).toEqual(['115', '10', '1'])
+  await click(main('二'), '產生本步驟全部')
+  await vi.waitFor(() => expect(mocks.downloadBlob).toHaveBeenCalledTimes(1))
+  expect(mocks.render.mock.calls.slice(1).map((call) => call[1]['日期_民國'])).toEqual([
+    '115/10/1',
+    '115/10/1',
+  ])
+  await click(parallel, '產生')
+  await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledTimes(2))
+  expect(mocks.render.mock.calls.at(-1)![1]).toMatchObject({
+    日期: '115年9月2日',
+    月: '9',
+    日: '2',
+  })
+  await click(host, '全部文件總覽')
+  const overviewStep = host.querySelector('[aria-label="Mock 第二步"]')!
+  expect(dateParts(overviewStep)).toEqual(['115', '10', '1'])
+  await click(host, '產生勾選文件')
+  await vi.waitFor(() => expect(mocks.downloadBlob).toHaveBeenCalledTimes(2))
+  expect(mocks.render.mock.calls.slice(-3).map((call) => call[1]['日期_民國'])).toEqual([
+    '115/10/1',
+    '115/10/1',
+    '115/9/2',
+  ])
+  const confirm = vi.fn(() => false)
+  vi.stubGlobal('confirm', confirm)
+  await toggleDate(overviewStep, false)
+  expect(confirm).toHaveBeenCalledOnce()
+  expect(overviewStep.querySelector<HTMLInputElement>('[role="switch"]')!.checked).toBe(true)
+  expect(dateParts(overviewStep)).toEqual(['115', '10', '1'])
+  confirm.mockReturnValue(true)
+  await toggleDate(overviewStep, false)
+  expect(overviewStep.textContent).toContain('沿用上方日期：115/11/13')
+  await click(host, '範本步驟')
+  expect(main('二').querySelector('select')).toBeNull()
+  expect(dateParts(main('五'))).toEqual(['115', '9', '2'])
+  await click(main('二'), '產生')
+  await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledTimes(3))
+  expect(mocks.render.mock.calls.at(-1)![1]['日期_民國']).toBe('115/11/13')
+  expect(storageWrite).not.toHaveBeenCalled()
+  expect(indexedDbOpen).not.toHaveBeenCalled()
+  expect(fetch).not.toHaveBeenCalled()
+})
+
+it('blocks invalid/empty overrides per step and overview, and clears them with the draft', async () => {
+  const router = await mount()
+  await fill(field(main('二'), '被害人姓名'), 'Mock victim')
+  await fill(field(main('二'), '姓名'), 'Mock name')
+  await fill(field(main('五'), '案由'), 'Mock reason')
+  await toggleDate(main('五'), true)
+  await setDate(main('五').querySelector('[data-step-date]')!, ['115', '2', '30'])
+  expect(button(main('五'), '產生').disabled).toBe(true)
+  expect(button(main('二'), '產生').disabled).toBe(false)
+  expect(main('五').textContent).toContain('日期格式')
+  await click(host, '全部文件總覽')
+  expect(button(host, '產生勾選文件').disabled).toBe(true)
+  vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {})
+  await click(host.querySelector('#panel-overview')!, '日期格式')
+  expect(document.activeElement).toBe(main('五').querySelector('select'))
+  await click(host, '全部文件總覽')
+  await click(host, '範本步驟')
+  await setDate(main('五').querySelector('[data-step-date]')!, ['115', '2', ''])
+  expect(button(main('五'), '產生').disabled).toBe(true)
+  await setDate(main('五').querySelector('[data-step-date]')!, ['115', '10', '1'])
+  // A valid override can generate independently of an invalid top date.
+  await setDate(host.querySelector('.basic-data-row')!, ['115', '2', '30'])
+  expect(button(main('五'), '產生').disabled).toBe(false)
+  expect(button(main('二'), '產生').disabled).toBe(true)
+  mocks.session.authenticated = false
+  await nextTick()
+  expect(main('五').querySelector<HTMLInputElement>('[role="switch"]')!.checked).toBe(false)
+  expect(field(main('二'), '姓名').value).toBe('')
+  mocks.session.authenticated = true
+  await toggleDate(main('五'), true)
+  await setDate(main('五').querySelector('[data-step-date]')!, ['115', '10', '1'])
+  await router.push('/categories/another')
+  await nextTick()
+  expect(main('五').querySelector<HTMLInputElement>('[role="switch"]')!.checked).toBe(false)
+  await toggleDate(main('五'), true)
+  await router.push('/categories')
+  await router.push('/categories/mock')
+  await nextTick()
+  expect(main('五').querySelector<HTMLInputElement>('[role="switch"]')!.checked).toBe(false)
 })
