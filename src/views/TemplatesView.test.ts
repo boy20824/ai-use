@@ -179,7 +179,7 @@ it('uses the shared keyboard dialog for deletion, preserves existing loss copy, 
   expect(mocks.remove).not.toHaveBeenCalled()
   opener.click()
   await nextTick()
-  host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-primary')!.click()
+  host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-danger')!.click()
   await vi.waitFor(() => expect(mocks.remove).toHaveBeenCalledWith('one'))
   await vi.waitFor(() => expect(host.querySelector('[role="dialog"]')).toBeNull())
 })

@@ -4,8 +4,14 @@ import { createApp, h, nextTick, reactive, type App } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import CategoryView from './CategoryView.vue'
 import CategoriesView from './CategoriesView.vue'
+import AppShell from '@/layouts/AppShell.vue'
 
-const mocks = vi.hoisted(() => ({ session: { authenticated: true, canEditCategory: true } }))
+const mocks = vi.hoisted(() => ({
+  session: { authenticated: true, canEditCategory: true, canDeleteCategory: true, logout: vi.fn() },
+}))
+vi.mock('@/components/SideNav.vue', () => ({
+  default: { template: '<button @click="$emit(\'logout\')">Mock logout</button>' },
+}))
 const items = ['one', 'two'].map((id) => ({
   id,
   name: `Mock ${id}`,
@@ -30,6 +36,7 @@ vi.mock('@/stores/categories', () => ({
 vi.mock('@/stores/session', () => ({ useSessionStore: () => mocks.session }))
 vi.mock('@/stores/templates', () => ({
   useTemplateStore: () => ({
+    load: vi.fn(),
     items: [{ id: 'mock-template', placeholders: ['姓名', '日期'] }],
     byId: () => ({ id: 'mock-template', fileName: 'Mock.docx', placeholders: ['姓名', '日期'] }),
   }),
@@ -37,26 +44,34 @@ vi.mock('@/stores/templates', () => ({
 let app: App
 let host: HTMLDivElement
 beforeEach(() => {
-  mocks.session = reactive({ authenticated: true, canEditCategory: true })
+  mocks.session = reactive({
+    authenticated: true,
+    canEditCategory: true,
+    canDeleteCategory: true,
+    logout: vi.fn(async () => {
+      mocks.session.authenticated = false
+    }),
+  })
 })
 afterEach(() => {
   app?.unmount()
   host?.remove()
   vi.restoreAllMocks()
 })
-async function mount(path = '/categories/one') {
+async function mount(path = '/categories/one', shell = false) {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
       { path: '/categories', component: CategoriesView },
       { path: '/categories/:id', component: CategoryView },
+      { path: '/login', name: 'login', component: { template: '<p>Mock login</p>' } },
       { path: '/away', component: { template: '<p>Mock destination</p>' } },
     ],
   })
   await router.push(path)
   host = document.createElement('div')
   document.body.append(host)
-  app = createApp({ render: () => h(RouterView) }).use(router)
+  app = createApp({ render: () => h(shell ? AppShell : RouterView) }).use(router)
   app.mount(host)
   await nextTick()
   return router
@@ -176,4 +191,54 @@ it('still clears values and refresh protection on logout', async () => {
   const event = new Event('beforeunload', { cancelable: true })
   window.dispatchEvent(event)
   expect(event.defaultPrevented).toBe(false)
+})
+
+it.each(['/categories/one', '/categories'])(
+  'asks before logout at %s and keeps the session and draft on cancel',
+  async (path) => {
+    const router = await mount(path, true)
+    await fill()
+    const logout = host.querySelector<HTMLButtonElement>('.desktop-sidebar button')!
+    logout.click()
+    await vi.waitFor(() => expect(dialog()?.textContent).toContain('離開工作台？'))
+    expect(mocks.session.logout).not.toHaveBeenCalled()
+    await decision(false)
+    expect(mocks.session.logout).not.toHaveBeenCalled()
+    expect(mocks.session.authenticated).toBe(true)
+    expect(nameInput().value).toBe('Mock draft name')
+    logout.click()
+    await decision(true)
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('login'))
+    expect(mocks.session.logout).toHaveBeenCalledTimes(1)
+    expect(mocks.session.authenticated).toBe(false)
+  },
+)
+it.each(['/categories/one', '/categories', '/away'])(
+  'logs out immediately at %s without a draft or leave handler',
+  async (path) => {
+    const router = await mount(path, true)
+    host.querySelector<HTMLButtonElement>('.desktop-sidebar button')!.click()
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('login'))
+    expect(dialog()).toBeNull()
+    expect(mocks.session.logout).toHaveBeenCalledTimes(1)
+  },
+)
+it('uses the shared danger modal to delete a category, with Escape and focus restoration', async () => {
+  await mount()
+  const opener = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent?.trim() === '刪除流程',
+  )!
+  opener.focus()
+  opener.click()
+  await nextTick()
+  expect(dialog()?.textContent).toContain('刪除「Mock one」')
+  expect(dialog()?.querySelector('.btn-danger')?.textContent).toContain('確定刪除')
+  expect(dialog()?.parentElement?.classList.contains('fixed')).toBe(true)
+  expect(dialog()?.contains(document.activeElement)).toBe(true)
+  document.activeElement!.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+  )
+  await nextTick()
+  expect(dialog()).toBeNull()
+  expect(document.activeElement).toBe(opener)
 })

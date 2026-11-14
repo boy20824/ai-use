@@ -9,7 +9,7 @@ afterEach(() => {
   app?.unmount()
   host?.remove()
 })
-async function mount() {
+async function mount(tone?: 'danger' | 'default') {
   const open = ref(false)
   host = document.createElement('div')
   document.body.append(host)
@@ -30,6 +30,7 @@ async function mount() {
               ConfirmDialog,
               {
                 title: 'Mock delete',
+                tone,
                 onCancel: () => {
                   open.value = false
                 },
@@ -96,6 +97,17 @@ it('restores focus after clicking cancel or confirming', async () => {
   opener.click()
   await nextTick()
   host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-primary')!.click()
+  await nextTick()
+  expect(host.querySelector('[role="dialog"]')).toBeNull()
+  expect(document.activeElement).toBe(opener)
+})
+
+it('uses danger styling for destructive confirmation and restores focus on confirm', async () => {
+  const opener = await mount('danger')
+  const confirm = host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-danger')!
+  expect(confirm).not.toBeNull()
+  expect(confirm.classList.contains('btn-primary')).toBe(false)
+  confirm.click()
   await nextTick()
   expect(host.querySelector('[role="dialog"]')).toBeNull()
   expect(document.activeElement).toBe(opener)

@@ -255,6 +255,7 @@ async function exportWord() {
 
 <template>
   <ConfirmDialog
+    tone="danger"
     v-if="pendingRemove !== null"
     title="移除圖片"
     @confirm="confirmRemove"
@@ -410,7 +411,7 @@ async function exportWord() {
             <button
               class="btn-secondary"
               :disabled="busy"
-              :aria-label="`下載切片 ${index + 1} PNG`"
+              :aria-label="`下載 PNG（切片 ${index + 1}）`"
               @click="exportImages(index)"
             >
               下載 PNG

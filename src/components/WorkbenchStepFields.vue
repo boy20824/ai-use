@@ -78,9 +78,8 @@ const emit = defineEmits<{
   <p v-if="templates.length === 0" class="mt-3 text-sm text-ink-muted">這個步驟還沒有範本。</p>
   <div v-if="documents.length" class="step-documents">
     <h4 class="text-sm font-semibold text-ink">產出文件</h4>
-    <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <div v-if="documents.length > 1" class="mb-3 flex flex-wrap items-center gap-3">
       <button
-        v-if="documents.length > 1"
         type="button"
         class="btn-primary"
         :disabled="busy || missing.length > 0"
@@ -88,6 +87,15 @@ const emit = defineEmits<{
       >
         產生本步驟全部
       </button>
+      <p v-if="missing.length" class="text-xs text-ink-muted">
+        請先填寫：
+        <template v-for="(key, index) in [...new Set(missing)]" :key="key">
+          {{ index ? '、' : ''
+          }}<button type="button" class="focus-control underline" @click="emit('focusField', key)">
+            {{ key }}
+          </button>
+        </template>
+      </p>
     </div>
     <ul class="step-template-list divide-y divide-edge">
       <li
@@ -104,15 +112,30 @@ const emit = defineEmits<{
             {{ item.placeholders.length > 0 ? item.placeholders.join('、') : '沒有偵測到欄位' }}
           </span>
         </span>
-        <button
-          type="button"
-          class="btn-secondary shrink-0 px-3 py-2"
-          :title="missing.join('、') || '產出 .docx'"
-          :disabled="busy || missing.length > 0"
-          @click="emit('generate', item.id)"
-        >
-          產生
-        </button>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            class="btn-secondary shrink-0 px-3 py-2"
+            :title="missing.join('、') || '產出 .docx'"
+            :disabled="busy || missing.length > 0"
+            @click="emit('generate', item.id)"
+          >
+            產生
+          </button>
+          <p v-if="missing.length" class="text-xs text-ink-muted">
+            請先填寫：
+            <template v-for="(key, index) in [...new Set(missing)]" :key="key">
+              {{ index ? '、' : ''
+              }}<button
+                type="button"
+                class="focus-control underline"
+                @click="emit('focusField', key)"
+              >
+                {{ key }}
+              </button>
+            </template>
+          </p>
+        </div>
       </li>
     </ul>
   </div>

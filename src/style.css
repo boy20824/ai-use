@@ -84,6 +84,12 @@
   @apply bg-accent text-surface hover:bg-accent-ink disabled:bg-tone-neutral disabled:text-ink-disabled;
 }
 
+@utility btn-danger {
+  min-height: 44px;
+  @apply button-focus inline-flex items-center justify-center rounded-control px-4 py-2.5 text-body font-medium transition-colors;
+  @apply bg-tone-danger-ink text-surface hover:bg-badge-danger-ink disabled:bg-tone-danger disabled:text-badge-danger-ink;
+}
+
 @utility btn-secondary {
   min-height: 44px;
   @apply button-focus inline-flex items-center justify-center rounded-control px-4 py-2.5 text-body font-medium transition-colors;
@@ -844,6 +850,9 @@
   flex-direction: column;
   gap: 16px;
 }
+.workbench-sidebar {
+  display: contents;
+}
 .workbench-library {
   order: 2;
 }
@@ -1566,9 +1575,12 @@ label:has(> input[type='file']:focus-visible) {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
   }
-  .parallel-work {
+  .workbench-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
     grid-column: 2;
-    grid-row: 1 / span 2;
+    grid-row: 1;
     position: sticky;
     top: 72px;
     max-height: calc(100dvh - 88px);
@@ -1576,9 +1588,16 @@ label:has(> input[type='file']:focus-visible) {
     overscroll-behavior: contain;
     align-self: start;
   }
-  .workbench-content,
-  .workbench-library {
+  .workbench-content {
     grid-column: 1;
+    grid-row: 1;
+  }
+  .workbench-sidebar > * {
+    flex-shrink: 0;
+  }
+  .workbench-library {
+    order: 0;
+    width: 100%;
   }
   .step-content {
     grid-template-columns: minmax(0, 1fr);
