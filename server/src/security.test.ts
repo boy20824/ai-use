@@ -208,7 +208,7 @@ describe('security controls', () => {
     }
   })
 
-  it('rejects incorrect current passwords and short new passwords without changing credentials', async () => {
+  it('rejects incorrect current passwords, blank and oversized new passwords without changing credentials', async () => {
     const { app, db } = await boot()
     databases.push(db)
     try {
@@ -222,21 +222,27 @@ describe('security controls', () => {
           payload: { currentPassword, newPassword },
         })
       const wrong = await change('incorrect-password', 'new-password-12345')
-      const short = await change(passwords.clerk, 'short')
+      const empty = await change(passwords.clerk, '')
+      const blank = await change(passwords.clerk, '   ')
       const tooManyBytes = await change(passwords.clerk, '密'.repeat(25))
       expect(wrong.statusCode).toBe(400)
-      expect(short.statusCode).toBe(400)
+      expect(empty.statusCode).toBe(400)
+      expect(blank.statusCode).toBe(400)
       expect(tooManyBytes.statusCode).toBe(400)
-      expect(wrong.json()).toEqual(short.json())
+      expect(wrong.json()).toEqual(empty.json())
+      expect(wrong.json()).toEqual(blank.json())
+      expect(tooManyBytes.json().message).toContain('72')
       expect(fetch).not.toHaveBeenCalled()
       expect(createQueries(db).findUserByUsername('clerk')!.passwordHash).toBe(original)
       expect((await app.inject({ url: '/api/auth/me', cookies: current.cookies })).statusCode).toBe(
         200,
       )
       const audit = db.prepare("SELECT * FROM audit_log WHERE action = 'password_change'").all()
-      expect(audit).toHaveLength(3)
+      expect(audit).toHaveLength(4)
       expect(JSON.stringify(audit)).not.toContain(passwords.clerk)
       expect(JSON.stringify(audit)).not.toContain('incorrect-password')
+      expect(JSON.stringify(audit)).not.toContain('new-password-12345')
+      expect(JSON.stringify(audit)).not.toContain('密'.repeat(25))
     } finally {
       await app.close()
     }

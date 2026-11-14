@@ -103,9 +103,14 @@ async function deleteMember(member: MemberAccount) {
 async function createMember() {
   if (pendingId.value) return
   message.value = ''
-  if (password.value.length < 12) {
+  if (!password.value.trim()) {
     tone.value = 'warn'
-    message.value = '密碼至少需要 12 個字元。'
+    message.value = '請填寫密碼。'
+    return
+  }
+  if (new TextEncoder().encode(password.value).length > 72) {
+    tone.value = 'warn'
+    message.value = '密碼不可超過 72 個 UTF-8 位元組。'
     return
   }
   pendingId.value = 'new'
@@ -198,7 +203,7 @@ onMounted(() => {
         v-model="password"
         type="password"
         required
-        minlength="12"
+        minlength="1"
         autocomplete="new-password"
         class="field mt-2 w-full"
       />

@@ -41,33 +41,44 @@ describe('change password form', () => {
   it('validates the new password and confirmation before sending', async () => {
     mount()
     await fill('current-password', 'current-password')
+    for (const secret of ['', '   ', '密'.repeat(25)]) {
+      await fill('new-password', secret)
+      await fill('confirm-password', secret)
+      await submit()
+      expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+        secret.trim() ? '72 個 UTF-8 位元組' : '非空白',
+      )
+      expect(request).not.toHaveBeenCalled()
+    }
     await fill('new-password', 'short')
-    await fill('confirm-password', 'short')
-    await submit()
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain('至少 12 碼')
-    await fill('new-password', 'replacement-password')
+    await fill('confirm-password', 'different')
     await submit()
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('不一致')
     expect(request).not.toHaveBeenCalled()
   })
 
-  it('submits the two passwords and clears all password fields after success', async () => {
-    request.mockResolvedValue(new Response(null, { status: 204 }))
-    mount()
-    await fill('current-password', 'current-password')
-    await fill('new-password', 'replacement-password')
-    await fill('confirm-password', 'replacement-password')
-    await submit()
-    expect(request).toHaveBeenCalledWith('/api/auth/change-password', {
-      method: 'POST',
-      body: JSON.stringify({
-        currentPassword: 'current-password',
-        newPassword: 'replacement-password',
-      }),
-    })
-    expect(host.querySelector('[role="status"]')?.textContent).toContain('密碼已更新')
-    expect([...host.querySelectorAll('input')].every((input) => input.value === '')).toBe(true)
-  })
+  it.each(['a', 'short', ' a '])(
+    'submits short password %j unchanged and clears all password fields after success',
+    async (password) => {
+      request.mockResolvedValue(new Response(null, { status: 204 }))
+      mount()
+      expect(host.querySelector('#new-password')?.getAttribute('minlength')).toBe('1')
+      expect(host.querySelector('#confirm-password')?.getAttribute('minlength')).toBe('1')
+      await fill('current-password', 'current-password')
+      await fill('new-password', password)
+      await fill('confirm-password', password)
+      await submit()
+      expect(request).toHaveBeenCalledWith('/api/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({
+          currentPassword: 'current-password',
+          newPassword: password,
+        }),
+      })
+      expect(host.querySelector('[role="status"]')?.textContent).toContain('密碼已更新')
+      expect([...host.querySelectorAll('input')].every((input) => input.value === '')).toBe(true)
+    },
+  )
 
   it('shows a generic API error and clears password fields on failure', async () => {
     request.mockResolvedValue(new Response(null, { status: 400 }))

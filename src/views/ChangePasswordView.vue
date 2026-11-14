@@ -14,8 +14,8 @@ async function submit() {
   if (busy.value) return
   error.value = ''
   success.value = false
-  if (newPassword.value.length < 12 || new TextEncoder().encode(newPassword.value).length > 72) {
-    error.value = '新密碼至少 12 碼，且不得超過 72 個 UTF-8 位元組。'
+  if (!newPassword.value.trim() || new TextEncoder().encode(newPassword.value).length > 72) {
+    error.value = '請填寫非空白的新密碼，且不得超過 72 個 UTF-8 位元組。'
     return
   }
   if (newPassword.value !== confirmPassword.value) {
@@ -78,14 +78,14 @@ async function submit() {
         class="field mt-2 w-full"
         type="password"
         autocomplete="new-password"
-        minlength="12"
+        minlength="1"
         maxlength="200"
         aria-describedby="password-hint"
         required
         :disabled="busy"
       />
       <p id="password-hint" class="mt-2 text-xs leading-5 text-ink-muted">
-        至少 12 碼，最多 72 個 UTF-8 位元組（中文字通常佔 3 個位元組）。
+        不可為空白，最多 72 個 UTF-8 位元組（中文字通常佔 3 個位元組）。
       </p>
     </div>
     <div>
@@ -96,7 +96,7 @@ async function submit() {
         class="field mt-2 w-full"
         type="password"
         autocomplete="new-password"
-        minlength="12"
+        minlength="1"
         maxlength="200"
         required
         :disabled="busy"
