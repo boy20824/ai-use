@@ -16,10 +16,3 @@ export function formatStamp(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
-
-export function formatMime(mime: string): string {
-  const value = mime.trim()
-  if (value.length === 0 || value === 'application/octet-stream') return '未標示類型'
-  if (value.length <= 42) return value
-  return `${value.slice(0, 39)}…`
-}
