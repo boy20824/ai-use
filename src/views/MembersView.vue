@@ -103,9 +103,9 @@ async function deleteMember(member: MemberAccount) {
 async function createMember() {
   if (pendingId.value) return
   message.value = ''
-  if (password.value.length < 8) {
+  if (password.value.length < 12) {
     tone.value = 'warn'
-    message.value = '密碼至少需要 8 個字元。'
+    message.value = '密碼至少需要 12 個字元。'
     return
   }
   pendingId.value = 'new'
@@ -198,7 +198,7 @@ onMounted(() => {
         v-model="password"
         type="password"
         required
-        minlength="8"
+        minlength="12"
         autocomplete="new-password"
         class="field mt-2 w-full"
       />

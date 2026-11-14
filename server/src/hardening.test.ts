@@ -1,3 +1,4 @@
+import { loginWithCsrf } from './loginTestHelper.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import PizZip from 'pizzip'
 import bcrypt from 'bcryptjs'
@@ -45,7 +46,81 @@ function addZipFlags(data: Buffer, method: number, flags: number) {
   return data
 }
 
+// Rebuild only our generated ZIP's local area; central records retain their original order.
+function reorderLocals(data: Buffer, gap: number, descriptor: 'none' | 'signed' | 'unsigned') {
+  const end = data.length - 22
+  const start = data.readUInt32LE(end + 16)
+  const directory = Buffer.from(data.subarray(start, end))
+  const records: { central: number; local: Buffer }[] = []
+  for (let n = 0; n < directory.length;) {
+    const local = directory.readUInt32LE(n + 42)
+    const payload = local + 30 + data.readUInt16LE(local + 26) + data.readUInt16LE(local + 28)
+    const record = Buffer.from(data.subarray(local, payload + directory.readUInt32LE(n + 20)))
+    if (descriptor !== 'none') {
+      record.writeUInt16LE(record.readUInt16LE(6) | 8, 6)
+      directory.writeUInt16LE(directory.readUInt16LE(n + 8) | 8, n + 8)
+      record.fill(0, 14, 26)
+      const dd = Buffer.alloc(descriptor === 'signed' ? 16 : 12)
+      const offset = descriptor === 'signed' ? 4 : 0
+      if (offset) dd.writeUInt32LE(0x08074b50)
+      directory.copy(dd, offset, n + 16, n + 28)
+      records.push({ central: n, local: Buffer.concat([record, dd]) })
+    } else records.push({ central: n, local: record })
+    n +=
+      46 +
+      directory.readUInt16LE(n + 28) +
+      directory.readUInt16LE(n + 30) +
+      directory.readUInt16LE(n + 32)
+  }
+  const chunks: Buffer[] = []
+  let offset = 0
+  for (const record of records.reverse()) {
+    chunks.push(Buffer.alloc(gap), record.local)
+    offset += gap
+    directory.writeUInt32LE(offset, record.central + 42)
+    offset += record.local.length
+  }
+  const eocd = Buffer.from(data.subarray(end))
+  eocd.writeUInt32LE(offset, 16)
+  return Buffer.concat([...chunks, directory, eocd])
+}
+
 describe('bounded ZIP and passive DOCX', () => {
+  it.each(['none', 'signed', 'unsigned'] as const)(
+    'reads reordered local records with gaps and %s data descriptors',
+    (descriptor) => {
+      const original = zip()
+      const document = new PizZip(original).file('word/document.xml')!.asText()
+      const data = reorderLocals(original, 7, descriptor)
+      expect(() => assertSafeZip(data, limits)).not.toThrow()
+      expect(listPlaceholders(data, limits)).toEqual(['name'])
+      const normalized = normalizeDocx(data, limits)
+      expect(listPlaceholders(normalized.data, limits)).toEqual(['name'])
+      expect(new PizZip(normalized.data).file('word/document.xml')!.asText()).toBe(document)
+    },
+  )
+  it('rejects otherwise valid local records nested inside another stored payload', () => {
+    const inner = new PizZip()
+    inner.file('inner', 'Mock content')
+    const innerData = inner.generate({ type: 'nodebuffer', compression: 'STORE' }) as Buffer
+    const outer = new PizZip()
+    outer.file('outer', innerData)
+    const data = outer.generate({ type: 'nodebuffer', compression: 'STORE' }) as Buffer
+    const end = data.length - 22
+    const innerCentral = Buffer.from(innerData.subarray(central(innerData), innerData.length - 22))
+    innerCentral.writeUInt32LE(30 + data.readUInt16LE(26) + data.readUInt16LE(28), 42)
+    const eocd = Buffer.from(data.subarray(end))
+    eocd.writeUInt16LE(2, 8)
+    eocd.writeUInt16LE(2, 10)
+    eocd.writeUInt32LE(eocd.readUInt32LE(12) + innerCentral.length, 12)
+    const overlapping = Buffer.concat([data.subarray(0, end), innerCentral, eocd])
+    expect(() => assertSafeZip(overlapping, limits)).toThrow('bad-local')
+  })
+  it('rejects a local payload that extends into the central directory', () => {
+    const data = zip()
+    data.writeUInt32LE(data.length, central(data) + 20)
+    expect(() => assertSafeZip(data, limits)).toThrow('bad-local')
+  })
   it('accepts Office metadata attributes with the same local name in different namespaces', () => {
     const data = zip({
       'customXml/item1.xml':
@@ -306,7 +381,7 @@ async function boot(overrides: Partial<AppConfig> = {}) {
   const app = await buildApp(db, config)
   disposers.push(() => app.close())
   async function auth(username = 'admin') {
-    const result = await app.inject({
+    const result = await loginWithCsrf(app, {
       method: 'POST',
       url: '/api/auth/login',
       payload: { username, password: 'p'.repeat(73) },
@@ -330,7 +405,7 @@ it('normalizes historical and alternating ASCII login names for counting and cle
   for (const username of ['aDmIn', 'ADmin']) {
     expect(
       (
-        await app.inject({
+        await loginWithCsrf(app, {
           method: 'POST',
           url: '/api/auth/login',
           payload: { username, password: 'wrong' },
@@ -340,7 +415,7 @@ it('normalizes historical and alternating ASCII login names for counting and cle
   }
   expect(
     (
-      await app.inject({
+      await loginWithCsrf(app, {
         method: 'POST',
         url: '/api/auth/login',
         payload: { username: 'ADMIN', password: 'p'.repeat(73) },
@@ -399,7 +474,7 @@ it('rejects over-72-byte new passwords at every entry point while preserving leg
   ).toBe(201)
   expect(
     (
-      await app.inject({
+      await loginWithCsrf(app, {
         method: 'POST',
         url: '/api/auth/login',
         payload: { username: 'admin', password: 'p'.repeat(72) },

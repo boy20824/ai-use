@@ -1,3 +1,4 @@
+import { loginWithCsrf } from './loginTestHelper.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -87,7 +88,7 @@ async function login(
 ) {
   const csrfProbe = await app.inject({ method: 'GET', url: '/api/auth/me' })
   const csrf = cookieValue(csrfProbe, 'csrf')
-  const signedIn = await app.inject({
+  const signedIn = await loginWithCsrf(app, {
     method: 'POST',
     url: '/api/auth/login',
     payload: { username, password: passwords[username] },
@@ -560,7 +561,7 @@ describe('v1.3 workflow spec', () => {
     expect((await request(app, viewer, 'GET', '/api/auth/me')).statusCode).toBe(401)
     expect(
       (
-        await app.inject({
+        await loginWithCsrf(app, {
           method: 'POST',
           url: '/api/auth/login',
           payload: { username: 'viewer', password: passwords.viewer },
@@ -570,9 +571,11 @@ describe('v1.3 workflow spec', () => {
     expect(db.pragma('foreign_key_check')).toEqual([])
   })
 
-  it('serves three to five release notes before login', async () => {
+  it('requires login to serve three to five release notes', async () => {
     const { app } = await setup()
-    const notes = await app.inject({ method: 'GET', url: '/api/release-notes' })
+    expect((await app.inject({ url: '/api/release-notes' })).statusCode).toBe(401)
+    const admin = await login(app)
+    const notes = await request(app, admin, 'GET', '/api/release-notes')
     expect(notes.statusCode).toBe(200)
     expect(notes.json().items.length).toBeGreaterThanOrEqual(3)
     expect(notes.json().items.length).toBeLessThanOrEqual(5)

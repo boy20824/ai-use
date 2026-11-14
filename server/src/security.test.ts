@@ -1,3 +1,4 @@
+import { loginWithCsrf } from './loginTestHelper.ts'
 import bcrypt from 'bcryptjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -108,7 +109,7 @@ async function login(
   username: string,
   password: string,
 ) {
-  return app.inject({
+  return loginWithCsrf(app, {
     method: 'POST',
     url: '/api/auth/login',
     payload: { username, password },

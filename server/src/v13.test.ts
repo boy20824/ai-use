@@ -1,3 +1,4 @@
+import { loginWithCsrf } from './loginTestHelper.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -106,7 +107,7 @@ function cookieValue(response: { cookies: { name: string; value: string }[] }, n
 async function login(app: Awaited<ReturnType<typeof boot>>['app']) {
   const csrfProbe = await app.inject({ method: 'GET', url: '/api/auth/me' })
   const csrf = cookieValue(csrfProbe, 'csrf')
-  const signedIn = await app.inject({
+  const signedIn = await loginWithCsrf(app, {
     method: 'POST',
     url: '/api/auth/login',
     payload: { username: 'admin', password: passwords.admin },

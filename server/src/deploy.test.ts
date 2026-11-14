@@ -1,3 +1,4 @@
+import { loginWithCsrf } from './loginTestHelper.ts'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -388,7 +389,7 @@ describe('deployment config', () => {
     expect(missingApi.statusCode).toBe(404)
     expect(missingApi.json().error).toBe('not-found')
 
-    const crossSite = await app.inject({
+    const crossSite = await loginWithCsrf(app, {
       method: 'POST',
       url: '/api/auth/login',
       headers: {
@@ -400,7 +401,7 @@ describe('deployment config', () => {
     })
     expect(crossSite.statusCode).toBe(403)
 
-    const loggedIn = await app.inject({
+    const loggedIn = await loginWithCsrf(app, {
       method: 'POST',
       url: '/api/auth/login',
       headers: {

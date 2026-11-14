@@ -3,8 +3,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import { appName } from '@/config/app'
 import { useSessionStore } from '@/stores/session'
 import { safeRedirect } from '@/utils/redirect'
-import { onMounted, ref } from 'vue'
-import { apiRequest } from '@/services/api'
+import { ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const session = useSessionStore()
@@ -14,18 +13,6 @@ const username = ref('')
 const password = ref('')
 const failed = ref(false)
 const offline = ref(false)
-const releaseNotes = ref<string[]>([])
-const notesError = ref(false)
-onMounted(async () => {
-  try {
-    const response = await apiRequest('/api/release-notes')
-    if (!response.ok) throw new Error('unavailable')
-    const body = (await response.json()) as { items: string[] }
-    releaseNotes.value = body.items
-  } catch {
-    notesError.value = true
-  }
-})
 
 async function submit() {
   failed.value = false
@@ -93,10 +80,6 @@ async function submit() {
         </form>
         <p class="corgi-description">輸入帳號與密碼，進入案件範本。</p>
       </section>
-      <aside class="corgi-release" aria-label="本次更新">
-        <p v-if="notesError">暫時無法讀取更新公告。</p>
-        <p v-else-if="releaseNotes.length">本次更新：{{ releaseNotes.slice(0, 2).join(' · ') }}</p>
-      </aside>
     </section>
   </main>
 </template>

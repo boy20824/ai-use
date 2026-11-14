@@ -359,7 +359,7 @@ function tableExists(db: AppDatabase, table: string): boolean {
 
 function columnNames(db: AppDatabase, table: string): string[] {
   if (!tableExists(db, table)) return []
-  const rows = db.prepare(`SELECT name FROM pragma_table_info('${table}')`).all() as {
+  const rows = db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as {
     name: string
   }[]
   return rows.map((row) => row.name)

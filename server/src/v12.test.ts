@@ -1,3 +1,4 @@
+import { loginWithCsrf } from './loginTestHelper.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -118,7 +119,11 @@ async function login(
   username: string,
   password: string,
 ) {
-  return app.inject({ method: 'POST', url: '/api/auth/login', payload: { username, password } })
+  return loginWithCsrf(app, {
+    method: 'POST',
+    url: '/api/auth/login',
+    payload: { username, password },
+  })
 }
 
 function account(username: string, extra: Record<string, unknown> = {}) {
@@ -126,8 +131,8 @@ function account(username: string, extra: Record<string, unknown> = {}) {
     name: '測試人員',
     nickname: '小測',
     username,
-    password: 'password1',
-    confirmPassword: 'password1',
+    password: 'password1234',
+    confirmPassword: 'password1234',
     ...extra,
   }
 }
@@ -178,7 +183,7 @@ describe('v1.2 access, registration, and feedback', () => {
     const stored = queries.findUserByUsername('NewUser')
     expect(stored).toMatchObject({ role: 'user', canManageCategories: false, active: true })
     expect(stored?.passwordHash.startsWith('$2')).toBe(true)
-    expect(stored?.passwordHash).not.toContain('password1')
+    expect(stored?.passwordHash).not.toContain('password1234')
 
     const duplicate = await app.inject({
       method: 'POST',
@@ -321,7 +326,7 @@ describe('v1.2 access, registration, and feedback', () => {
         name: '新會員',
         nickname: '新',
         username: 'member2',
-        password: 'memberpass',
+        password: 'memberpass12',
         role: 'sysadmin',
         canManageCategories: true,
       },
@@ -332,13 +337,13 @@ describe('v1.2 access, registration, and feedback', () => {
       method: 'POST',
       url: '/api/members',
       ...admin,
-      payload: { name: '新會員', nickname: '新', username: 'member2', password: 'memberpass' },
+      payload: { name: '新會員', nickname: '新', username: 'member2', password: 'memberpass12' },
     })
     expect(added.statusCode).toBe(201)
     expect(added.json()).toMatchObject({
       member: { username: 'member2', role: 'user', canManageCategories: false, active: true },
     })
-    expect(JSON.stringify(added.json())).not.toContain('memberpass')
+    expect(JSON.stringify(added.json())).not.toContain('memberpass12')
 
     const adminId = queries.findUserByUsername('admin')?.id ?? ''
     const selfOff = await app.inject({
@@ -436,7 +441,7 @@ describe('v1.2 access, registration, and feedback', () => {
     })
     expect(revived.statusCode).toBe(401)
     expect(queries.findSession(worker.cookies.session)).toBeUndefined()
-    const relogin = await login(app, 'worker1', 'password1')
+    const relogin = await login(app, 'worker1', 'password1234')
     expect(relogin.statusCode).toBe(401)
 
     const audit = db
@@ -474,8 +479,8 @@ describe('v1.2 access, registration, and feedback', () => {
           row.target_username === 'worker1',
       ),
     ).toBe(true)
-    expect(JSON.stringify(audit)).not.toContain('password1')
-    expect(JSON.stringify(audit)).not.toContain('memberpass')
+    expect(JSON.stringify(audit)).not.toContain('password1234')
+    expect(JSON.stringify(audit)).not.toContain('memberpass12')
 
     const last = queries.updateMember('u-missing', adminId, { role: 'user', active: false })
     expect(last).toEqual({ ok: false, error: 'last-sysadmin' })

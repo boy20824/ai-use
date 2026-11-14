@@ -1,3 +1,4 @@
+import { loginWithCsrf } from './loginTestHelper.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -90,7 +91,7 @@ async function boot() {
 }
 
 async function login(app: Awaited<ReturnType<typeof boot>>['app'], username: keyof SeedPasswords) {
-  return app.inject({
+  return loginWithCsrf(app, {
     method: 'POST',
     url: '/api/auth/login',
     payload: { username, password: passwords[username] },

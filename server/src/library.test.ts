@@ -1,3 +1,4 @@
+import { loginWithCsrf } from './loginTestHelper.ts'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -119,7 +120,7 @@ describe('category library', () => {
     databases.push(db)
     try {
       const admin = auth(
-        await app.inject({
+        await loginWithCsrf(app, {
           method: 'POST',
           url: '/api/auth/login',
           payload: { username: 'admin', password: passwords.admin },
@@ -196,21 +197,21 @@ describe('category library', () => {
     const { app, db } = await boot()
     databases.push(db)
     const clerk = auth(
-      await app.inject({
+      await loginWithCsrf(app, {
         method: 'POST',
         url: '/api/auth/login',
         payload: { username: 'clerk', password: passwords.clerk },
       }),
     )
     const admin = auth(
-      await app.inject({
+      await loginWithCsrf(app, {
         method: 'POST',
         url: '/api/auth/login',
         payload: { username: 'admin', password: passwords.admin },
       }),
     )
     const viewer = auth(
-      await app.inject({
+      await loginWithCsrf(app, {
         method: 'POST',
         url: '/api/auth/login',
         payload: { username: 'viewer', password: passwords.viewer },
