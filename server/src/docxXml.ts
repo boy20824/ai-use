@@ -167,8 +167,8 @@ export function readSafeZip(data: Uint8Array, limits: ZipLimits): Map<string, Ui
   const result = new Map<string, Uint8Array>()
   const names = new Set<string>()
   const decoder = new TextDecoder('utf-8', { fatal: true })
+  const localSpans: [number, number][] = []
   let n = start,
-    localEnd = 0,
     total = 0,
     actualCount = 0
   const extras = (from: number, length: number) => {
@@ -213,8 +213,7 @@ export function readSafeZip(data: Uint8Array, limits: ZipLimits): Map<string, Ui
     if (names.has(key)) throw new Error('duplicate-entry')
     names.add(key)
     extras(n + 46 + nl, el)
-    if (local !== localEnd || local + 30 > start || u32(local) !== 0x04034b50)
-      throw new Error('bad-local')
+    if (local + 30 > start || u32(local) !== 0x04034b50) throw new Error('bad-local')
     const lnl = u16(local + 26),
       lel = u16(local + 28),
       payload = local + 30 + lnl + lel
@@ -246,7 +245,7 @@ export function readSafeZip(data: Uint8Array, limits: ZipLimits): Map<string, Ui
     if (name.endsWith('/') && output.length) throw new Error('bad-directory-entry')
     if (output.length > 1_000_000 && output.length / Math.max(1, compressed) > 100)
       throw new Error('zip-bomb')
-    localEnd = payload + compressed
+    let localEnd = payload + compressed
     if (flags & 8) {
       if (localEnd + 12 > start) throw new Error('bad-descriptor')
       if (u32(localEnd) === 0x08074b50) localEnd += 4
@@ -259,10 +258,16 @@ export function readSafeZip(data: Uint8Array, limits: ZipLimits): Map<string, Ui
         throw new Error('bad-descriptor')
       localEnd += 12
     }
+    localSpans.push([local, localEnd])
     result.set(name, output)
     n += 46 + nl + el + cl
   }
-  if (actualCount !== count || n !== end || localEnd !== start) throw new Error('bad-directory')
+  if (actualCount !== count || n !== end) throw new Error('bad-directory')
+  localSpans.sort((a, b) => a[0] - b[0])
+  for (let i = 0; i < localSpans.length; i++) {
+    const [from, until] = localSpans[i]!
+    if (until > start || (i > 0 && from < localSpans[i - 1]![1])) throw new Error('bad-local')
+  }
   return result
 }
 

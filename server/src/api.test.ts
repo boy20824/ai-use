@@ -1,8 +1,10 @@
+import { loginWithCsrf } from './loginTestHelper.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import PizZip from 'pizzip'
+import bcrypt from 'bcryptjs'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
 import type { AppConfig, SeedPasswords } from './config.ts'
@@ -121,7 +123,7 @@ async function login(
   username: string,
   password: string,
 ) {
-  const response = await app.inject({
+  const response = await loginWithCsrf(app, {
     method: 'POST',
     url: '/api/auth/login',
     payload: { username, password },
@@ -153,6 +155,103 @@ describe('api', () => {
 
   afterAll(() => {
     rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it('requires login CSRF and Origin checks while accepting legacy cost-10 passwords', async () => {
+    const { app, db } = await createApp()
+    databases.push(db)
+    try {
+      const stored = createQueries(db).findUserByUsername('admin')!
+      expect(bcrypt.getRounds(stored.passwordHash)).toBe(10)
+      const page = await app.inject({ url: '/login' })
+      const csrf = page.cookies.find((cookie) => cookie.name === 'csrf')!.value
+      const payload = { username: 'admin', password: passwords.admin }
+      for (const options of [
+        {},
+        { cookies: { csrf } },
+        { headers: { 'x-csrf-token': csrf } },
+        { cookies: { csrf }, headers: { 'x-csrf-token': 'wrong' } },
+        { cookies: { csrf }, headers: { 'x-csrf-token': csrf, origin: 'https://evil.example' } },
+      ]) {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/api/auth/login',
+          payload,
+          ...options,
+        })
+        expect(response.statusCode).toBe(403)
+        expect(response.json().error).toBe('csrf')
+      }
+      expect((await app.inject({ url: '/api/release-notes' })).statusCode).toBe(401)
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload,
+        cookies: { csrf },
+        headers: { origin: allowedOrigin, 'x-csrf-token': csrf },
+      })
+      expect(response.statusCode).toBe(200)
+      const session = sessionCookie(response)!.value
+      expect(
+        (await app.inject({ url: '/api/release-notes', cookies: { session } })).statusCode,
+      ).toBe(200)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('requires 12-character new passwords and stores cost-12 hashes without delaying account access', async () => {
+    const { app, db } = await createApp()
+    databases.push(db)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('')))
+    try {
+      const queries = createQueries(db)
+      const admin = authFrom(await login(app, 'admin', passwords.admin))
+      const account = { name: 'Mock User', nickname: 'Mock', username: 'mock-new' }
+      const password = 'mock-pass-12'
+      const register = (secret: string) =>
+        app.inject({
+          method: 'POST',
+          url: '/api/auth/register',
+          ...admin,
+          payload: { ...account, password: secret, confirmPassword: secret },
+        })
+      const short = await register('12345678')
+      expect(short.statusCode).toBe(400)
+      expect(short.json().message).toContain('12')
+      const created = await register(password)
+      expect(created.statusCode).toBe(201)
+      const user = queries.findUserByUsername(account.username)!
+      expect(user.active).toBe(true)
+      expect(bcrypt.getRounds(user.passwordHash)).toBe(12)
+      const session = sessionCookie(created)!.value
+      expect((await app.inject({ url: '/api/auth/me', cookies: { session } })).statusCode).toBe(200)
+      expect((await login(app, account.username, password)).statusCode).toBe(200)
+      const member = (secret: string) =>
+        app.inject({
+          method: 'POST',
+          url: '/api/members',
+          ...admin,
+          payload: { ...account, username: 'mock-member', password: secret },
+        })
+      expect((await member('12345678')).statusCode).toBe(400)
+      expect((await member(password)).statusCode).toBe(201)
+      expect(bcrypt.getRounds(queries.findUserByUsername('mock-member')!.passwordHash)).toBe(12)
+      const change = (newPassword: string) =>
+        app.inject({
+          method: 'POST',
+          url: '/api/auth/change-password',
+          ...admin,
+          payload: { currentPassword: passwords.admin, newPassword },
+        })
+      expect((await change('12345678')).statusCode).toBe(400)
+      expect((await change(password)).statusCode).toBe(204)
+      expect(bcrypt.getRounds(queries.findUserByUsername('admin')!.passwordHash)).toBe(12)
+      expect((await login(app, 'admin', password)).statusCode).toBe(200)
+    } finally {
+      vi.unstubAllGlobals()
+      await app.close()
+    }
   })
 
   it('accepts generic Mock upload MIME, rejects bad bytes, and lists corrupt placeholders safely', async () => {
@@ -760,7 +859,7 @@ describe('api', () => {
   it('rejects a JSON body above 1 MiB with the existing JSON error format', async () => {
     const { app, db } = await createApp()
     try {
-      const response = await app.inject({
+      const response = await loginWithCsrf(app, {
         method: 'POST',
         url: '/api/auth/login',
         payload: { username: 'a'.repeat(1024 * 1024), password: 'password' },

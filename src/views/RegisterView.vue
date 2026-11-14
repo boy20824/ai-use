@@ -15,8 +15,8 @@ const message = ref('')
 
 async function submit() {
   message.value = ''
-  if (password.value.length < 8) {
-    message.value = '密碼至少需要 8 個字元。'
+  if (password.value.length < 12) {
+    message.value = '密碼至少需要 12 個字元。'
     return
   }
   if (password.value !== confirmPassword.value) {
@@ -115,7 +115,7 @@ async function submit() {
               name="password"
               autocomplete="new-password"
               required
-              minlength="8"
+              minlength="12"
               class="field mt-2 w-full"
             />
           </div>
@@ -130,7 +130,7 @@ async function submit() {
               name="confirmPassword"
               autocomplete="new-password"
               required
-              minlength="8"
+              minlength="12"
               class="field mt-2 w-full"
             />
           </div>

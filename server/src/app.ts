@@ -59,7 +59,7 @@ declare module 'fastify' {
 
 const sessionCookieName = 'session'
 const csrfCookieName = 'csrf'
-const dummyHash = bcrypt.hashSync(randomBytes(16).toString('hex'), 10)
+const dummyHash = bcrypt.hashSync(randomBytes(16).toString('hex'), 12)
 const mutatingMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 const loginSchema = z
@@ -196,7 +196,7 @@ const usernameSchema = z
 
 const passwordSchema = z
   .string()
-  .min(8)
+  .min(12)
   .max(200)
   .refine(passwordByteLimit, '密碼不可超過 72 UTF-8 bytes。')
 
@@ -376,7 +376,7 @@ function registerMessage(error: { issues: { path: PropertyKey[]; code?: string }
   const issue = error.issues[0]
   const field = issue?.path[0]
   if (field === 'confirmPassword') return '兩次密碼不一致。'
-  if (field === 'password' && issue?.code === 'too_small') return '密碼至少需要 8 個字元。'
+  if (field === 'password' && issue?.code === 'too_small') return '密碼至少需要 12 個字元。'
   if (field === 'username') return '帳號格式不正確。'
   if (field === 'name') return '請填寫名稱。'
   if (field === 'nickname') return '請填寫暱稱。'
@@ -722,7 +722,6 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     if (!originAllowed(request, config)) {
       return fail(reply, 403, 'csrf', '這個來源不能變更資料。')
     }
-    if (request.url === '/api/auth/login') return
     if (!csrfOk(request)) {
       return fail(reply, 403, 'csrf', '缺少或不相符的驗證權杖。')
     }
@@ -872,7 +871,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     if (breach === 'unavailable') {
       queries.insertAudit(user.username, 'breach_check_unavailable', '', '', '', '')
     }
-    const hash = bcrypt.hashSync(parsed.data.newPassword, 10)
+    const hash = bcrypt.hashSync(parsed.data.newPassword, 12)
     if (!queries.changePassword(record, token, hash)) {
       denied()
       return fail(reply, 400, 'invalid-input', '無法變更密碼，請確認輸入資料後再試。')
@@ -903,7 +902,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       return fail(reply, 400, 'invalid-input', '密碼不可超過 72 UTF-8 bytes。')
     const parsed = registerSchema.safeParse(request.body)
     if (!parsed.success) return fail(reply, 400, 'invalid-input', registerMessage(parsed.error))
-    const passwordHash = bcrypt.hashSync(parsed.data.password, 10)
+    const passwordHash = bcrypt.hashSync(parsed.data.password, 12)
     const id = randomBytes(16).toString('hex')
     try {
       queries.insertUser({
@@ -1394,7 +1393,10 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     }
   }
 
-  app.get('/api/release-notes', async () => ({ items: releaseNotes }))
+  app.get('/api/release-notes', async (request, reply) => {
+    if (!requireUser(request, reply)) return
+    return { items: releaseNotes }
+  })
 
   app.delete('/api/members/:id', async (request, reply) => {
     const actor = requireSysadmin(request, reply, 'member_update', '只有系統管理員可以管理會員。')
@@ -1622,7 +1624,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       queries.insertUser({
         id,
         username: parsed.data.username,
-        passwordHash: bcrypt.hashSync(parsed.data.password, 10),
+        passwordHash: bcrypt.hashSync(parsed.data.password, 12),
         displayName: parsed.data.name,
         nickname: parsed.data.nickname,
         role: 'user',

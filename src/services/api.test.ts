@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { apiPagedList } from './api'
+import { apiPagedList, apiRequest } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 it.each([
@@ -26,4 +26,18 @@ it('reports an error on a subsequent page instead of silently dropping rows', as
       .mockResolvedValueOnce(Response.json({ message: 'failed' }, { status: 503 })),
   )
   await expect(apiPagedList('/api/feedback', 'posts', 'failed')).rejects.toThrow('failed')
+})
+
+it('sends the CSRF cookie as a header when logging in', async () => {
+  vi.stubGlobal('document', { cookie: 'csrf=mock-csrf-token' })
+  const request = vi.fn().mockResolvedValue(Response.json({ user: { username: 'mock' } }))
+  vi.stubGlobal('fetch', request)
+  await apiRequest('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username: 'mock', password: 'short' }),
+  })
+  const [url, options] = request.mock.calls[0]!
+  expect(url).toBe('/api/auth/login')
+  expect(options.credentials).toBe('include')
+  expect(options.headers.get('x-csrf-token')).toBe('mock-csrf-token')
 })
