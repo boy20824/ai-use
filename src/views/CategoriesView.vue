@@ -19,10 +19,10 @@ const selected = computed(
   () => visible.value.find((item) => item.id === selection.value) ?? visible.value[0],
 )
 
-const visible = computed(() => {
-  const query = keyword.value.trim().toLocaleLowerCase()
+function filtered(nextGroup: CategoryGroup, nextKeyword: string) {
+  const query = nextKeyword.trim().toLocaleLowerCase()
   return categories.items
-    .filter((item) => (item.group ?? 'criminal') === group.value)
+    .filter((item) => (item.group ?? 'criminal') === nextGroup)
     .filter(
       (item) =>
         !query ||
@@ -31,7 +31,32 @@ const visible = computed(() => {
           .toLocaleLowerCase()
           .includes(query),
     )
-})
+}
+const visible = computed(() => filtered(group.value, keyword.value))
+const workbench = ref<InstanceType<typeof CategoryView> | null>(null)
+async function changeBrowser(
+  nextSelection = selection.value,
+  nextGroup = group.value,
+  nextKeyword = keyword.value,
+) {
+  const choices = filtered(nextGroup, nextKeyword)
+  const next = choices.find((item) => item.id === nextSelection) ?? choices[0]
+  if (next?.id !== selected.value?.id && workbench.value && !(await workbench.value.requestLeave()))
+    return
+  selection.value = nextSelection
+  group.value = nextGroup
+  keyword.value = nextKeyword
+}
+async function search(event: Event) {
+  const input = event.target as HTMLInputElement
+  await changeBrowser(selection.value, group.value, input.value)
+  input.value = keyword.value
+}
+async function choose(event: Event) {
+  const select = event.target as HTMLSelectElement
+  await changeBrowser(select.value)
+  select.value = selected.value?.id ?? ''
+}
 </script>
 
 <template>
@@ -62,7 +87,7 @@ const visible = computed(() => {
       :class="
         group === key ? 'bg-surface text-ink shadow-card' : 'text-ink-muted hover:bg-surface-muted'
       "
-      @click="group = key"
+      @click="changeBrowser(selection, key)"
     >
       {{ label }}
     </button>
@@ -87,11 +112,7 @@ const visible = computed(() => {
     <div class="case-browser">
       <label v-if="visible.length" class="mobile-case-select"
         ><span class="sr-only">選擇案件類別</span
-        ><select
-          class="field w-full"
-          :value="selected?.id"
-          @change="selection = ($event.target as HTMLSelectElement).value"
-        >
+        ><select class="field w-full" :value="selected?.id" @change="choose">
           <option v-for="item in visible" :key="item.id" :value="item.id">
             {{ item.name }} · {{ item.steps.length }} 個範本步驟
           </option>
@@ -103,7 +124,8 @@ const visible = computed(() => {
           <label for="category-search" class="sr-only">搜尋案件類別</label
           ><input
             id="category-search"
-            v-model="keyword"
+            :value="keyword"
+            @input="search"
             type="search"
             placeholder="搜尋案件類別"
             class="field w-full"
@@ -117,7 +139,7 @@ const visible = computed(() => {
           class="case-select-row focus-control"
           :class="{ selected: selected?.id === item.id }"
           :aria-pressed="selected?.id === item.id"
-          @click="selection = item.id"
+          @click="changeBrowser(item.id)"
         >
           <AppIcon name="folder" /><span
             ><strong>{{ item.name }}</strong
@@ -125,7 +147,13 @@ const visible = computed(() => {
           ><span>›</span>
         </button>
       </aside>
-      <CategoryView v-if="selected" :key="selected.id" :selected-id="selected.id" embedded />
+      <CategoryView
+        ref="workbench"
+        v-if="selected"
+        :key="selected.id"
+        :selected-id="selected.id"
+        embedded
+      />
     </div>
   </template>
 </template>

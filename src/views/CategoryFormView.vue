@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { categoryGroups } from '@/config/app'
 import type { CaseCategory, CategoryGroup, Variant, FieldDef } from '@/types/domain'
 import SopEditor from '@/components/SopEditor.vue'
@@ -139,7 +140,7 @@ function removeField(key: string, field?: FieldDef) {
   if (key === '姓名') builtinName.value = false
 }
 const summary = ref('')
-const steps = ref<DraftStep[]>([])
+const steps = ref<DraftStep[]>([blankStep()])
 const populated = ref(false)
 let loadedCategoryId = ''
 let loadedFields = '[]'
@@ -155,6 +156,11 @@ const editingId = computed(() => {
 })
 const isEdit = computed(() => editingId.value.length > 0)
 const existing = computed(() => (editingId.value ? categories.byId(editingId.value) : undefined))
+const wizardSteps = computed(() => [
+  { label: '命名與分類', value: 1 },
+  ...(isEdit.value ? [{ label: '情境模組', value: 2 }] : []),
+  { label: '步驟與範本', value: 3 },
+])
 
 function blankStep(): DraftStep {
   return {
@@ -227,7 +233,7 @@ watch(
       builtinName.value = false
       wizard.value = 1
       summary.value = ''
-      steps.value = []
+      steps.value = [blankStep()]
     }
   },
 )
@@ -242,8 +248,13 @@ function moveStep(index: number, delta: number) {
   steps.value = next
 }
 
+const pendingRemoveStep = ref<DraftStep | null>(null)
 function removeStep(index: number) {
-  steps.value = steps.value.filter((_, itemIndex) => itemIndex !== index)
+  pendingRemoveStep.value = steps.value[index] ?? null
+}
+function confirmRemoveStep() {
+  steps.value = steps.value.filter((step) => step.key !== pendingRemoveStep.value?.key)
+  pendingRemoveStep.value = null
 }
 
 function onStep(index: number, event: Event) {
@@ -347,7 +358,7 @@ async function submit() {
     return
   }
   if (wizard.value < 3) {
-    wizard.value += 1
+    wizard.value = !isEdit.value && wizard.value === 1 ? 3 : wizard.value + 1
     return
   }
   const prepared = steps.value.map((step, order) => ({
@@ -394,7 +405,7 @@ async function submit() {
       return
     }
     const created = await categories.create(input)
-    await router.push(`/categories/${created.id}/edit`)
+    await router.push(`/categories/${created.id}`)
   } catch (cause) {
     formError.value = cause instanceof Error ? cause.message : '無法儲存案件範本。'
   } finally {
@@ -404,6 +415,16 @@ async function submit() {
 </script>
 
 <template>
+  <ConfirmDialog
+    v-if="pendingRemoveStep"
+    title="移除步驟"
+    @confirm="confirmRemoveStep"
+    @cancel="pendingRemoveStep = null"
+  >
+    將移除「{{
+      pendingRemoveStep.body || '空白步驟'
+    }}」的內容、說明與範本連結；範本檔案仍保留在範本庫。
+  </ConfirmDialog>
   <PageIntro
     eyebrow="工作台"
     :title="isEdit ? '編輯案件範本' : '新增案件範本'"
@@ -444,11 +465,11 @@ async function submit() {
   >
     <ol class="mb-6 flex gap-3 text-sm" aria-label="編輯進度">
       <li
-        v-for="(label, i) in ['命名與分類', '情境模組', '步驟與範本']"
-        :key="label"
-        :class="wizard === i + 1 ? 'font-semibold text-accent-ink' : 'text-ink-muted'"
+        v-for="(step, i) in wizardSteps"
+        :key="step.value"
+        :class="wizard === step.value ? 'font-semibold text-accent-ink' : 'text-ink-muted'"
       >
-        {{ i + 1 }}. {{ label }}
+        {{ i + 1 }}. {{ step.label }}
       </li>
     </ol>
     <section v-show="wizard === 1">
@@ -487,7 +508,7 @@ async function submit() {
         ></textarea>
       </div>
     </section>
-    <section v-show="wizard === 2" aria-label="情境模組設定">
+    <section v-if="isEdit" v-show="wizard === 2" aria-label="情境模組設定">
       <h2 class="font-semibold">情境模組</h2>
       <p class="mt-2 text-sm">
         儲存案類後，可新增及維護模組步驟，並設定基本 SOP 與所選情境模組的組合專屬順序。
@@ -774,7 +795,12 @@ async function submit() {
     </p>
     <p v-if="formError" class="mt-4 text-sm text-tone-danger-ink" role="alert">{{ formError }}</p>
     <div class="mt-6 flex flex-wrap gap-3">
-      <button v-if="wizard > 1" type="button" class="btn-secondary py-2" @click="wizard--">
+      <button
+        v-if="wizard > 1"
+        type="button"
+        class="btn-secondary py-2"
+        @click="wizard = !isEdit && wizard === 3 ? 1 : wizard - 1"
+      >
         上一步
       </button>
       <button type="submit" class="btn-primary" :disabled="saving">

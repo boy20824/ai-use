@@ -14,7 +14,7 @@ vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ canEditCategory: false }),
 }))
 
-it('groups each feature title and description beside its icon', async () => {
+it('offers one primary workbench action and one secondary library action without duplicate entry cards', async () => {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/', component: HomeView }],
@@ -24,21 +24,16 @@ it('groups each feature title and description beside its icon', async () => {
   const app = createApp(HomeView).use(router)
   app.mount(host)
   try {
-    const cards = [...host.querySelectorAll('.overview-entries .entry-card')]
-    expect(cards).toHaveLength(4)
-    expect(cards.map((card) => card.querySelector('h2')?.textContent)).toEqual([
-      '案件範本',
-      '範本步驟',
-      '範本庫',
-      '產出文件',
-    ])
-    for (const card of cards) {
-      expect(card.children[0]?.classList.contains('entry-icon')).toBe(true)
-      const text = card.children[1]!
-      expect(text.classList.contains('entry-text')).toBe(true)
-      expect([...text.children].map((el) => el.tagName)).toEqual(['H2', 'P'])
-      expect(text.querySelector('p')?.textContent?.trim()).not.toBe('')
-    }
+    expect(host.querySelector('.overview-entries')).toBeNull()
+    const primary = host.querySelector('a.btn-primary')!
+    expect(primary.textContent).toBe('選擇案件、開始填寫')
+    expect(primary.getAttribute('href')).toBe('/categories')
+    const secondary = host.querySelector('a.btn-secondary')!
+    expect(secondary.textContent).toBe('範本庫')
+    expect(secondary.getAttribute('href')).toBe('/templates')
+    expect(host.querySelectorAll('a.btn-primary')).toHaveLength(1)
+    expect(host.querySelectorAll('a.btn-secondary')).toHaveLength(1)
+    expect(host.querySelectorAll('.data-panel')).toHaveLength(2)
   } finally {
     app.unmount()
   }

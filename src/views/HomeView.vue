@@ -14,13 +14,6 @@ const categories = useCategoryStore()
 const templates = useTemplateStore()
 const session = useSessionStore()
 
-const entries = [
-  { label: '案件範本', icon: 'documents', hint: '依案件類別檢視範本步驟', to: '/categories' },
-  { label: '範本步驟', icon: 'steps', hint: '每一步驟挑選對應範本', to: '/categories' },
-  { label: '範本庫', icon: 'folder', hint: '共用範本、上傳 .docx', to: '/templates' },
-  { label: '產出文件', icon: 'document', hint: '填寫欄位後產生 .docx', to: '/categories' },
-]
-
 const latestTemplates = computed(() => templates.items.slice(0, 4))
 
 function usageLabel(usages: { categoryId: string; categoryName: string; stepBody: string }[]) {
@@ -39,24 +32,12 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
 <template>
   <PageIntro title="總覽" description="選擇案件類別，依範本步驟挑選範本並產出 .docx 文件。">
     <div class="flex gap-2">
+      <RouterLink to="/categories" class="btn-primary">選擇案件、開始填寫</RouterLink>
       <RouterLink to="/templates" class="btn-secondary"
         ><AppIcon name="folder" class="mr-2 h-4 w-4" />範本庫</RouterLink
-      ><RouterLink to="/categories" class="btn-primary">選擇案件範本</RouterLink>
+      >
     </div>
   </PageIntro>
-  <section class="overview-entries" aria-label="文件操作入口">
-    <RouterLink
-      v-for="entry in entries"
-      :key="entry.label"
-      :to="entry.to"
-      class="entry-card focus-control"
-      ><span class="entry-icon"><AppIcon :name="entry.icon" /></span>
-      <div class="entry-text">
-        <h2>{{ entry.label }}</h2>
-        <p>{{ entry.hint }}</p>
-      </div></RouterLink
-    >
-  </section>
   <p
     v-if="categories.error || templates.error"
     class="mt-4 text-sm text-tone-danger-ink"

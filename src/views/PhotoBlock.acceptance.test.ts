@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { confirmedNavigation } from '@/test/confirmedNavigation'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, reactive, type App } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
@@ -123,7 +124,7 @@ it('照片表單、同步區、單份與 ZIP 依範本隔離，排序、覆寫�
       { path: '/away', component: { template: '<p>離開 Mock</p>' } },
     ],
   })
-  await router.push('/categories/mock')
+  await confirmedNavigation(router, '/categories/mock')
   host = document.createElement('div')
   document.body.append(host)
   app = createApp({ render: () => h(RouterView) })
@@ -224,9 +225,17 @@ it('照片表單、同步區、單份與 ZIP 依範本隔離，排序、覆寫�
   expect(textOf(await zip.file('產生-ordinary.docx')!.async('uint8array'))).toBe('Mock 案由')
   panel.querySelector<HTMLButtonElement>('[aria-label="刪除照片5"]')!.click()
   await nextTick()
+  expect(panel.textContent).toContain('5 張 → 3 頁')
+  button(host.querySelector('[role="dialog"]')!, '取消').click()
+  await nextTick()
+  expect(panel.textContent).toContain('5 張 → 3 頁')
+  panel.querySelector<HTMLButtonElement>('[aria-label="刪除照片5"]')!.click()
+  await nextTick()
+  button(host.querySelector('[role="dialog"]')!, '確定').click()
+  await nextTick()
   expect(panel.textContent).toContain('4 張 → 2 頁')
-  await router.push('/away')
-  await router.push('/categories/mock')
+  await confirmedNavigation(router, '/away')
+  await confirmedNavigation(router, '/categories/mock')
   await flush()
   await vi.waitFor(() =>
     expect(host.querySelector('[aria-label="照片區塊 a"]')?.textContent).toContain('0 張 → 0 頁'),
@@ -277,7 +286,7 @@ it('照片上傳與攝影欄位只在使用照片範本的第三步，基本資�
       { path: '/categories', component: { template: '<p>Mock</p>' } },
     ],
   })
-  await router.push('/categories/mock')
+  await confirmedNavigation(router, '/categories/mock')
   host = document.createElement('div')
   document.body.append(host)
   app = createApp({ render: () => h(RouterView) }).use(router)

@@ -88,8 +88,8 @@ async function mountFields() {
   await mountForm()
   await type('#category-name', '公共危險')
   await submit()
-  expect(button('繼續設定步驟')).toBeDefined()
-  await submit()
+  expect(button('建立流程')).toBeDefined()
+  await type('#category-step-0', 'Mock step')
   button('新增欄位').click()
   await nextTick()
   await type('[aria-label="欄位名稱"]', '  酒測值  ')
@@ -115,10 +115,10 @@ it('skips optional variants, copies the trimmed key and saves a standalone base 
 it('keeps create views narrow throughout the wizard', async () => {
   await mountForm()
   await type('#category-name', '公共危險')
-  for (let step = 1; step <= 3; step++) {
+  for (let step = 1; step <= 2; step++) {
     expect(host.querySelector('form')?.classList.contains('max-w-3xl')).toBe(true)
     expect(host.querySelector('form')?.classList.contains('xl:max-w-none')).toBe(false)
-    if (step < 3) await submit()
+    if (step < 2) await submit()
   }
 })
 
@@ -227,9 +227,6 @@ it('offers PDF reference attachments in the step picker with PDF upload accepted
   await mountForm()
   await type('#category-name', 'Mock PDF')
   await submit()
-  await submit()
-  button('新增步驟').click()
-  await nextTick()
   button('從範本庫選取').click()
   await nextTick()
   const label = [...host.querySelectorAll('label')].find((item) =>
@@ -340,3 +337,42 @@ it.each(['manual', 'builtin', 'both'])(
     expect(JSON.stringify(mocks.update.mock.calls)).not.toMatch(/stepDateOverrides|values/)
   },
 )
+
+it('starts with one blank step, skips the explanation-only page, and creates into the workbench', async () => {
+  const router = await mountForm()
+  expect(host.querySelector('[aria-label="編輯進度"]')?.textContent).not.toContain('情境模組')
+  expect(host.querySelector('[aria-label="情境模組設定"]')).toBeNull()
+  await type('#category-name', 'Mock new case')
+  await submit()
+  expect(host.querySelectorAll('[id^="category-step-"]')).toHaveLength(1)
+  expect((host.querySelector('#category-step-0') as HTMLTextAreaElement).value).toBe('')
+  button('上一步').click()
+  await nextTick()
+  expect((host.querySelector('#category-name') as HTMLInputElement).value).toBe('Mock new case')
+  await submit()
+  await type('#category-step-0', 'Mock first step')
+  await submit()
+  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/created'))
+  expect(mocks.create).toHaveBeenCalledWith(
+    expect.objectContaining({ steps: [expect.objectContaining({ body: 'Mock first step' })] }),
+  )
+})
+it('confirms removing a wizard step and keeps its values on cancel', async () => {
+  await mountForm()
+  await type('#category-name', 'Mock new case')
+  await submit()
+  await type('#category-step-0', 'Mock retained step')
+  button('移除').click()
+  await nextTick()
+  expect(host.querySelector('[role="dialog"]')?.textContent).toContain('Mock retained step')
+  host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-secondary')!.click()
+  await nextTick()
+  expect((host.querySelector('#category-step-0') as HTMLTextAreaElement).value).toBe(
+    'Mock retained step',
+  )
+  button('移除').click()
+  await nextTick()
+  host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-primary')!.click()
+  await nextTick()
+  expect(host.querySelector('#category-step-0')).toBeNull()
+})

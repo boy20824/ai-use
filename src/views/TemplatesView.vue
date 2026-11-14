@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import { categoryGroups } from '@/config/app'
 import type { CategoryGroup } from '@/types/domain'
@@ -410,46 +411,31 @@ async function onFiles(files: File[]) {
       </div>
     </details>
 
-    <div
+    <ConfirmDialog
       v-if="pendingDelete"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-nav/40 px-4"
-      @click.self="pendingDelete = null"
+      title="移除範本"
+      confirm-label="確定移除"
+      :busy="deleting"
+      @confirm="confirmRemove"
+      @cancel="pendingDelete = null"
     >
-      <div
-        class="w-full max-w-md rounded-2xl border border-edge bg-surface p-6 shadow-card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="delete-template-title"
-      >
-        <h2 id="delete-template-title" class="text-base font-semibold text-ink-strong">移除範本</h2>
-        <p class="mt-2 text-sm leading-6 text-stone-600">
-          <template v-if="usageLinks(pendingDelete).length > 0">
-            「{{
-              displayFileName(pendingDelete.fileName)
-            }}」目前用在下列案件範本的步驟。確定後會解除這些連結，並從範本庫刪除檔案。流程與步驟會保留。
-          </template>
-          <template v-else>
-            「{{
-              displayFileName(pendingDelete.fileName)
-            }}」尚未連結任何步驟。確定後會從範本庫刪除檔案。
-          </template>
-        </p>
-        <ul v-if="usageLinks(pendingDelete).length > 0" class="mt-3 list-disc space-y-1 pl-5">
-          <li
-            v-for="link in usageLinks(pendingDelete)"
-            :key="link.id"
-            class="text-sm text-stone-800"
-          >
-            {{ link.label }}
-          </li>
-        </ul>
-        <div class="mt-5 flex flex-wrap gap-3">
-          <button type="button" class="btn-primary" :disabled="deleting" @click="confirmRemove">
-            確定移除
-          </button>
-          <button type="button" class="btn-secondary" @click="pendingDelete = null">取消</button>
-        </div>
-      </div>
-    </div>
+      <p class="mt-2 text-sm leading-6 text-stone-600">
+        <template v-if="usageLinks(pendingDelete).length > 0">
+          「{{
+            displayFileName(pendingDelete.fileName)
+          }}」目前用在下列案件範本的步驟。確定後會解除這些連結，並從範本庫刪除檔案。流程與步驟會保留。
+        </template>
+        <template v-else>
+          「{{
+            displayFileName(pendingDelete.fileName)
+          }}」尚未連結任何步驟。確定後會從範本庫刪除檔案。
+        </template>
+      </p>
+      <ul v-if="usageLinks(pendingDelete).length > 0" class="mt-3 list-disc space-y-1 pl-5">
+        <li v-for="link in usageLinks(pendingDelete)" :key="link.id" class="text-sm text-stone-800">
+          {{ link.label }}
+        </li>
+      </ul>
+    </ConfirmDialog>
   </div>
 </template>

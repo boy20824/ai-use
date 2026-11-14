@@ -11,12 +11,14 @@ const mocks = vi.hoisted(() => ({
   canDelete: false,
   bytesFor: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
   downloadBytes: vi.fn(),
+  remove: vi.fn(async () => {}),
 }))
 vi.mock('@/services/pdfPreview', () => ({ previewPdf: mocks.previewPdf }))
 vi.mock('@/utils/download', () => ({ downloadBytes: mocks.downloadBytes }))
 vi.mock('@/stores/session', () => ({ useSessionStore: () => mocks }))
 vi.mock('@/stores/categories', () => ({
   useCategoryStore: () => ({
+    reload: vi.fn(async () => {}),
     items: [
       { id: 'criminal', name: '刑事類別', group: 'criminal' },
       { id: 'admin', name: '行政類別', group: 'admin' },
@@ -29,6 +31,7 @@ vi.mock('@/stores/templates', () => ({
     ready: true,
     total: 3,
     bytesFor: mocks.bytesFor,
+    remove: mocks.remove,
     items: [
       {
         id: 'one',
@@ -152,4 +155,31 @@ it('shows PDF badges and reference actions and downloads the original PDF name a
     ),
   )
   expect(rows()[0]?.textContent).toContain('Word')
+})
+
+it('uses the shared keyboard dialog for deletion, preserves existing loss copy, and cancels without deleting', async () => {
+  mocks.canDelete = true
+  await mount()
+  const opener = host.querySelector<HTMLButtonElement>('[aria-label="移除 刑事文件.docx"]')!
+  opener.focus()
+  opener.click()
+  await nextTick()
+  const dialog = host.querySelector('[role="dialog"]')!
+  expect(dialog.textContent).toContain(
+    '確定後會解除這些連結，並從範本庫刪除檔案。流程與步驟會保留。',
+  )
+  expect(dialog.textContent).toContain('受理')
+  expect(dialog.contains(document.activeElement)).toBe(true)
+  document.activeElement!.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+  )
+  await nextTick()
+  expect(host.querySelector('[role="dialog"]')).toBeNull()
+  expect(document.activeElement).toBe(opener)
+  expect(mocks.remove).not.toHaveBeenCalled()
+  opener.click()
+  await nextTick()
+  host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-primary')!.click()
+  await vi.waitFor(() => expect(mocks.remove).toHaveBeenCalledWith('one'))
+  await vi.waitFor(() => expect(host.querySelector('[role="dialog"]')).toBeNull())
 })

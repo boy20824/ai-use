@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { confirmedNavigation } from '@/test/confirmedNavigation'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, ref, type App, type Ref } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
@@ -121,7 +122,7 @@ async function mount(selectedId?: Ref<string>) {
       { path: '/categories', component: { render: () => h('div') } },
     ],
   })
-  await router.push('/categories/mock-flow')
+  await confirmedNavigation(router, '/categories/mock-flow')
   await router.isReady()
   app = createApp({ render: () => h(RouterView) }).use(router)
   app.mount(host)
@@ -229,13 +230,13 @@ describe('workflow acceptance UI', () => {
     field.value = '0.35'
     field.dispatchEvent(new Event('input', { bubbles: true }))
     await nextTick()
-    await router.push('/categories/another-mock')
+    await confirmedNavigation(router, '/categories/another-mock')
     await nextTick()
     expect((host.querySelector('input[type="number"]') as HTMLInputElement).value).toBe('')
     expect(input('已完成').checked).toBe(false)
     expect(input('攔查').checked).toBe(false)
     expect(host.textContent).not.toContain('攔查專屬')
-    await router.push('/categories/mock-flow')
+    await confirmedNavigation(router, '/categories/mock-flow')
     expect(input('已完成').checked).toBe(false)
     expect(host.querySelector('progress')).toBeNull()
     expect(localStorage.length).toBe(0)
@@ -283,8 +284,8 @@ describe('workflow acceptance UI', () => {
         button.click()
         await nextTick()
         expect(mocks.bytesFor).toHaveBeenCalledOnce()
-        await router.push('/categories/other')
-        await router.push('/categories/mock-flow')
+        await confirmedNavigation(router, '/categories/other')
+        await confirmedNavigation(router, '/categories/mock-flow')
         expect(input('已完成').checked).toBe(false)
         await check(input('已完成'), true)
         if (outcome === 'resolve') resolve(new Uint8Array())
@@ -346,8 +347,8 @@ it('keeps #21 completion checkboxes functional with saved cross-source order and
     field.value = '0.35'
     field.dispatchEvent(new Event('input', { bubbles: true }))
     await nextTick()
-    await router.push('/categories/another-mock')
-    await router.push('/categories/mock-flow')
+    await confirmedNavigation(router, '/categories/another-mock')
+    await confirmedNavigation(router, '/categories/mock-flow')
     await check(input('攔查'), true)
     await check(input('肇事'), true)
     expect(
@@ -471,7 +472,7 @@ it('places scenario inputs in their steps, preserves shared values through combi
       expect.objectContaining({ name: '產生-same.docx' }),
       expect.objectContaining({ name: '產生-same.docx' }),
     ])
-    await router.push('/categories/another-mock')
+    await confirmedNavigation(router, '/categories/another-mock')
     await check(input('攔查'), true)
     expect((host.querySelector('#step-stop-step-1') as HTMLInputElement).value).toBe('')
     expect(localStorage.length).toBe(0)

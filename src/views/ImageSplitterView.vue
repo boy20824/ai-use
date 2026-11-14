@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import SplitterSourcePreview from '@/components/SplitterSourcePreview.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import {
@@ -119,6 +120,12 @@ function move(index: number, offset: number) {
   if (busy.value) return
   releaseDownloads()
   images.value = reorder(images.value, index, index + offset)
+}
+const pendingRemove = ref<number | null>(null)
+function confirmRemove() {
+  if (pendingRemove.value === null) return
+  remove(pendingRemove.value)
+  pendingRemove.value = null
 }
 function remove(id: number) {
   if (busy.value) return
@@ -247,6 +254,16 @@ async function exportWord() {
 </script>
 
 <template>
+  <ConfirmDialog
+    v-if="pendingRemove !== null"
+    title="移除圖片"
+    @confirm="confirmRemove"
+    @cancel="pendingRemove = null"
+  >
+    將移除「{{
+      images.find((image) => image.id === pendingRemove)?.name
+    }}」及其切割設定，需要時須重新加入圖片。
+  </ConfirmDialog>
   <section class="splitter-page" :aria-busy="busy">
     <PageIntro
       title="詐騙訊息切割截圖"
@@ -344,7 +361,7 @@ async function exportWord() {
                 class="btn-secondary"
                 :aria-label="`移除 ${image.name}`"
                 :disabled="busy"
-                @click="remove(image.id)"
+                @click="pendingRemove = image.id"
               >
                 移除
               </button>

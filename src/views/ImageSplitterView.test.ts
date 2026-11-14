@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { Blob as NodeBlob } from 'node:buffer'
 import JSZip from 'jszip'
 import { format } from 'prettier'
@@ -243,7 +243,7 @@ describe('local multi-image splitter DOM', () => {
     await idle()
     expect(clicks.at(-1)).toBe('002-001.png')
     expect(fetch).not.toHaveBeenCalled()
-    const evidence = 'evidence/splitter-long/'
+    const evidence = mkdtempSync('/tmp/ai-use-splitter-') + '/'
     mkdirSync(evidence, { recursive: true })
     writeFileSync(
       evidence + 'synthetic-dom.html',
@@ -256,6 +256,12 @@ describe('local multi-image splitter DOM', () => {
     )
     const count = blobs.size
     await click('移除 fake-A.png')
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('fake-A.png')
+    expect(host.querySelectorAll('[data-source]')).toHaveLength(3)
+    await click('取消')
+    expect(host.querySelectorAll('[data-source]')).toHaveLength(3)
+    await click('移除 fake-A.png')
+    await click('確定')
     expect(revoked).toHaveBeenCalled()
     expect(host.querySelectorAll('[data-source]').length).toBe(2)
     expect(blobs.size).toBe(count)
@@ -293,6 +299,7 @@ describe('local multi-image splitter DOM', () => {
       ['3584', '4000'],
     ])
     await click('移除 fake-csp.png')
+    await click('確定')
     expect(canvases.every((canvas) => canvas.width === 0 && canvas.height === 0)).toBe(true)
     await vi.waitFor(() => expect(closed).toHaveBeenCalledTimes(decodeBitmap.mock.calls.length))
     expect(fetch).not.toHaveBeenCalled()

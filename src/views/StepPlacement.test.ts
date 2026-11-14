@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { confirmedNavigation } from '@/test/confirmedNavigation'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, reactive, type App } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
@@ -101,7 +102,7 @@ async function mount() {
       { path: '/categories', component: { render: () => h('div') } },
     ],
   })
-  await router.push('/categories/mock')
+  await confirmedNavigation(router, '/categories/mock')
   host = document.createElement('div')
   document.body.append(host)
   app = createApp({ render: () => h(RouterView) }).use(router)
@@ -389,12 +390,12 @@ it('blocks invalid/empty overrides per step and overview, and clears them with t
   mocks.session.authenticated = true
   await toggleDate(main('五'), true)
   await setDate(main('五').querySelector('[data-step-date]')!, ['115', '10', '1'])
-  await router.push('/categories/another')
+  await confirmedNavigation(router, '/categories/another')
   await nextTick()
   expect(main('五').querySelector<HTMLInputElement>('[role="switch"]')!.checked).toBe(false)
   await toggleDate(main('五'), true)
-  await router.push('/categories')
-  await router.push('/categories/mock')
+  await confirmedNavigation(router, '/categories')
+  await confirmedNavigation(router, '/categories/mock')
   await nextTick()
   expect(main('五').querySelector<HTMLInputElement>('[role="switch"]')!.checked).toBe(false)
 })
