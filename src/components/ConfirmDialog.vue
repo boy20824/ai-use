@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, useId } from 'vue'
 
-defineProps<{ title: string; confirmLabel?: string; busy?: boolean }>()
+defineProps<{ title: string; confirmLabel?: string; busy?: boolean; tone?: 'danger' | 'default' }>()
 const emit = defineEmits<{ confirm: []; cancel: [] }>()
 const dialog = ref<HTMLElement | null>(null)
 const cancelButton = ref<HTMLButtonElement | null>(null)
@@ -60,7 +60,12 @@ onUnmounted(() => {
       <h2 :id="`${id}-title`" class="text-base font-semibold text-ink-strong">{{ title }}</h2>
       <div :id="`${id}-description`" class="mt-2 text-sm leading-6 text-stone-600"><slot /></div>
       <div class="mt-5 flex flex-wrap gap-3">
-        <button type="button" class="btn-primary" :disabled="busy" @click="emit('confirm')">
+        <button
+          type="button"
+          :class="tone === 'danger' ? 'btn-danger' : 'btn-primary'"
+          :disabled="busy"
+          @click="emit('confirm')"
+        >
           {{ confirmLabel ?? '確定' }}
         </button>
         <button ref="cancelButton" type="button" class="btn-secondary" @click="emit('cancel')">

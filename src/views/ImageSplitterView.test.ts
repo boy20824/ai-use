@@ -239,7 +239,7 @@ describe('local multi-image splitter DOM', () => {
       width: 10,
       height: 4,
     })
-    await click('下載切片 1 PNG')
+    await click('下載 PNG（切片 1）')
     await idle()
     expect(clicks.at(-1)).toBe('002-001.png')
     expect(fetch).not.toHaveBeenCalled()

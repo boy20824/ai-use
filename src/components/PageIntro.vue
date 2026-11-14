@@ -7,7 +7,9 @@ defineProps<{
 </script>
 
 <template>
-  <header class="page-intro mb-section flex flex-wrap items-start justify-between gap-4">
+  <header
+    class="page-intro mb-section flex flex-col flex-wrap items-start justify-between gap-4 md:flex-row"
+  >
     <div class="min-w-0 flex-1">
       <p v-if="eyebrow" class="text-xs font-medium tracking-wide text-accent-ink">
         {{ eyebrow }}
@@ -17,7 +19,7 @@ defineProps<{
       </h1>
       <p class="mt-2 max-w-3xl text-sm leading-relaxed text-ink-muted">{{ description }}</p>
     </div>
-    <div v-if="$slots.default" class="shrink-0">
+    <div v-if="$slots.default" class="w-full md:w-auto md:shrink-0">
       <slot />
     </div>
   </header>

@@ -416,6 +416,7 @@ async function submit() {
 
 <template>
   <ConfirmDialog
+    tone="danger"
     v-if="pendingRemoveStep"
     title="移除步驟"
     @confirm="confirmRemoveStep"

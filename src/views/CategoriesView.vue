@@ -34,6 +34,11 @@ function filtered(nextGroup: CategoryGroup, nextKeyword: string) {
 }
 const visible = computed(() => filtered(group.value, keyword.value))
 const workbench = ref<InstanceType<typeof CategoryView> | null>(null)
+function requestLeave(): Promise<boolean> {
+  return workbench.value?.requestLeave() ?? Promise.resolve(true)
+}
+defineExpose({ requestLeave })
+
 async function changeBrowser(
   nextSelection = selection.value,
   nextGroup = group.value,
