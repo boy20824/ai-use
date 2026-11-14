@@ -39,3 +39,22 @@ it('defaults legacy summaries to Word and reads the original PDF filename and MI
     expect.objectContaining({ credentials: 'include' }),
   )
 })
+
+it.each([undefined, 'not-an-array', {}])(
+  'defaults malformed API Word placeholders %j to an empty array',
+  async (placeholders) => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ templates: [{ id: 'mock-word', kind: 'docx', placeholders }] }),
+          ),
+        ),
+    )
+    expect(await createApiTemplateRepository().list()).toEqual([
+      expect.objectContaining({ id: 'mock-word', placeholders: [] }),
+    ])
+  },
+)

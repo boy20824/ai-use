@@ -3,6 +3,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import SideNav from '@/components/SideNav.vue'
 import { mainNav } from '@/navigation'
 import { useSessionStore } from '@/stores/session'
+import { useTemplateStore } from '@/stores/templates'
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 
@@ -31,6 +32,7 @@ async function logout() {
 }
 
 onMounted(() => {
+  void useTemplateStore().load()
   window.addEventListener('keydown', onKeydown)
 })
 

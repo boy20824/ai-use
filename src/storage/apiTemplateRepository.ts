@@ -17,7 +17,8 @@ export function createApiTemplateRepository(): TemplateRepository {
       return templates.map((item) => ({
         ...item,
         kind: item.kind ?? 'docx',
-        placeholders: item.kind === 'pdf' ? [] : item.placeholders,
+        placeholders:
+          item.kind === 'pdf' || !Array.isArray(item.placeholders) ? [] : item.placeholders,
         usages: item.usages ?? [],
         data: new ArrayBuffer(0),
       }))

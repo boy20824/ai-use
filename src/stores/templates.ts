@@ -33,7 +33,8 @@ function toSummary(record: StoredTemplate): TemplateSummary {
     mimeType: record.mimeType,
     sizeBytes: record.sizeBytes,
     addedAt: record.addedAt,
-    placeholders: record.kind === 'pdf' ? [] : [...record.placeholders],
+    placeholders:
+      record.kind === 'pdf' || !Array.isArray(record.placeholders) ? [] : [...record.placeholders],
     origin: record.origin,
     usages: record.usages.map((usage) => ({ ...usage })),
   }
@@ -69,6 +70,7 @@ export const useTemplateStore = defineStore('templates', () => {
   }
 
   function load() {
+    if (ready.value) return Promise.resolve()
     pending ??= (async () => {
       try {
         if (import.meta.env.DEV && templateStorageMode() === 'indexeddb') {
@@ -77,10 +79,11 @@ export const useTemplateStore = defineStore('templates', () => {
         }
         await reload()
         error.value = ''
+        ready.value = true
       } catch {
         error.value = '無法讀取範本文件。'
       } finally {
-        ready.value = true
+        pending = null
       }
     })()
     return pending
@@ -141,8 +144,6 @@ export const useTemplateStore = defineStore('templates', () => {
           payload = copy.buffer
           sizeBytes = copy.byteLength
           placeholders = listPlaceholders(copy)
-        } else if (kind === 'docx') {
-          placeholders = listPlaceholders(data)
         }
       } catch (cause) {
         rejected.push(
@@ -191,7 +192,7 @@ export const useTemplateStore = defineStore('templates', () => {
     const { kind, data } = await validateTemplateFile(file)
     if (kind !== (byId(id)?.kind ?? 'docx'))
       throw new Error('替換檔案必須維持相同類型（Word 或 PDF）。')
-    if (kind === 'docx') listPlaceholders(data)
+    if (kind === 'docx' && templateStorageMode() === 'indexeddb') listPlaceholders(data)
     const form = new FormData()
     form.append('file', file)
     const response = await apiRequest(`/api/templates/${encodeURIComponent(id)}/file`, {

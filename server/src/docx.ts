@@ -2,6 +2,10 @@
 export { assertSafeZip, listPlaceholders, normalizeDocx, type ZipLimits } from './docxXml.ts'
 
 const allowedMimeTypes = new Set([
+  '',
+  'text/plain', // Busboy's fallback for a missing or empty multipart Content-Type.
+  'application/x-zip-compressed',
+  'application/x-zip',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   'application/octet-stream',
   'application/zip',
@@ -12,7 +16,7 @@ export function hasZipHeader(data: Uint8Array): boolean {
 }
 
 export function isAllowedDocxMime(mimeType: string): boolean {
-  return allowedMimeTypes.has(mimeType.toLowerCase())
+  return allowedMimeTypes.has(mimeType.trim().toLowerCase())
 }
 
 export function sanitizeTemplateFileName(input: string): string | null {
