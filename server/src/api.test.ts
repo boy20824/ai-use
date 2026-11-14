@@ -200,59 +200,71 @@ describe('api', () => {
     }
   })
 
-  it('requires 12-character new passwords and stores cost-12 hashes without delaying account access', async () => {
-    const { app, db } = await createApp()
-    databases.push(db)
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('')))
-    try {
-      const queries = createQueries(db)
-      const admin = authFrom(await login(app, 'admin', passwords.admin))
-      const account = { name: 'Mock User', nickname: 'Mock', username: 'mock-new' }
-      const password = 'mock-pass-12'
-      const register = (secret: string) =>
-        app.inject({
-          method: 'POST',
-          url: '/api/auth/register',
-          ...admin,
-          payload: { ...account, password: secret, confirmPassword: secret },
-        })
-      const short = await register('12345678')
-      expect(short.statusCode).toBe(400)
-      expect(short.json().message).toContain('12')
-      const created = await register(password)
-      expect(created.statusCode).toBe(201)
-      const user = queries.findUserByUsername(account.username)!
-      expect(user.active).toBe(true)
-      expect(bcrypt.getRounds(user.passwordHash)).toBe(12)
-      const session = sessionCookie(created)!.value
-      expect((await app.inject({ url: '/api/auth/me', cookies: { session } })).statusCode).toBe(200)
-      expect((await login(app, account.username, password)).statusCode).toBe(200)
-      const member = (secret: string) =>
-        app.inject({
-          method: 'POST',
-          url: '/api/members',
-          ...admin,
-          payload: { ...account, username: 'mock-member', password: secret },
-        })
-      expect((await member('12345678')).statusCode).toBe(400)
-      expect((await member(password)).statusCode).toBe(201)
-      expect(bcrypt.getRounds(queries.findUserByUsername('mock-member')!.passwordHash)).toBe(12)
-      const change = (newPassword: string) =>
-        app.inject({
-          method: 'POST',
-          url: '/api/auth/change-password',
-          ...admin,
-          payload: { currentPassword: passwords.admin, newPassword },
-        })
-      expect((await change('12345678')).statusCode).toBe(400)
-      expect((await change(password)).statusCode).toBe(204)
-      expect(bcrypt.getRounds(queries.findUserByUsername('admin')!.passwordHash)).toBe(12)
-      expect((await login(app, 'admin', password)).statusCode).toBe(200)
-    } finally {
-      vi.unstubAllGlobals()
-      await app.close()
-    }
-  })
+  it.each(['a', '12345678', ' a '])(
+    'accepts short non-blank password %j and stores cost-12 hashes with immediate account access',
+    async (password) => {
+      const { app, db } = await createApp()
+      databases.push(db)
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('')))
+      try {
+        const queries = createQueries(db)
+        const admin = authFrom(await login(app, 'admin', passwords.admin))
+        const account = { name: 'Mock User', nickname: 'Mock', username: 'mock-new' }
+        const register = (secret: string) =>
+          app.inject({
+            method: 'POST',
+            url: '/api/auth/register',
+            ...admin,
+            payload: { ...account, password: secret, confirmPassword: secret },
+          })
+        for (const secret of ['', '   ', '密'.repeat(25)]) {
+          const rejected = await register(secret)
+          expect(rejected.statusCode).toBe(400)
+          if (!secret) expect(rejected.json().message).toBe('請填寫密碼。')
+        }
+        const created = await register(password)
+        expect(created.statusCode).toBe(201)
+        const user = queries.findUserByUsername(account.username)!
+        expect(user.active).toBe(true)
+        expect(bcrypt.getRounds(user.passwordHash)).toBe(12)
+        const session = sessionCookie(created)!.value
+        expect((await app.inject({ url: '/api/auth/me', cookies: { session } })).statusCode).toBe(
+          200,
+        )
+        expect((await login(app, account.username, password)).statusCode).toBe(200)
+        const member = (secret: string) =>
+          app.inject({
+            method: 'POST',
+            url: '/api/members',
+            ...admin,
+            payload: { ...account, username: 'mock-member', password: secret },
+          })
+        for (const secret of ['', '   ', '密'.repeat(25)]) {
+          expect((await member(secret)).statusCode).toBe(400)
+        }
+        expect((await member(password)).statusCode).toBe(201)
+        const memberHash = queries.findUserByUsername('mock-member')!.passwordHash
+        expect(bcrypt.getRounds(memberHash)).toBe(12)
+        expect(bcrypt.compareSync(password, memberHash)).toBe(true)
+        const change = (newPassword: string) =>
+          app.inject({
+            method: 'POST',
+            url: '/api/auth/change-password',
+            ...admin,
+            payload: { currentPassword: passwords.admin, newPassword },
+          })
+        for (const secret of ['', '   ', '密'.repeat(25)]) {
+          expect((await change(secret)).statusCode).toBe(400)
+        }
+        expect((await change(password)).statusCode).toBe(204)
+        expect(bcrypt.getRounds(queries.findUserByUsername('admin')!.passwordHash)).toBe(12)
+        expect((await login(app, 'admin', password)).statusCode).toBe(200)
+      } finally {
+        vi.unstubAllGlobals()
+        await app.close()
+      }
+    },
+  )
 
   it('accepts generic Mock upload MIME, rejects bad bytes, and lists corrupt placeholders safely', async () => {
     const { app, db } = await createApp()

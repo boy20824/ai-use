@@ -82,8 +82,9 @@ const changePasswordSchema = z
     currentPassword: z.string().min(1).max(200),
     newPassword: z
       .string()
-      .min(12)
+      .min(1)
       .max(200)
+      .refine((value) => value.trim().length > 0, '請填寫密碼。')
       .refine(passwordByteLimit, '密碼不可超過 72 UTF-8 bytes。'),
   })
   .strict()
@@ -196,8 +197,9 @@ const usernameSchema = z
 
 const passwordSchema = z
   .string()
-  .min(12)
+  .min(1)
   .max(200)
+  .refine((value) => value.trim().length > 0, '請填寫密碼。')
   .refine(passwordByteLimit, '密碼不可超過 72 UTF-8 bytes。')
 
 const registerSchema = z
@@ -376,7 +378,7 @@ function registerMessage(error: { issues: { path: PropertyKey[]; code?: string }
   const issue = error.issues[0]
   const field = issue?.path[0]
   if (field === 'confirmPassword') return '兩次密碼不一致。'
-  if (field === 'password' && issue?.code === 'too_small') return '密碼至少需要 12 個字元。'
+  if (field === 'password' && issue?.code === 'too_small') return '請填寫密碼。'
   if (field === 'username') return '帳號格式不正確。'
   if (field === 'name') return '請填寫名稱。'
   if (field === 'nickname') return '請填寫暱稱。'
