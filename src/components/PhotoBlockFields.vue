@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ConfirmDialog from './ConfirmDialog.vue'
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
 import RocDateField from './RocDateField.vue'
 import PhotoThumbnail from './PhotoThumbnail.vue'
@@ -65,8 +66,13 @@ function move(from: number, to: number) {
   if (props.busy || loading.value) return
   emit('update', { ...state.value, photos: movePhoto(state.value.photos, from, to) })
 }
-function remove(index: number) {
-  emit('update', { ...state.value, photos: state.value.photos.filter((_, n) => n !== index) })
+const pendingRemove = ref<string | null>(null)
+function confirmRemove() {
+  emit('update', {
+    ...state.value,
+    photos: state.value.photos.filter((photo) => photo.id !== pendingRemove.value),
+  })
+  pendingRemove.value = null
 }
 async function add(files: File[]) {
   if (loading.value || props.busy || disposed) return
@@ -123,6 +129,14 @@ function dragStart(event: DragEvent, index: number) {
 }
 </script>
 <template>
+  <ConfirmDialog
+    v-if="pendingRemove !== null"
+    title="刪除照片"
+    @confirm="confirmRemove"
+    @cancel="pendingRemove = null"
+  >
+    將刪除這張照片、照片說明與覆寫的攝影資料，需要時須重新加入照片。
+  </ConfirmDialog>
   <section
     class="mt-3 w-full rounded-control border border-edge p-3"
     :aria-label="`照片區塊 ${templateId}`"
@@ -208,7 +222,7 @@ function dragStart(event: DragEvent, index: number) {
               type="button"
               class="btn-ghost"
               :aria-label="`刪除照片${index + 1}`"
-              @click="remove(index)"
+              @click="pendingRemove = photo.id"
             >
               刪除
             </button>

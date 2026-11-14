@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import FeedbackText from '@/components/FeedbackText.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
@@ -112,6 +113,13 @@ async function saveEdit(post: FeedbackPost) {
   }
 }
 
+const pendingDelete = ref<FeedbackPost | null>(null)
+async function confirmRemove() {
+  const post = pendingDelete.value
+  if (!post) return
+  pendingDelete.value = null
+  await remove(post)
+}
 async function remove(post: FeedbackPost) {
   pendingId.value = post.id
   message.value = ''
@@ -172,6 +180,14 @@ onMounted(() => {
 </script>
 
 <template>
+  <ConfirmDialog
+    v-if="pendingDelete"
+    title="刪除留言"
+    @confirm="confirmRemove"
+    @cancel="pendingDelete = null"
+  >
+    將刪除「{{ pendingDelete.title }}」的留言內容及回覆，刪除後無法復原。
+  </ConfirmDialog>
   <PageIntro
     eyebrow="留言板"
     title="網頁改善建議"
@@ -232,7 +248,10 @@ onMounted(() => {
       ></textarea>
       <p class="mt-2 text-xs text-ink-muted">還可輸入 {{ remaining }} 個字。</p>
     </div>
-    <button type="submit" class="btn-primary mt-4" :disabled="pendingId === 'new'">送出</button>
+    <div class="mt-4 flex flex-wrap items-center gap-3">
+      <button type="submit" class="btn-primary" :disabled="pendingId === 'new'">送出</button>
+      <p class="text-xs text-ink-muted">送出後仍可編輯或刪除自己的留言。</p>
+    </div>
   </form>
 
   <p v-if="!ready" class="text-sm text-ink-muted">正在讀取留言。</p>
@@ -300,7 +319,7 @@ onMounted(() => {
           type="button"
           class="btn-ghost text-sm text-stone-600 hover:text-tone-danger-ink"
           :disabled="pendingId === post.id"
-          @click="remove(post)"
+          @click="pendingDelete = post"
         >
           刪除
         </button>
@@ -346,7 +365,7 @@ onMounted(() => {
             v-if="!owns(post)"
             type="button"
             class="btn-ghost text-sm text-stone-600 hover:text-tone-danger-ink"
-            @click="remove(post)"
+            @click="pendingDelete = post"
           >
             刪除
           </button>

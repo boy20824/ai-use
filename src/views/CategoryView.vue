@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { fieldMappingIssues } from '@/workbench/fieldMapping'
 import StepFields from '@/components/StepFields.vue'
 import StepDateField from '@/components/StepDateField.vue'
@@ -11,7 +12,7 @@ import {
   type PhotoDraft,
   type PhotoDrafts,
 } from '../../shared/photoBlockRender'
-import { parseRocDate } from '@/utils/rocDate'
+import { defaultRocDateSlash, parseRocDate } from '@/utils/rocDate'
 import AppIcon from '@/components/AppIcon.vue'
 import { parallelSteps } from '@/workbench/parallel'
 import {
@@ -46,8 +47,14 @@ import {
   inputFields,
   missingOverviewFields,
 } from '@/workbench/overview'
-import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  onBeforeRouteLeave,
+  onBeforeRouteUpdate,
+  RouterLink,
+  useRoute,
+  useRouter,
+} from 'vue-router'
 
 const props = defineProps<{ selectedId?: string; embedded?: boolean }>()
 
@@ -60,6 +67,7 @@ const templates = useTemplateStore()
 const session = useSessionStore()
 const workbench = ref<HTMLElement | null>(null)
 const values = ref<Record<string, string>>(initialDraftValues())
+const emptyValues = ref({ ...values.value })
 const stepDateOverrides = ref<Record<string, string>>({})
 const defaultedFields = new Set<string>()
 const draftGeneration = ref(0)
@@ -258,7 +266,10 @@ watch(
 watch(
   () => session.authenticated,
   (signedIn) => {
-    if (!signedIn) clearDraft()
+    if (!signedIn) {
+      clearDraft()
+      if (pendingLeave) finishLeave(true)
+    }
   },
 )
 
@@ -271,6 +282,7 @@ function clearDraft() {
   printStep.value = null
   defaultedFields.clear()
   values.value = initialDraftValues()
+  emptyValues.value = { ...values.value }
   stepDateOverrides.value = {}
   draftGeneration.value++
   photoDrafts.value = {}
@@ -409,6 +421,7 @@ watch(
   ([fields]) => {
     const added = fields.filter((key) => !defaultedFields.has(key))
     values.value = applyFieldDefaults(values.value, added)
+    emptyValues.value = applyFieldDefaults(emptyValues.value, added)
     for (const key of added) defaultedFields.add(key)
   },
   { immediate: true },
@@ -579,14 +592,74 @@ async function removeCategory() {
   }
 }
 
-onBeforeRouteLeave(() => {
+// Defaults alone are not a draft. Check every in-memory input, including hidden
+// step values and photos, rather than only the currently visible/required fields.
+const hasDraftContent = computed(
+  () =>
+    Object.entries(values.value).some(([key, value]) => value !== (emptyValues.value[key] ?? '')) ||
+    Object.keys(stepDateOverrides.value).length > 0 ||
+    Object.values(photoDrafts.value).some(
+      (draft) =>
+        draft.photos.length > 0 ||
+        draft.common.location !== '' ||
+        draft.common.photographer !== '' ||
+        draft.common.time !== defaultRocDateSlash(),
+    ) ||
+    photoProcessing.value.size > 0 ||
+    selectedVariants.value.length > 0 ||
+    temporaryIds.value.length > 0 ||
+    Object.values(unchecked.value).some(Boolean) ||
+    completedSteps.value.length > 0 ||
+    handledSteps.value.length > 0,
+)
+const confirmLeave = ref(false)
+let pendingLeave: Promise<boolean> | undefined
+let resolveLeave: ((allowed: boolean) => void) | undefined
+function finishLeave(allowed: boolean) {
+  confirmLeave.value = false
+  if (allowed) clearDraft()
+  resolveLeave?.(allowed)
+  resolveLeave = undefined
+  pendingLeave = undefined
+}
+function requestLeave(): Promise<boolean> {
+  if (!hasDraftContent.value) {
+    clearDraft()
+    return Promise.resolve(true)
+  }
+  if (pendingLeave) return pendingLeave
+  confirmLeave.value = true
+  pendingLeave = new Promise((resolve) => {
+    resolveLeave = resolve
+  })
+  return pendingLeave
+}
+function beforeUnload(event: BeforeUnloadEvent) {
+  if (!hasDraftContent.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+onBeforeRouteLeave(requestLeave)
+onBeforeRouteUpdate((to, from) => (to.params.id !== from.params.id ? requestLeave() : true))
+onMounted(() => window.addEventListener('beforeunload', beforeUnload))
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', beforeUnload)
+  finishLeave(false)
   clearDraft()
 })
-
-onUnmounted(clearDraft)
+defineExpose({ requestLeave })
 </script>
 
 <template>
+  <ConfirmDialog
+    v-if="confirmLeave"
+    title="離開工作台？"
+    confirm-label="確定離開"
+    @confirm="finishLeave(true)"
+    @cancel="finishLeave(false)"
+  >
+    離開會清除本次填寫的欄位、步驟日期、照片與處理註記，內容不會保存。確定要離開嗎？
+  </ConfirmDialog>
   <Teleport to="body">
     <article v-if="printStep" id="sop-print" class="hidden">
       <h1>{{ printStep.title ?? printStep.body }}</h1>
@@ -629,7 +702,7 @@ onUnmounted(clearDraft)
         :to="`/categories/${category.id}/edit`"
         class="btn-secondary"
       >
-        編輯流程
+        繼續編輯
       </RouterLink>
       <button
         v-if="session.canDeleteCategory"

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
+import { confirmedNavigation } from '@/test/confirmedNavigation'
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { createApp, h, nextTick, type App } from 'vue'
 import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
@@ -43,8 +44,8 @@ vi.mock('@/utils/download', () => ({
 }))
 let app: App | undefined
 let host: HTMLDivElement
-// Mock evidence is written locally; the coordinator copies it to /workspace/evidence/base-fields.
-const evidence = '/workspace/ai-use/evidence/base-fields'
+// Mock artifacts stay in a temporary directory so tests do not change workspace evidence.
+const evidence = mkdtempSync('/tmp/ai-use-base-fields-')
 function snapshot(name: string) {
   mkdirSync(evidence, { recursive: true })
   const clone = host.cloneNode(true) as HTMLElement
@@ -227,7 +228,7 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
       { path: '/categories', component: { render: () => h('div') } },
     ],
   })
-  await router.push('/categories/mock/edit')
+  await confirmedNavigation(router, '/categories/mock/edit')
   await router.isReady()
   host = document.createElement('div')
   document.body.append(host)
@@ -276,7 +277,7 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   expect(host.querySelectorAll('[aria-label="欄位名稱"]')).toHaveLength(1)
   await submit()
   await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/mock'))
-  await router.push('/categories/mock/edit')
+  await confirmedNavigation(router, '/categories/mock/edit')
   await settle()
   await submit()
   await submit()
@@ -388,9 +389,9 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   expect(JSON.stringify(mocks.request.mock.calls)).not.toMatch(
     /Mock Person|Mock Shared X|24\.5|99\.25|Mock Only N/,
   )
-  await router.push('/categories/mock/edit')
+  await confirmedNavigation(router, '/categories/mock/edit')
   await settle()
-  await router.push('/categories/mock')
+  await confirmedNavigation(router, '/categories/mock')
   await settle()
   await check(host.querySelector('[aria-label="情境模組選擇"] input[value="m"]')!, true)
   expect((row('D Mock').querySelector('input[type="number"]') as HTMLInputElement).value).toBe('')
@@ -456,7 +457,7 @@ it('reports manual keys with no output instead of silently ignoring their defini
       { path: '/categories', component: { render: () => h('div') } },
     ],
   })
-  await router.push('/categories/empty/edit')
+  await confirmedNavigation(router, '/categories/empty/edit')
   await router.isReady()
   host = document.createElement('div')
   document.body.append(host)
@@ -471,7 +472,7 @@ it('reports manual keys with no output instead of silently ignoring their defini
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{Orphan}}')
   expect(retained?.fields).toEqual([field])
   snapshot('workbench-retained-no-output')
-  await router.push('/categories/empty/edit')
+  await confirmedNavigation(router, '/categories/empty/edit')
   await settle()
   await submit()
   await submit()
@@ -491,7 +492,7 @@ it('reports manual keys with no output instead of silently ignoring their defini
       2,
     ),
   )
-  await router.push('/categories/empty')
+  await confirmedNavigation(router, '/categories/empty')
   await settle()
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{Orphan}}')
   snapshot('workbench-no-output-error')
@@ -553,7 +554,7 @@ it('saves a base field without templates, reopens it, and later consumes the exa
       { path: '/categories', component: { render: () => h('div') } },
     ],
   })
-  await router.push('/categories/standalone/edit')
+  await confirmedNavigation(router, '/categories/standalone/edit')
   await router.isReady()
   host = document.createElement('div')
   document.body.append(host)
@@ -576,7 +577,7 @@ it('saves a base field without templates, reopens it, and later consumes the exa
   ])
   expect(host.querySelector('.basic-data-row')?.textContent).toContain('身分證')
   const savedField = structuredClone(saved.fields![1])
-  await router.push('/categories/standalone/edit')
+  await confirmedNavigation(router, '/categories/standalone/edit')
   await settle()
   await submit()
   await submit()
@@ -590,8 +591,8 @@ it('saves a base field without templates, reopens it, and later consumes the exa
   mocks.library = [
     { id: 'late', fileName: 'mock-late.docx', placeholders: listPlaceholders(data), data },
   ]
-  await router.push('/categories/standalone')
-  await router.push('/categories/standalone/edit')
+  await confirmedNavigation(router, '/categories/standalone')
+  await confirmedNavigation(router, '/categories/standalone/edit')
   await settle()
   await submit()
   await submit()
@@ -610,7 +611,7 @@ it('saves a base field without templates, reopens it, and later consumes the exa
     placeholders: listPlaceholders(exact),
     data: exact,
   })
-  await router.push('/categories/standalone/edit')
+  await confirmedNavigation(router, '/categories/standalone/edit')
   await settle()
   await submit()
   await submit()

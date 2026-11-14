@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { confirmedNavigation } from '@/test/confirmedNavigation'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, reactive, type App } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
@@ -86,7 +87,7 @@ async function mount() {
     history: createMemoryHistory(),
     routes: [{ path: '/categories/:id', component: CategoryView }],
   })
-  await router.push('/categories/mock')
+  await confirmedNavigation(router, '/categories/mock')
   host = document.createElement('div')
   document.body.append(host)
   app = createApp({ render: () => h(RouterView) }).use(router)
@@ -223,7 +224,7 @@ it('clears exited notes, retains shared field values, and clears on case change 
   expect(handled(item('J')).checked).toBe(false)
   expect(item('J').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('J only')
   expect((host.querySelector('#draft-0') as HTMLInputElement).value).toBe('Shared')
-  await router.push('/categories/other')
+  await confirmedNavigation(router, '/categories/other')
   await select('alcohol')
   expect(handled(item('D')).checked).toBe(false)
   expect(item('D').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('')
@@ -256,10 +257,10 @@ it('clears in-memory notes and values on sign-out (12)', async () => {
 it('keeps the production login and maintainer route guards (12)', async () => {
   const { router } = await import('@/router')
   mocks.session.authenticated = false
-  await router.push('/categories/mock')
+  await confirmedNavigation(router, '/categories/mock')
   expect(router.currentRoute.value.name).toBe('login')
   expect(router.currentRoute.value.query.redirect).toBe('/categories/mock')
   mocks.session.authenticated = true
-  await router.push('/categories/mock/edit')
+  await confirmedNavigation(router, '/categories/mock/edit')
   expect(router.currentRoute.value.name).toBe('category')
 })
