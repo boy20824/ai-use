@@ -130,6 +130,7 @@ function dragStart(event: DragEvent, index: number) {
 </script>
 <template>
   <ConfirmDialog
+    tone="danger"
     v-if="pendingRemove !== null"
     title="刪除照片"
     @confirm="confirmRemove"

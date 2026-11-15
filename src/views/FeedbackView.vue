@@ -181,6 +181,7 @@ onMounted(() => {
 
 <template>
   <ConfirmDialog
+    tone="danger"
     v-if="pendingDelete"
     title="刪除留言"
     @confirm="confirmRemove"

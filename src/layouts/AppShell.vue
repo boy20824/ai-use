@@ -11,6 +11,7 @@ const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
 const menuOpen = ref(false)
+const currentPage = ref<{ requestLeave?: () => Promise<boolean> } | null>(null)
 
 watch(
   () => route.fullPath,
@@ -26,6 +27,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 async function logout() {
+  if (currentPage.value?.requestLeave && !(await currentPage.value.requestLeave())) return
   await session.logout()
   menuOpen.value = false
   void router.push({ name: 'login' })
@@ -96,7 +98,9 @@ onUnmounted(() => {
 
       <main class="app-main flex-1 px-4 py-6 md:px-page-x md:py-page-y">
         <div class="mx-auto max-w-[1280px]">
-          <RouterView />
+          <RouterView v-slot="{ Component }">
+            <component :is="Component" ref="currentPage" />
+          </RouterView>
         </div>
       </main>
       <nav class="mobile-bottom-nav md:hidden" aria-label="行動導覽">

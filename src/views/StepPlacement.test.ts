@@ -183,7 +183,13 @@ it('synchronizes shared mock data in both directions including parallel work, la
 it('deduplicates missing prompts in a step and overview; clicking either focuses the first occurrence (8)', async () => {
   await mount()
   const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {})
-  expect(main('二').querySelectorAll('p button')).toHaveLength(3)
+  const prompts = [...main('二').querySelectorAll('p')].filter((p) =>
+    p.textContent?.includes('請先填寫：'),
+  )
+  expect(prompts.length).toBeGreaterThan(1)
+  for (const prompt of prompts) {
+    expect(prompt.querySelectorAll('button')).toHaveLength(3)
+  }
   await click(main('五'), '案由')
   expect(document.activeElement).toBe(field(main('二'), '案由'))
   expect(scroll).toHaveBeenCalledOnce()

@@ -412,6 +412,7 @@ async function onFiles(files: File[]) {
     </details>
 
     <ConfirmDialog
+      tone="danger"
       v-if="pendingDelete"
       title="移除範本"
       confirm-label="確定移除"

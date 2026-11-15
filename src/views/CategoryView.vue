@@ -714,26 +714,17 @@ defineExpose({ requestLeave })
       </button>
     </div>
 
-    <div
+    <ConfirmDialog
       v-if="confirmDelete"
-      class="mb-8 rounded-2xl border border-edge bg-surface p-5 shadow-card"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="delete-category-title"
+      :title="`刪除「${category.name}」`"
+      tone="danger"
+      confirm-label="確定刪除"
+      :busy="deleting"
+      @confirm="removeCategory"
+      @cancel="confirmDelete = false"
     >
-      <h2 id="delete-category-title" class="text-base font-semibold text-ink-strong">
-        刪除「{{ category.name }}」
-      </h2>
-      <p class="mt-2 text-sm leading-6 text-stone-600">
-        只會刪除這個流程、它的步驟，以及步驟和範本的連結。範本檔仍留在範本庫。
-      </p>
-      <div class="mt-4 flex flex-wrap gap-3">
-        <button type="button" class="btn-primary" :disabled="deleting" @click="removeCategory">
-          確定刪除
-        </button>
-        <button type="button" class="btn-secondary" @click="confirmDelete = false">取消</button>
-      </div>
-    </div>
+      只會刪除這個流程、它的步驟，以及步驟和範本的連結。範本檔仍留在範本庫。
+    </ConfirmDialog>
 
     <section
       v-if="tab === 'steps'"
@@ -822,21 +813,6 @@ defineExpose({ requestLeave })
       >
     </div>
     <div class="workbench-layout">
-      <aside class="workbench-library self-start rounded-2xl border border-edge bg-surface p-4">
-        <h2 class="font-semibold">全部範本</h2>
-        <p class="mt-2 text-xs text-ink-muted">{{ fieldKeyHint }}：{{ fieldNames.join('、') }}</p>
-        <ul class="mt-3 space-y-3">
-          <li v-for="item in contexts" :key="item.id">
-            <button
-              class="btn-ghost text-left text-sm text-accent-ink hover:underline"
-              :disabled="!canGenerateStep(item.stepId!)"
-              @click="produceOne(item.stepId!, item.templateId)"
-            >
-              {{ item.stepTitle }}：{{ displayFileName(item.fileName) }}
-            </button>
-          </li>
-        </ul>
-      </aside>
       <div class="workbench-content min-w-0">
         <div class="mb-6 flex flex-wrap gap-2" role="tablist" aria-label="工作台檢視">
           <button
@@ -1240,99 +1216,116 @@ defineExpose({ requestLeave })
           </div>
         </section>
       </div>
-      <section
-        id="parallel-work"
-        ref="parallelRegion"
-        role="region"
-        tabindex="-1"
-        aria-labelledby="parallel-work-title"
-        class="parallel-work focus-control rounded-2xl border border-edge bg-surface p-4"
-      >
-        <h2 id="parallel-work-title" class="font-semibold text-ink-strong">可同步作業區</h2>
-        <p class="mt-2 text-sm text-ink">需要前置資料的作業，請確認備齊後再進行</p>
-        <p class="mt-2 text-xs text-ink-muted">
-          「本次已處理」僅為本次手動註記，非系統驗證或法定程序完成；離開後清除。
-        </p>
-        <p v-if="parallelWork.length === 0" class="mt-4 text-sm text-ink-muted">
-          此情境組合沒有可同步作業
-        </p>
-        <ol v-else class="mt-4 space-y-4" aria-label="可同步作業清單">
-          <li
-            v-for="step in parallelWork"
-            :key="step.id"
-            class="parallel-work-item min-w-0 border-t border-edge pt-3"
-          >
-            <label class="mb-2 inline-flex cursor-pointer items-center gap-2 text-sm text-ink">
-              <input
-                v-model="handledSteps"
-                type="checkbox"
-                :value="step.id"
-                :aria-label="`${step.title ?? step.body}：本次已處理`"
-                class="focus-control h-4 w-4"
-              />
-              本次已處理
-            </label>
-            <details>
-              <summary class="focus-control cursor-pointer font-semibold text-ink">
-                {{ step.title ?? step.body }}
-              </summary>
-              <ul v-if="step.items?.length" class="mt-3 list-disc pl-5 text-sm">
-                <li v-for="(item, index) in step.items" :key="index">{{ item }}</li>
-              </ul>
-              <p
-                v-if="step.note"
-                class="mt-3 rounded-control bg-amber-100 p-3 text-sm text-amber-950"
-              >
-                {{ step.note }}
-              </p>
+      <div class="workbench-sidebar">
+        <aside class="workbench-library self-start rounded-2xl border border-edge bg-surface p-4">
+          <h2 class="font-semibold">全部範本</h2>
+          <p class="mt-2 text-xs text-ink-muted">{{ fieldKeyHint }}：{{ fieldNames.join('、') }}</p>
+          <ul class="mt-3 space-y-3">
+            <li v-for="item in contexts" :key="item.id">
               <button
-                type="button"
-                class="btn-ghost mt-3 text-sm text-accent-ink"
-                @click="printSop(step)"
+                class="btn-ghost text-left text-sm text-accent-ink hover:underline"
+                :disabled="!canGenerateStep(item.stepId!)"
+                @click="produceOne(item.stepId!, item.templateId)"
               >
-                列印 SOP
+                {{ item.stepTitle }}：{{ displayFileName(item.fileName) }}
               </button>
-              <WorkbenchStepFields
-                :fields="localFields(step.id)"
-                :date-override="stepDateOverrides[step.id]"
-                :shared-labels="sharedLabels"
-                :values="values"
-                :definitions="category.fields"
-                :prefix="`parallel-${step.id}`"
-                :missing="stepMissing(step.id)"
-                :templates="templatesFor(step)"
-                :photo-cells="photoCells"
-                :busy="busy || photoProcessing.size > 0"
-                :message="messageStepId === step.id ? message : ''"
-                :message-tone="messageTone"
-                @update="setField"
-                @update-date-override="setStepDateOverride(step.id, $event)"
-                @focus-field="focusField($event, step.id)"
-                @generate="(id) => produceOne(step.id, id)"
-                @generate-all="
-                  produceStep(
-                    step.id,
-                    step.templateIds,
-                    visibleSteps.findIndex((item) => item.id === step.id),
-                  )
-                "
-              >
-                <template #photos="{ templateId }">
-                  <PhotoBlockFields
-                    v-if="photoCells[templateId]"
-                    :template-id="templateId"
-                    :cells="photoCells[templateId]!"
-                    :draft="photoDrafts[templateId]"
-                    :busy="busy || photoProcessing.size > 0"
-                    @update="setPhotoDraft(templateId, $event)"
-                    @processing="setPhotoProcessing"
-                  />
-                </template>
-              </WorkbenchStepFields>
-            </details>
-          </li>
-        </ol>
-      </section>
+            </li>
+          </ul>
+        </aside>
+        <section
+          id="parallel-work"
+          ref="parallelRegion"
+          role="region"
+          tabindex="-1"
+          aria-labelledby="parallel-work-title"
+          class="parallel-work focus-control rounded-2xl border border-edge bg-surface p-4"
+        >
+          <h2 id="parallel-work-title" class="font-semibold text-ink-strong">可同步作業區</h2>
+          <p class="mt-2 text-sm text-ink">需要前置資料的作業，請確認備齊後再進行</p>
+          <p class="mt-2 text-xs text-ink-muted">
+            「本次已處理」僅為本次手動註記，非系統驗證或法定程序完成；離開後清除。
+          </p>
+          <p v-if="parallelWork.length === 0" class="mt-4 text-sm text-ink-muted">
+            此情境組合沒有可同步作業
+          </p>
+          <ol v-else class="mt-4 space-y-4" aria-label="可同步作業清單">
+            <li
+              v-for="step in parallelWork"
+              :key="step.id"
+              class="parallel-work-item min-w-0 border-t border-edge pt-3"
+            >
+              <label class="mb-2 inline-flex cursor-pointer items-center gap-2 text-sm text-ink">
+                <input
+                  v-model="handledSteps"
+                  type="checkbox"
+                  :value="step.id"
+                  :aria-label="`${step.title ?? step.body}：本次已處理`"
+                  class="focus-control h-4 w-4"
+                />
+                本次已處理
+              </label>
+              <details>
+                <summary class="focus-control cursor-pointer font-semibold text-ink">
+                  {{ step.title ?? step.body }}
+                </summary>
+                <ul v-if="step.items?.length" class="mt-3 list-disc pl-5 text-sm">
+                  <li v-for="(item, index) in step.items" :key="index">{{ item }}</li>
+                </ul>
+                <p
+                  v-if="step.note"
+                  class="mt-3 rounded-control bg-amber-100 p-3 text-sm text-amber-950"
+                >
+                  {{ step.note }}
+                </p>
+                <button
+                  type="button"
+                  class="btn-ghost mt-3 text-sm text-accent-ink"
+                  @click="printSop(step)"
+                >
+                  列印 SOP
+                </button>
+                <WorkbenchStepFields
+                  :fields="localFields(step.id)"
+                  :date-override="stepDateOverrides[step.id]"
+                  :shared-labels="sharedLabels"
+                  :values="values"
+                  :definitions="category.fields"
+                  :prefix="`parallel-${step.id}`"
+                  :missing="stepMissing(step.id)"
+                  :templates="templatesFor(step)"
+                  :photo-cells="photoCells"
+                  :busy="busy || photoProcessing.size > 0"
+                  :message="messageStepId === step.id ? message : ''"
+                  :message-tone="messageTone"
+                  @update="setField"
+                  @update-date-override="setStepDateOverride(step.id, $event)"
+                  @focus-field="focusField($event, step.id)"
+                  @generate="(id) => produceOne(step.id, id)"
+                  @generate-all="
+                    produceStep(
+                      step.id,
+                      step.templateIds,
+                      visibleSteps.findIndex((item) => item.id === step.id),
+                    )
+                  "
+                >
+                  <template #photos="{ templateId }">
+                    <PhotoBlockFields
+                      v-if="photoCells[templateId]"
+                      :template-id="templateId"
+                      :cells="photoCells[templateId]!"
+                      :draft="photoDrafts[templateId]"
+                      :busy="busy || photoProcessing.size > 0"
+                      @update="setPhotoDraft(templateId, $event)"
+                      @processing="setPhotoProcessing"
+                    />
+                  </template>
+                </WorkbenchStepFields>
+              </details>
+            </li>
+          </ol>
+        </section>
+      </div>
     </div>
   </div>
 

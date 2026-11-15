@@ -372,7 +372,7 @@ it('confirms removing a wizard step and keeps its values on cancel', async () =>
   )
   button('移除').click()
   await nextTick()
-  host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-primary')!.click()
+  host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-danger')!.click()
   await nextTick()
   expect(host.querySelector('#category-step-0')).toBeNull()
 })
