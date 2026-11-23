@@ -250,7 +250,15 @@ onMounted(() => {
       <p class="mt-2 text-xs text-ink-muted">還可輸入 {{ remaining }} 個字。</p>
     </div>
     <div class="mt-4 flex flex-wrap items-center gap-3">
-      <button type="submit" class="btn-primary" :disabled="pendingId === 'new'">送出</button>
+      <button
+        type="submit"
+        class="btn-primary"
+        :disabled="pendingId === 'new'"
+        :aria-busy="pendingId === 'new'"
+      >
+        <span v-if="pendingId === 'new'" class="btn-spinner" aria-hidden="true"></span>
+        送出
+      </button>
       <p class="text-xs text-ink-muted">送出後仍可編輯或刪除自己的留言。</p>
     </div>
   </form>
@@ -291,7 +299,10 @@ onMounted(() => {
           class="field w-full"
         ></textarea>
         <div class="flex gap-2">
-          <button type="submit" class="btn-primary px-3 py-2">儲存</button>
+          <button type="submit" class="btn-primary px-3 py-2" :aria-busy="pendingId === post.id">
+            <span v-if="pendingId === post.id" class="btn-spinner" aria-hidden="true"></span>
+            儲存
+          </button>
           <button type="button" class="btn-secondary px-3 py-2" @click="editingId = ''">
             取消
           </button>
@@ -361,7 +372,10 @@ onMounted(() => {
           ></textarea>
         </div>
         <div class="flex flex-wrap gap-3">
-          <button type="submit" class="btn-primary px-3 py-2">儲存回覆</button>
+          <button type="submit" class="btn-primary px-3 py-2" :aria-busy="pendingId === post.id">
+            <span v-if="pendingId === post.id" class="btn-spinner" aria-hidden="true"></span>
+            儲存回覆
+          </button>
           <button
             v-if="!owns(post)"
             type="button"

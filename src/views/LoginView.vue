@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppIcon from '@/components/AppIcon.vue'
+import { useCorgiMotion } from '@/composables/usePointerMotion'
 import { appName } from '@/config/app'
 import { useSessionStore } from '@/stores/session'
 import { safeRedirect } from '@/utils/redirect'
@@ -13,29 +14,56 @@ const username = ref('')
 const password = ref('')
 const failed = ref(false)
 const offline = ref(false)
+const pending = ref(false)
+const { hopping, parallaxStyle, hopOnce, onHopEnd, onParallax, resetParallax } = useCorgiMotion()
 
 async function submit() {
+  if (pending.value) return
   failed.value = false
   offline.value = false
-  const result = await session.login(username.value, password.value)
-  password.value = ''
-  if (result === 'invalid') {
-    failed.value = true
-    return
+  pending.value = true
+  try {
+    const result = await session.login(username.value, password.value)
+    password.value = ''
+    if (result === 'invalid') {
+      failed.value = true
+      return
+    }
+    if (result !== 'ok') {
+      offline.value = true
+      return
+    }
+    void router.push(safeRedirect(route.query.redirect))
+  } finally {
+    pending.value = false
   }
-  if (result !== 'ok') {
-    offline.value = true
-    return
-  }
-  void router.push(safeRedirect(route.query.redirect))
 }
 </script>
 
 <template>
   <main class="corgi-login">
-    <section class="corgi-stage" aria-label="平台登入">
+    <div class="bg-mist" aria-hidden="true"></div>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <section
+      class="corgi-stage"
+      aria-label="平台登入"
+      @pointermove="onParallax"
+      @pointerleave="resetParallax"
+    >
+      <div class="stage-mist" aria-hidden="true"></div>
+      <div class="stage-grid" aria-hidden="true"></div>
       <div class="corgi-portrait" aria-hidden="true">
-        <img src="/images/corgi-login-hero.webp" alt="" width="1152" height="864" />
+        <div class="corgi-parallax" :style="parallaxStyle">
+          <div class="corgi-hop" :class="{ 'is-hop': hopping }" @animationend.self="onHopEnd">
+            <div class="corgi-shadow"></div>
+            <div class="corgi-actor">
+              <div class="corgi-tilt">
+                <img src="/images/corgi-login-hero.webp" alt="" width="1152" height="864" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="corgi-hit" @pointerenter="hopOnce"></div>
       </div>
       <section class="corgi-card" aria-labelledby="login-title">
         <h1 id="login-title" class="corgi-brand">
@@ -71,7 +99,10 @@ async function submit() {
           <p v-if="failed" class="corgi-error" role="alert">帳號或密碼不正確。</p>
           <p v-if="offline" class="corgi-error" role="alert">無法連線。請確認服務已啟動。</p>
           <div class="corgi-actions">
-            <button type="submit" class="corgi-submit">登入</button>
+            <button type="submit" class="corgi-submit" :disabled="pending" :aria-busy="pending">
+              <span v-if="pending" class="btn-spinner" aria-hidden="true"></span>
+              登入
+            </button>
             <p class="corgi-register">
               <span>還沒有帳號？</span>
               <RouterLink to="/register">註冊</RouterLink>
@@ -86,6 +117,8 @@ async function submit() {
 
 <style scoped>
 .corgi-login {
+  position: relative;
+  overflow: hidden;
   min-height: 100dvh;
   padding: clamp(32px, 5vw, 72px);
   background: #edf0f2;
@@ -94,6 +127,7 @@ async function submit() {
 
 .corgi-stage {
   position: relative;
+  z-index: 1;
   isolation: isolate;
   display: grid;
   grid-template-rows: 1fr auto 1fr;
@@ -109,10 +143,12 @@ async function submit() {
 
 .corgi-portrait {
   position: absolute;
-  z-index: -1;
+  z-index: 1;
   inset: 0;
   overflow: hidden;
   pointer-events: none;
+  /* The animated wrappers isolate the image's blend from the stage. */
+  mix-blend-mode: multiply;
 }
 
 .corgi-portrait img {
@@ -127,7 +163,181 @@ async function submit() {
   mix-blend-mode: multiply;
 }
 
+.corgi-login .bg-mist,
+.corgi-login .bg-grid {
+  position: absolute;
+  inset: -30%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.corgi-login .bg-mist {
+  background:
+    radial-gradient(ellipse 72% 52% at 16% 24%, rgba(55, 64, 74, 0.22), transparent 58%),
+    radial-gradient(ellipse 58% 44% at 84% 76%, rgba(30, 36, 42, 0.16), transparent 52%),
+    radial-gradient(ellipse 42% 32% at 48% 100%, rgba(80, 88, 96, 0.14), transparent 60%);
+  animation: mist-drift 7s ease-in-out infinite alternate;
+}
+
+.corgi-login .bg-grid {
+  background-image: radial-gradient(rgba(28, 34, 40, 0.28) 1.15px, transparent 1.3px);
+  background-size: 20px 20px;
+  opacity: 0.7;
+  animation: grid-drift 7s linear infinite;
+}
+
+.corgi-stage .stage-mist,
+.corgi-stage .stage-grid {
+  position: absolute;
+  inset: -18%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.corgi-stage .stage-mist {
+  background:
+    radial-gradient(ellipse 60% 48% at 82% 36%, rgba(70, 78, 86, 0.06), transparent 64%),
+    radial-gradient(ellipse 46% 36% at 20% 88%, rgba(50, 58, 64, 0.04), transparent 60%);
+  animation: mist-drift 7.5s ease-in-out infinite alternate-reverse;
+}
+
+.corgi-stage .stage-grid {
+  background-image: radial-gradient(rgba(37, 43, 48, 0.1) 1px, transparent 1.2px);
+  background-size: 24px 24px;
+  opacity: 0.28;
+  animation: grid-drift 8s linear infinite;
+}
+
+@keyframes mist-drift {
+  from {
+    transform: translate3d(-5%, -3%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(5.5%, 3.4%, 0) scale(1.1);
+  }
+}
+
+@keyframes grid-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(20px, 20px, 0);
+  }
+}
+
+.corgi-parallax,
+.corgi-hop,
+.corgi-actor,
+.corgi-tilt {
+  position: absolute;
+  inset: 0;
+}
+
+.corgi-parallax {
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform 0.4s ease-out;
+}
+
+.corgi-actor,
+.corgi-tilt {
+  transform-origin: 72% 96%;
+}
+
+.corgi-actor {
+  animation: corgi-breathe 3.6s ease-in-out infinite;
+}
+
+.corgi-tilt {
+  animation: corgi-tilt 10.8s ease-in-out infinite;
+}
+
+.corgi-shadow {
+  position: absolute;
+  z-index: 2;
+  right: 10%;
+  bottom: 3.5%;
+  width: 38%;
+  height: 7%;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(28, 34, 40, 0.18) 0%,
+    rgba(28, 34, 40, 0.07) 42%,
+    transparent 72%
+  );
+  filter: blur(6px);
+  animation: corgi-shadow 3.6s ease-in-out infinite;
+}
+
+.corgi-hit {
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 54%;
+  z-index: 3;
+  pointer-events: auto;
+}
+
+@keyframes corgi-breathe {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-6px) scale(1.015);
+  }
+}
+
+@keyframes corgi-tilt {
+  0%,
+  26%,
+  58%,
+  100% {
+    transform: rotate(0deg);
+  }
+  34% {
+    transform: rotate(-2deg);
+  }
+  42% {
+    transform: rotate(1.8deg);
+  }
+  50% {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes corgi-shadow {
+  0%,
+  100% {
+    transform: scale(1, 1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.14, 0.82);
+    opacity: 0.5;
+  }
+}
+
+@keyframes corgi-hop {
+  0% {
+    transform: translateY(0);
+  }
+  40% {
+    transform: translateY(-10px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+.corgi-hop.is-hop {
+  animation: corgi-hop 500ms cubic-bezier(0.22, 1.35, 0.36, 1);
+}
+
 .corgi-card {
+  position: relative;
+  z-index: 4;
   grid-row: 2;
   width: 340px;
   max-width: 100%;
@@ -327,6 +537,16 @@ async function submit() {
     max-height: none;
   }
 
+  .corgi-hit {
+    width: 100%;
+    height: 268px;
+  }
+
+  .corgi-actor,
+  .corgi-tilt {
+    transform-origin: 70% 80%;
+  }
+
   .corgi-card {
     width: 100%;
     padding: 28px;
@@ -349,6 +569,37 @@ async function submit() {
     width: 100%;
     margin-top: auto;
     padding-top: 48px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-mist,
+  .bg-grid,
+  .stage-mist,
+  .stage-grid,
+  .corgi-actor,
+  .corgi-tilt,
+  .corgi-shadow,
+  .corgi-hop,
+  .corgi-hop.is-hop {
+    animation: none !important;
+  }
+  .corgi-parallax {
+    transform: none !important;
+    transition: none !important;
+  }
+  .corgi-hit {
+    pointer-events: none;
+  }
+}
+
+@media (hover: none), (pointer: coarse), (pointer: none) {
+  .corgi-hit {
+    pointer-events: none;
+  }
+  .corgi-parallax {
+    transform: none !important;
+    transition: none !important;
   }
 }
 </style>
