@@ -106,7 +106,8 @@ async function submit() {
     <p v-if="success" role="status" class="rounded-control bg-tone-ok p-3 text-sm text-tone-ok-ink">
       密碼已更新，其他裝置需重新登入。
     </p>
-    <button class="btn-primary" type="submit" :disabled="busy">
+    <button class="btn-primary" type="submit" :disabled="busy" :aria-busy="busy">
+      <span v-if="busy" class="btn-spinner" aria-hidden="true"></span>
       {{ busy ? '更新中…' : '更新密碼' }}
     </button>
   </form>

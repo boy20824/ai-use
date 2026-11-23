@@ -12,8 +12,10 @@ const username = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const message = ref('')
+const pending = ref(false)
 
 async function submit() {
+  if (pending.value) return
   message.value = ''
   if (!password.value.trim()) {
     message.value = '請填寫密碼。'
@@ -27,20 +29,25 @@ async function submit() {
     message.value = '兩次密碼不一致。'
     return
   }
-  const result = await session.register({
-    name: name.value,
-    nickname: nickname.value,
-    username: username.value,
-    password: password.value,
-    confirmPassword: confirmPassword.value,
-  })
-  password.value = ''
-  confirmPassword.value = ''
-  if (!result.ok) {
-    message.value = result.message
-    return
+  pending.value = true
+  try {
+    const result = await session.register({
+      name: name.value,
+      nickname: nickname.value,
+      username: username.value,
+      password: password.value,
+      confirmPassword: confirmPassword.value,
+    })
+    password.value = ''
+    confirmPassword.value = ''
+    if (!result.ok) {
+      message.value = result.message
+      return
+    }
+    void router.push('/')
+  } finally {
+    pending.value = false
   }
-  void router.push('/')
 }
 </script>
 
@@ -139,7 +146,10 @@ async function submit() {
             />
           </div>
           <p v-if="message" class="text-sm text-tone-danger-ink" role="alert">{{ message }}</p>
-          <button type="submit" class="btn-primary w-full">註冊帳號</button>
+          <button type="submit" class="btn-primary w-full" :disabled="pending" :aria-busy="pending">
+            <span v-if="pending" class="btn-spinner" aria-hidden="true"></span>
+            註冊帳號
+          </button>
         </form>
 
         <p class="mt-4 text-center text-sm text-stone-600">

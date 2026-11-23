@@ -1180,8 +1180,10 @@ defineExpose({ requestLeave })
                   type="button"
                   class="btn-primary"
                   :disabled="!canGenerateOverview"
+                  :aria-busy="busy"
                   @click="produceChecked"
                 >
+                  <span v-if="busy" class="btn-spinner" aria-hidden="true"></span>
                   產生勾選文件
                 </button>
                 <p v-if="!canGenerateOverview && overviewHint" class="text-sm text-amber-900">

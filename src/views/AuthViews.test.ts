@@ -115,3 +115,30 @@ it('does not fetch private release notes on the public login page and allows leg
   expect(session.login).toHaveBeenCalledWith('mock-user', 'short')
   expect(push).toHaveBeenCalledWith('/')
 })
+
+it('marks login busy only while the request is pending and redirects as soon as it succeeds', async () => {
+  let resolveLogin!: (result: 'ok') => void
+  const login = new Promise<'ok'>((resolve) => {
+    resolveLogin = resolve
+  })
+  session.login.mockReturnValue(login)
+  mount(LoginView)
+  await fill('username', 'mock-user')
+  await fill('password', 'short')
+  const button = host.querySelector<HTMLButtonElement>('button[type="submit"]')!
+
+  await submit()
+  expect(session.login).toHaveBeenCalledWith('mock-user', 'short')
+  expect(button.disabled).toBe(true)
+  expect(button.getAttribute('aria-busy')).toBe('true')
+  expect(button.querySelector('.btn-spinner')).not.toBeNull()
+  expect(push).not.toHaveBeenCalled()
+
+  resolveLogin('ok')
+  await login
+  expect(push).toHaveBeenCalledWith('/')
+  await nextTick()
+  expect(button.disabled).toBe(false)
+  expect(button.getAttribute('aria-busy')).toBe('false')
+  expect(button.querySelector('.btn-spinner')).toBeNull()
+})

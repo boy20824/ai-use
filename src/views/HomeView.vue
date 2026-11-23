@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import EmptyState from '@/components/EmptyState.vue'
+import CountUp from '@/components/CountUp.vue'
 import PageIntro from '@/components/PageIntro.vue'
+import { useSpotlight } from '@/composables/usePointerMotion'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
@@ -13,6 +15,7 @@ import { RouterLink } from 'vue-router'
 const categories = useCategoryStore()
 const templates = useTemplateStore()
 const session = useSessionStore()
+const { onMove } = useSpotlight()
 
 const latestTemplates = computed(() => templates.items.slice(0, 4))
 
@@ -30,7 +33,11 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
 </script>
 
 <template>
-  <PageIntro title="總覽" description="選擇案件類別，依範本步驟挑選範本並產出 .docx 文件。">
+  <PageIntro
+    class="enter enter-1"
+    title="總覽"
+    description="選擇案件類別，依範本步驟挑選範本並產出 .docx 文件。"
+  >
     <div class="flex gap-2">
       <RouterLink to="/categories" class="btn-primary">選擇案件、開始填寫</RouterLink>
       <RouterLink to="/templates" class="btn-secondary"
@@ -46,7 +53,7 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
     {{ categories.error || templates.error }}
   </p>
   <div class="overview-columns">
-    <section class="data-panel">
+    <section class="data-panel enter enter-2 lift-card spot" @pointermove="onMove">
       <div class="panel-heading">
         <h2>案件類別</h2>
         <RouterLink to="/categories" class="focus-control">全部案件範本 ›</RouterLink>
@@ -68,9 +75,10 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
           v-for="item in categories.items"
           :key="item.id"
           :to="`/categories/${item.id}`"
-          class="category-table-row focus-control"
+          class="category-table-row focus-control lift-row spot"
+          @pointermove="onMove"
           ><AppIcon name="folder" /><span class="category-name"
-            >{{ item.name }}<small>{{ item.steps.length }} 個範本步驟</small></span
+            >{{ item.name }}<small><CountUp :value="item.steps.length" /> 個範本步驟</small></span
           ><span class="group-badge" :class="item.group ?? 'criminal'">{{
             categoryGroups[item.group ?? 'criminal']
           }}</span
@@ -81,14 +89,17 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
         ></template
       >
     </section>
-    <section class="data-panel overview-library">
+    <section class="data-panel overview-library enter enter-3 lift-card spot" @pointermove="onMove">
       <div class="panel-heading">
         <h2>範本庫</h2>
         <RouterLink to="/templates" class="focus-control">全部 .docx ›</RouterLink>
       </div>
       <ul v-if="latestTemplates.length">
         <li v-for="item in latestTemplates" :key="item.id">
-          <RouterLink to="/templates" class="library-preview-row focus-control"
+          <RouterLink
+            to="/templates"
+            class="library-preview-row focus-control lift-row spot"
+            @pointermove="onMove"
             ><span class="entry-icon"><AppIcon /></span
             ><span
               ><strong>{{ displayFileName(item.fileName) }}</strong

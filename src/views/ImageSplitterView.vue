@@ -317,7 +317,13 @@ async function exportWord() {
         :aria-invalid="!!nameError"
         aria-describedby="splitter-word-hint"
       />
-      <button class="btn-primary" :disabled="busy || !!wordHint" @click="exportWord">
+      <button
+        class="btn-primary"
+        :disabled="busy || !!wordHint"
+        :aria-busy="busy"
+        @click="exportWord"
+      >
+        <span v-if="busy" class="btn-spinner" aria-hidden="true"></span>
         產出 Word
       </button>
       <p id="splitter-word-hint">

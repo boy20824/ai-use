@@ -804,7 +804,13 @@ async function submit() {
       >
         上一步
       </button>
-      <button type="submit" class="btn-primary" :disabled="saving">
+      <button
+        type="submit"
+        class="btn-primary"
+        :disabled="saving"
+        :aria-busy="wizard === 3 ? saving : undefined"
+      >
+        <span v-if="wizard === 3 && saving" class="btn-spinner" aria-hidden="true"></span>
         {{
           wizard === 2 && !variants.length
             ? '繼續設定步驟'

@@ -34,6 +34,9 @@ it('offers one primary workbench action and one secondary library action without
     expect(host.querySelectorAll('a.btn-primary')).toHaveLength(1)
     expect(host.querySelectorAll('a.btn-secondary')).toHaveLength(1)
     expect(host.querySelectorAll('.data-panel')).toHaveLength(2)
+    expect(host.querySelector('.page-intro.enter.enter-1')).not.toBeNull()
+    expect(host.querySelector('.data-panel.enter.enter-2.lift-card.spot')).not.toBeNull()
+    expect(host.querySelector('.overview-library.enter.enter-3.lift-card.spot')).not.toBeNull()
   } finally {
     app.unmount()
   }
