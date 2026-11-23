@@ -820,7 +820,7 @@
 }
 .group-badge.admin {
   background: #edf0f3;
-  color: #68717d;
+  color: var(--color-ink-muted);
 }
 .group-badge.internal {
   background: #faf2e1;
