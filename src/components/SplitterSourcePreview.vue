@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { cropBitmap, type Source } from '@/splitter/core'
+import { clampCrop, cropBitmap, type Source } from '@/splitter/core'
 import {
   clampScroll,
   edgeVelocity,
@@ -21,6 +21,7 @@ const height = ref(600)
 const scroll = ref(0)
 const message = ref('')
 const scale = computed(() => sourceScale(props.source.width, width.value))
+const crop = computed(() => clampCrop(props.source))
 const tiles = computed<ReturnType<typeof visibleTiles>>((previous) => {
   const next = measured.value
     ? visibleTiles(props.source.width, props.source.height, scale.value, scroll.value, height.value)
@@ -295,6 +296,16 @@ onBeforeUnmount(() => {
           height: `${(tile.end - tile.start) * scale}px`,
         }"
       />
+      <div
+        class="splitter-crop-shade"
+        :style="{ left: 0, width: `${(crop.cropLeft / source.width) * 100}%` }"
+        aria-hidden="true"
+      />
+      <div
+        class="splitter-crop-shade"
+        :style="{ right: 0, width: `${(crop.cropRight / source.width) * 100}%` }"
+        aria-hidden="true"
+      />
       <button
         v-for="index in lines"
         :key="`${source.id}-${index}`"
@@ -344,6 +355,12 @@ onBeforeUnmount(() => {
   left: 0;
   display: block;
   user-select: none;
+  pointer-events: none;
+}
+.splitter-crop-shade {
+  position: absolute;
+  inset-block: 0;
+  background: rgb(0 0 0 / 35%);
   pointer-events: none;
 }
 .splitter-cut {

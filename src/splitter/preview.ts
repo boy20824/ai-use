@@ -1,4 +1,4 @@
-import { bandRows, cropBitmap, type CropDecoder, type Source } from './core'
+import { bandRows, clampCrop, cropBitmap, cropWidth, type CropDecoder, type Source } from './core'
 
 export interface PreviewTarget {
   canvas: HTMLCanvasElement
@@ -7,7 +7,7 @@ export interface PreviewTarget {
   maxWidth: number
   maxHeight: number
 }
-type PreviewSource = Pick<Source, 'file' | 'width' | 'height'>
+type PreviewSource = Pick<Source, 'file' | 'width' | 'height' | 'cropLeft' | 'cropRight'>
 export type PreviewState = 'empty' | 'loading' | 'ready' | 'error'
 
 // One cropped bitmap at a time, no retained decoder bitmap. Thumbnails outside
@@ -54,6 +54,9 @@ export function createPreviewRenderer(
       while (source && !disposed) {
         const token = revision
         const requested = source
+        const { cropLeft } = clampCrop(requested)
+        const width = cropWidth(requested)
+        const rowsPerBand = Math.min(2048, bandRows(width))
         const selected = targets.filter(
           (target, index) => index === 0 || !observer || visible.has(target.canvas),
         )
@@ -63,22 +66,15 @@ export function createPreviewRenderer(
               throw new Error('預覽範圍無效。')
             const scale = Math.min(
               1,
-              Math.min(600, maxWidth) / requested.width,
+              Math.min(600, maxWidth) / width,
               Math.min(2048, maxHeight) / (end - start),
             )
-            canvas.width = Math.max(1, Math.round(requested.width * scale))
+            canvas.width = Math.max(1, Math.round(width * scale))
             canvas.height = Math.max(1, Math.round((end - start) * scale))
           }
-          for (
-            let start = 0;
-            start < requested.height;
-            start += Math.min(2048, bandRows(requested.width))
-          ) {
+          for (let start = 0; start < requested.height; start += rowsPerBand) {
             if (disposed || revision !== token) break
-            const end = Math.min(
-              requested.height,
-              start + Math.min(2048, bandRows(requested.width)),
-            )
+            const end = Math.min(requested.height, start + rowsPerBand)
             const intersecting = selected.filter(
               (target) => target.start < end && target.end > start,
             )
@@ -86,10 +82,11 @@ export function createPreviewRenderer(
             const bitmap = await cropBitmap(
               requested.file,
               start,
-              requested.width,
+              width,
               end - start,
               decode,
               () => !disposed && revision === token,
+              cropLeft,
             )
             try {
               if (disposed || revision !== token) break
@@ -102,7 +99,7 @@ export function createPreviewRenderer(
                   bitmap,
                   0,
                   top - start,
-                  requested.width,
+                  width,
                   bottom - top,
                   0,
                   ((top - from) * canvas.height) / (to - from),

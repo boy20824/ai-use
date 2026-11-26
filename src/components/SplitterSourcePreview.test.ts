@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, shallowRef, type App, type ShallowRef } from 'vue'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { format } from 'prettier'
+import { format, resolveConfig } from 'prettier'
 import Preview from './SplitterSourcePreview.vue'
 import { defaultCuts, moveCut, type Source } from '@/splitter/core'
 
@@ -164,12 +164,13 @@ describe('mounted scrolling source preview', () => {
     expect(box().scrollTop).toBe(12000)
     expect([...host.querySelectorAll('canvas')].every((canvas) => canvas.height <= 2048)).toBe(true)
     mkdirSync('evidence/splitter-scroll', { recursive: true })
+    const domPath = 'evidence/splitter-scroll/synthetic-dom.html'
     writeFileSync(
-      'evidence/splitter-scroll/synthetic-dom.html',
+      domPath,
       await format(
         '<!doctype html>\n<!-- Synthetic mounted DOM, not a browser screenshot. -->\n' +
           host.innerHTML,
-        { parser: 'html' },
+        { ...(await resolveConfig(domPath)), parser: 'html' },
       ),
     )
     writeFileSync(

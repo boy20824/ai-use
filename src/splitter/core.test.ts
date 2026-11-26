@@ -7,10 +7,14 @@ import { format } from 'prettier'
 import {
   batch,
   checkDimensions,
+  clampCrop,
+  cropLimit,
+  cropWidth,
   defaultCuts,
   dimensions,
   encodeSlice,
   makeZip,
+  moveCrop,
   moveCut,
   plan,
   reorder,
@@ -129,6 +133,60 @@ describe('source row splitting and real PNG pipeline', () => {
     expect(() => checkDimensions(4000, 4000)).not.toThrow()
     const fixture = encodeSlice(pixels(3, 10), 3, 10, { start: 0, end: 10 })
     expect(dimensions(fixture)).toEqual({ width: 3, height: 10 })
+  })
+  it('clamps crop offsets to integer pixels and preserves at least 10% of the source', () => {
+    expect(cropWidth({ width: 17 })).toBe(17)
+    expect(clampCrop({ width: 100, cropLeft: -2, cropRight: 19.6 })).toEqual({
+      cropLeft: 0,
+      cropRight: 20,
+    })
+    const image = { width: 101, cropLeft: 20, cropRight: 10 }
+    expect(cropLimit(image, 'cropRight')).toBe(70)
+    const crop = moveCrop(image, 'cropRight', 1000)
+    expect(crop).toEqual({ cropLeft: 20, cropRight: 70 })
+    expect(cropWidth({ ...image, ...crop })).toBe(11)
+    expect(moveCrop(image, 'cropLeft', 4.6)).toEqual({ cropLeft: 5, cropRight: 10 })
+    expect(moveCrop(image, 'cropLeft', Infinity)).toEqual({ cropLeft: 20, cropRight: 10 })
+    expect(clampCrop({ width: 3, cropLeft: 1, cropRight: 6 })).toEqual({
+      cropLeft: 1,
+      cropRight: 1,
+    })
+    expect(cropWidth({ width: 1, cropLeft: 5, cropRight: 9 })).toBe(1)
+  })
+  it('plans, batches and packages cropped pixels in the original row and slice order', async () => {
+    const image = { ...source(17, 5, 1), cuts: [2], cropLeft: 3, cropRight: 5 }
+    const original = pixels(image.width, image.height)
+    const croppedRow = (y: number) => original.slice((y * 17 + 3) * 4, (y * 17 + 12) * 4)
+    const read = async (_source: Source, start: number, end: number) =>
+      Buffer.concat(Array.from({ length: end - start }, (_, i) => croppedRow(start + i)))
+    const entries = plan([image])
+    expect(entries.map(({ x, width, start, end }) => ({ x, width, start, end }))).toEqual([
+      { x: 3, width: 9, start: 0, end: 2 },
+      { x: 3, width: 9, start: 2, end: 5 },
+    ])
+    const zip = await JSZip.loadAsync((await makeZip([image], () => true, read))!, {
+      checkCRC32: true,
+    })
+    for (const { path, width, start, end } of entries) {
+      const png = decode(await zip.file(path)!.async('uint8array'))
+      expect(png).toEqual({ width, height: end - start, pixels: await read(image, start, end) })
+    }
+    const single: string[] = []
+    await batch(
+      [image],
+      () => true,
+      async (path, png) => {
+        single.push(path)
+        expect(decode(new Uint8Array(await png.arrayBuffer()))).toEqual({
+          width: 9,
+          height: 3,
+          pixels: await read(image, 2, 5),
+        })
+      },
+      read,
+      { imageIndex: 0, sliceIndex: 1 },
+    )
+    expect(single).toEqual(['001/002.png'])
   })
   it('runs decode sequentially in reordered image order; ZIP paths, dimensions and pixels match the actual batch', async () => {
     const sources = reorder([source(17, 10000, 1), source(23, 3584, 2)], 1, 0)

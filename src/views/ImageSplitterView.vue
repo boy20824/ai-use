@@ -5,17 +5,32 @@ import PageIntro from '@/components/PageIntro.vue'
 import {
   batch,
   checkDimensions,
+  clampCrop,
+  cropLimit,
+  cropWidth,
   defaultCuts,
   readDimensions,
   LIMITS,
   makeZip,
+  moveCrop,
   moveCut,
   pad,
   reorder,
   slices,
+  type CropSide,
   type Source,
 } from '@/splitter/core'
 import { createDocx, DOCX_MIME, docxFilename, victimNameError } from '@/splitter/docx'
+import {
+  cellSize,
+  chooseGrid,
+  imageScaleLimit,
+  ORIGINAL_LAYOUT,
+  pagesNeeded,
+  summarizeSliceFit,
+  type Orientation,
+  type PerPage,
+} from '@/splitter/layout'
 import { createPreviewRenderer, type PreviewState, type PreviewTarget } from '@/splitter/preview'
 import { computed, onBeforeUnmount, ref, shallowRef, watchPostEffect } from 'vue'
 
@@ -28,6 +43,32 @@ const wordProgress = ref('')
 const images = shallowRef<Source[]>([])
 const selected = ref<number>()
 const current = computed(() => images.value.find((image) => image.id === selected.value))
+const currentWidth = computed(() => (current.value ? cropWidth(current.value) : 0))
+const perPage = ref<PerPage>(ORIGINAL_LAYOUT.perPage)
+const orientation = ref<Orientation>(ORIGINAL_LAYOUT.orientation)
+const layout = computed(() => ({ perPage: perPage.value, orientation: orientation.value }))
+const orientationLabels = { landscape: '橫式', portrait: '直式' }
+const pageOptions = [3, 4, 6] as const
+const cropLabels = { cropLeft: '左側裁掉 px', cropRight: '右側裁掉 px' }
+const sliceSizes = computed(() =>
+  images.value.flatMap((image) => {
+    const width = cropWidth(image)
+    return slices(image.height, image.cuts).map(({ start, end }) => ({
+      width,
+      height: end - start,
+    }))
+  }),
+)
+const wordSummary = computed(() => {
+  const sizes = sliceSizes.value
+  const settings = layout.value
+  const grid = chooseGrid(settings.perPage, settings.orientation, sizes)
+  const print = summarizeSliceFit(sizes, cellSize(settings, grid), imageScaleLimit(settings))
+  if (!print) return
+  const originalPages = pagesNeeded(sizes.length, ORIGINAL_LAYOUT.perPage)
+  const pages = pagesNeeded(sizes.length, settings.perPage)
+  return { grid, pages, originalPages, saved: originalPages - pages, ...print }
+})
 const busy = ref(false)
 const error = ref('')
 const status = ref('尚未加入圖片')
@@ -149,6 +190,21 @@ function reset() {
     item.id === id ? { ...item, cuts: defaultCuts(item.height) } : item,
   )
 }
+function applyCrop(crop: ReturnType<typeof clampCrop>, all = false) {
+  if (!current.value || busy.value) return
+  const id = current.value.id
+  releaseDownloads()
+  images.value = images.value.map((image) =>
+    all || image.id === id ? { ...image, ...clampCrop({ ...image, ...crop }) } : image,
+  )
+}
+function editCrop(side: CropSide, event: Event) {
+  if (!current.value || busy.value) return
+  const input = event.target as HTMLInputElement
+  const crop = moveCrop(current.value, side, input.valueAsNumber)
+  input.value = String(crop[side])
+  if (crop[side] !== (current.value[side] ?? 0)) applyCrop(crop)
+}
 function save(bytes: Uint8Array<ArrayBuffer> | Blob, name: string, type: string) {
   if (!alive) return
   const url = URL.createObjectURL(bytes instanceof Blob ? bytes : new Blob([bytes], { type }))
@@ -223,6 +279,7 @@ async function exportWord() {
     const bytes = await createDocx({
       name,
       total,
+      layout: layout.value,
       active,
       images: (append) =>
         batch(snapshot, active, async (_path, png) => {
@@ -271,8 +328,9 @@ async function exportWord() {
       description="多張長截圖，依序切成方便檢視的 PNG。所有圖片僅於本機瀏覽器處理，不上傳、不儲存。"
     />
     <div class="splitter-note">
-      預設每片 1792 個來源像素，末片保留實際高度；原寬、不縮放、不補白，不避開訊息。
-      可拖動切線，或聚焦切線以方向鍵調整 1px（Shift：10px，Home／End：可用範圍邊界）。
+      預設每片 1792 個來源像素，末片保留實際高度；預設保留原寬，也可左右裁切。PNG
+      不縮放、不補白，不避開訊息。 可拖動切線，或聚焦切線以方向鍵調整
+      1px（Shift：10px，Home／End：可用範圍邊界）。
     </div>
     <div class="splitter-upload" @dragover.prevent @drop.prevent="drop">
       <button class="btn-primary" :disabled="busy" @click="input?.click()">選擇多張圖片</button>
@@ -317,6 +375,36 @@ async function exportWord() {
         :aria-invalid="!!nameError"
         aria-describedby="splitter-word-hint"
       />
+      <fieldset class="splitter-options" :disabled="busy">
+        <legend>版面</legend>
+        <fieldset class="splitter-choice">
+          <legend>每頁張數</legend>
+          <label v-for="count in pageOptions" :key="count">
+            <input v-model="perPage" type="radio" name="splitter-per-page" :value="count" />
+            {{ count }} 張{{ count === 3 ? '（原版）' : '' }}
+          </label>
+        </fieldset>
+        <fieldset class="splitter-choice">
+          <legend>紙張方向</legend>
+          <label v-for="(label, value) in orientationLabels" :key="value">
+            <input v-model="orientation" type="radio" name="splitter-orientation" :value="value" />
+            {{ label }}
+          </label>
+        </fieldset>
+      </fieldset>
+      <div v-if="wordSummary" class="splitter-word-summary" aria-live="polite">
+        <p>每頁 {{ wordSummary.grid.cols }} 欄 × {{ wordSummary.grid.rows }} 列</p>
+        <p>
+          預計 {{ wordSummary.pages }} 頁（原版 {{ wordSummary.originalPages }} 頁，省
+          {{ wordSummary.saved }} 頁）
+        </p>
+        <p>縮放比例最小的切片約 {{ Math.round(wordSummary.dpi) }} dpi。</p>
+        <p v-if="wordSummary.heightTip">
+          建議把切片高度調整為約 {{ wordSummary.heightTip.height }} px，可讓每張圖再放大約
+          {{ wordSummary.heightTip.percent }}%
+        </p>
+        <p v-if="wordSummary.dpi < 110">文字可能偏小，建議調小切片高度或裁掉左右空白。</p>
+      </div>
       <button
         class="btn-primary"
         :disabled="busy || !!wordHint"
@@ -327,7 +415,10 @@ async function exportWord() {
         產出 Word
       </button>
       <p id="splitter-word-hint">
-        {{ wordHint || '每頁依序放置 3 張切片，姓名僅用於本機產出 Word。' }}
+        {{
+          wordHint ||
+          `每頁依序放置 ${perPage} 張切片，使用 A4 ${orientationLabels[orientation]}。姓名僅用於本機產出 Word。`
+        }}
       </p>
       <p v-if="wordProgress" role="status">{{ wordProgress }}</p>
     </div>
@@ -385,6 +476,42 @@ async function exportWord() {
           原圖以原尺寸顯示，超過可用寬度才縮小；可捲動查看完整圖片，輸出保留來源像素。ZIP
           路徑：圖片編號／切片編號.png。
         </p>
+        <fieldset class="splitter-options splitter-crop" :disabled="busy">
+          <legend>左右裁切</legend>
+          <div v-for="(label, side) in cropLabels" :key="side" class="splitter-crop-control">
+            <label :id="`splitter-label-${side}`" :for="`splitter-${side}`">{{ label }}</label>
+            <input
+              :id="`splitter-${side}`"
+              type="number"
+              min="0"
+              :max="cropLimit(current, side)"
+              step="1"
+              :value="current[side] ?? 0"
+              @change="editCrop(side, $event)"
+            />
+            <input
+              type="range"
+              :aria-labelledby="`splitter-label-${side}`"
+              min="0"
+              :max="cropLimit(current, side)"
+              step="1"
+              :value="current[side] ?? 0"
+              @input="editCrop(side, $event)"
+            />
+          </div>
+          <div class="splitter-actions">
+            <button class="btn-secondary" @click="applyCrop({ cropLeft: 0, cropRight: 0 })">
+              重設裁切
+            </button>
+            <button
+              class="btn-secondary"
+              :disabled="images.length < 2"
+              @click="applyCrop(clampCrop(current), true)"
+            >
+              套用到全部圖片
+            </button>
+          </div>
+        </fieldset>
         <p
           class="splitter-preview-status"
           :data-state="previewState"
@@ -398,7 +525,7 @@ async function exportWord() {
           <li v-for="(slice, index) in slices(current.height, current.cuts)" :key="index">
             <div
               class="splitter-thumbnail"
-              :style="{ aspectRatio: `${current.width} / ${slice.end - slice.start}` }"
+              :style="{ aspectRatio: `${currentWidth} / ${slice.end - slice.start}` }"
             >
               <canvas
                 ref="sliceCanvases"
@@ -411,7 +538,7 @@ async function exportWord() {
             </div>
             <div>
               <strong>{{ pad(index) }}.png</strong>
-              <p>{{ current.width }} × {{ slice.end - slice.start }}px</p>
+              <p>{{ currentWidth }} × {{ slice.end - slice.start }}px</p>
               <small>來源列 [{{ slice.start }}, {{ slice.end }})</small>
             </div>
             <button
@@ -434,12 +561,58 @@ async function exportWord() {
   padding: 16px;
   line-height: 1.8;
 }
-.splitter-word input {
+.splitter-word input[type='text'],
+.splitter-crop input[type='number'] {
   border: 1px solid var(--color-edge);
   border-radius: 4px;
   padding: 8px;
   margin: 8px;
   max-width: 100%;
+}
+.splitter-options {
+  border: 1px solid var(--color-edge);
+  border-radius: 4px;
+  padding: 0 12px 8px;
+  margin: 8px 0;
+  min-width: 0;
+}
+.splitter-options > legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+.splitter-choice {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+.splitter-choice label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px;
+  min-height: 44px;
+  min-width: 44px;
+}
+.splitter-word-summary {
+  margin: 8px 0;
+}
+.splitter-crop-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+.splitter-crop-control input {
+  min-height: 44px;
+}
+.splitter-crop input[type='number'] {
+  width: 7em;
+  margin: 4px 0;
+}
+.splitter-crop-control input[type='range'] {
+  flex: 1 1 120px;
+  min-width: 0;
 }
 
 .splitter-note,

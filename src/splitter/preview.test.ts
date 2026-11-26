@@ -22,6 +22,27 @@ function drawing() {
   return draw
 }
 describe('cropped local preview', () => {
+  it('decodes and draws only the retained columns after changing the crop', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    const draw = drawing()
+    const report = vi.fn()
+    const decode = vi.fn(
+      async (_file: File, _x: number, _y: number, width: number, height: number) =>
+        ({ width, height, close() {} }) as ImageBitmap,
+    )
+    const renderer = createPreviewRenderer(report, decode)
+    const image = { ...source(), height: 100 }
+    const thumb = target(5, 25)
+    renderer.update(image, [thumb])
+    await vi.waitFor(() => expect(report).toHaveBeenLastCalledWith('ready', expect.any(String)))
+    expect(thumb.canvas.width).toBe(17)
+    renderer.update({ ...image, cropLeft: 3, cropRight: 5 }, [thumb])
+    await vi.waitFor(() => expect(report).toHaveBeenLastCalledWith('ready', expect.any(String)))
+    expect(decode).toHaveBeenLastCalledWith(image.file, 3, 0, 9, 100)
+    expect(thumb.canvas.width).toBe(9)
+    expect(draw).toHaveBeenLastCalledWith(expect.anything(), 0, 5, 9, 20, 0, 0, 9, 20)
+    renderer.dispose()
+  })
   it('uses only sequential cropped bitmaps, bounded backing stores and source row coordinates', async () => {
     vi.stubGlobal('IntersectionObserver', undefined)
     const draw = drawing(),
