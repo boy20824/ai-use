@@ -1,30 +1,24 @@
 import { docxMimeType } from '../../shared/templateUpload.ts'
 import { loginWithCsrf } from './loginTestHelper.ts'
+import {
+  makeConfig,
+  testOrigin as allowedOrigin,
+  testPasswords as passwords,
+  testSamplePath as samplePath,
+} from './testSupport.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import PizZip from 'pizzip'
 import bcrypt from 'bcryptjs'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
-import type { AppConfig, SeedPasswords } from './config.ts'
+import type { AppConfig } from './config.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
 import { buildMockPdf } from '../../shared/mockPdfFixture'
 import { templateFilePath } from './files.ts'
 import { existsSync, readFileSync } from 'node:fs'
 import { seedReferenceData } from './seed.ts'
-
-const passwords: SeedPasswords = {
-  clerk: 'clerk-pass',
-  admin: 'admin-pass',
-  viewer: 'viewer-pass',
-}
-
-const samplePath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../public/samples/field-note.docx',
-)
 
 function buildDocx(text: string) {
   const zip = new PizZip()
@@ -77,41 +71,10 @@ function multipart(
   }
 }
 
-const allowedOrigin = 'http://localhost:5173'
 const scratch = mkdtempSync(path.join(tmpdir(), 'ai-use-api-'))
 
-function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
-  return {
-    host: '127.0.0.1',
-    port: 0,
-    databasePath: ':memory:',
-    uploadDir: mkdtempSync(path.join(scratch, 'up-')),
-    sessionSecret: '',
-    sessionTtlHours: 1,
-    cookieSecure: false,
-    corsOrigins: [allowedOrigin],
-    maxUploadBytes: 1024 * 1024,
-    maxZipEntries: 32,
-    maxZipUncompressedBytes: 8 * 1024 * 1024,
-    loginMaxFailures: 5,
-    loginLockoutMinutes: 15,
-    globalRatePerMinute: 120,
-    loginRatePerMinute: 30,
-    registerIpLimit: 5,
-    registerGlobalLimit: 30,
-    registerWindowMs: 60 * 60 * 1000,
-    sampleTemplatePath: samplePath,
-    seedSampleData: false,
-    staticDir: undefined,
-    trustProxy: false,
-    seedDemoUsers: true,
-    passwords,
-    ...overrides,
-  }
-}
-
 async function createApp(overrides: Partial<AppConfig> = {}) {
-  const config = testConfig(overrides)
+  const config = makeConfig({ scratch }, overrides)
   const db = openDatabase(':memory:')
   migrate(db)
   seedReferenceData(createQueries(db), passwords, samplePath, config.uploadDir, false)
@@ -461,11 +424,14 @@ describe('api', () => {
     'rejects incorrect PDF magic, extension and MIME, enforces per-kind limits, and counts PDF quota bytes (Word cap %i)',
     async (maxUploadBytes) => {
       const data = buildMockPdf()
-      const config = testConfig({
-        maxUploadBytes,
-        maxPdfUploadBytes: data.length,
-        templateBytesGlobal: data.length,
-      })
+      const config = makeConfig(
+        { scratch },
+        {
+          maxUploadBytes,
+          maxPdfUploadBytes: data.length,
+          templateBytesGlobal: data.length,
+        },
+      )
       const db = openDatabase(':memory:')
       migrate(db)
       databases.push(db)
@@ -622,7 +588,7 @@ describe('api', () => {
   it('limits requests per IP across routes and resets after one minute', async () => {
     const db = openDatabase(':memory:')
     migrate(db)
-    const app = await buildApp(db, testConfig({ globalRatePerMinute: 2 }))
+    const app = await buildApp(db, makeConfig({ scratch }, { globalRatePerMinute: 2 }))
     const now = Date.now()
     const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
     try {
@@ -650,7 +616,7 @@ describe('api', () => {
   it('exempts health checks, including query strings, from consuming the quota', async () => {
     const db = openDatabase(':memory:')
     migrate(db)
-    const app = await buildApp(db, testConfig({ globalRatePerMinute: 1 }))
+    const app = await buildApp(db, makeConfig({ scratch }, { globalRatePerMinute: 1 }))
     try {
       for (let index = 0; index < 3; index += 1) {
         const health = await app.inject('/healthz?probe=1')
@@ -854,7 +820,7 @@ describe('api', () => {
   })
 
   it('accepts a template larger than the JSON body limit within the upload limit', async () => {
-    const config = testConfig({ maxUploadBytes: 2 * 1024 * 1024 })
+    const config = makeConfig({ scratch }, { maxUploadBytes: 2 * 1024 * 1024 })
     const db = openDatabase(':memory:')
     migrate(db)
     seedReferenceData(createQueries(db), passwords, samplePath, config.uploadDir, false)
@@ -905,7 +871,7 @@ describe('api', () => {
   })
 
   it('rejects an oversized upload', async () => {
-    const config = testConfig({ maxUploadBytes: 32 })
+    const config = makeConfig({ scratch }, { maxUploadBytes: 32 })
     const db = openDatabase(':memory:')
     migrate(db)
     seedReferenceData(createQueries(db), passwords, samplePath, config.uploadDir, false)

@@ -9,6 +9,7 @@ import { assertSafeZip, listPlaceholders, normalizeDocx, normalizeWordXml } from
 import { createQueries, migrate, openDatabase } from './db.ts'
 import { buildApp } from './app.ts'
 import type { AppConfig } from './config.ts'
+import { makeConfig } from './testSupport.ts'
 
 const limits = { maxEntries: 64, maxUncompressedBytes: 1024 * 1024 }
 const mainType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'
@@ -351,33 +352,23 @@ async function boot(overrides: Partial<AppConfig> = {}) {
       nickname: id,
       role: id === 'admin' ? 'sysadmin' : 'user',
     })
-  const config: AppConfig = {
-    host: '127.0.0.1',
-    port: 0,
-    databasePath: ':memory:',
-    uploadDir: dir,
-    sessionSecret: '',
-    sessionTtlHours: 1,
-    cookieSecure: false,
-    corsOrigins: ['http://localhost'],
-    maxUploadBytes: 1024 * 1024,
-    maxZipEntries: 64,
-    maxZipUncompressedBytes: 1024 * 1024,
-    loginMaxFailures: 3,
-    loginLockoutMinutes: 15,
-    globalRatePerMinute: 1000,
-    loginRatePerMinute: 1000,
-    registerIpLimit: 100,
-    registerGlobalLimit: 100,
-    registerWindowMs: 3600000,
-    sampleTemplatePath: '',
-    seedSampleData: false,
-    staticDir: undefined,
-    trustProxy: false,
-    seedDemoUsers: false,
-    passwords: undefined,
-    ...overrides,
-  }
+  const config = makeConfig(
+    { uploadDir: dir },
+    {
+      corsOrigins: ['http://localhost'],
+      maxZipEntries: 64,
+      maxZipUncompressedBytes: 1024 * 1024,
+      loginMaxFailures: 3,
+      globalRatePerMinute: 1000,
+      loginRatePerMinute: 1000,
+      registerIpLimit: 100,
+      registerGlobalLimit: 100,
+      sampleTemplatePath: '',
+      seedDemoUsers: false,
+      passwords: undefined,
+      ...overrides,
+    },
+  )
   const app = await buildApp(db, config)
   disposers.push(() => app.close())
   async function auth(username = 'admin') {

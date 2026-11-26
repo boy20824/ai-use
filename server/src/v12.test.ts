@@ -1,71 +1,23 @@
 import { docxMimeType } from '../../shared/templateUpload.ts'
 import { loginWithCsrf } from './loginTestHelper.ts'
+import {
+  buildMinimalDocx,
+  makeConfig,
+  testOrigin as origin,
+  testPasswords as passwords,
+  testSamplePath as samplePath,
+} from './testSupport.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import PizZip from 'pizzip'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { buildApp } from './app.ts'
-import type { AppConfig, SeedPasswords } from './config.ts'
+import type { AppConfig } from './config.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
 import { seedReferenceData } from './seed.ts'
 
-const passwords: SeedPasswords = {
-  clerk: 'clerk-pass',
-  admin: 'admin-pass',
-  viewer: 'viewer-pass',
-}
-const origin = 'http://localhost:5173'
-const samplePath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../public/samples/field-note.docx',
-)
 const scratch = mkdtempSync(path.join(tmpdir(), 'ai-use-v12-'))
 const xssPayload = '<img src=x onerror="alert(1)"><script>alert(1)</script>'
-
-function config(overrides: Partial<AppConfig> = {}): AppConfig {
-  return {
-    host: '127.0.0.1',
-    port: 0,
-    databasePath: ':memory:',
-    uploadDir: mkdtempSync(path.join(scratch, 'up-')),
-    sessionSecret: '',
-    sessionTtlHours: 1,
-    cookieSecure: false,
-    corsOrigins: [origin],
-    maxUploadBytes: 1024 * 1024,
-    maxZipEntries: 32,
-    maxZipUncompressedBytes: 8 * 1024 * 1024,
-    loginMaxFailures: 8,
-    loginLockoutMinutes: 15,
-    globalRatePerMinute: 120,
-    loginRatePerMinute: 60,
-    registerIpLimit: 5,
-    registerGlobalLimit: 30,
-    registerWindowMs: 60 * 60 * 1000,
-    sampleTemplatePath: samplePath,
-    seedSampleData: false,
-    staticDir: undefined,
-    trustProxy: false,
-    seedDemoUsers: true,
-    passwords,
-    ...overrides,
-  }
-}
-
-function docx(text: string) {
-  const zip = new PizZip()
-  zip.file(
-    '[Content_Types].xml',
-    '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
-  )
-  zip.file(
-    'word/document.xml',
-    `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`,
-  )
-  return zip.generate({ type: 'nodebuffer' }) as Uint8Array
-}
 
 function multipart(name: string, data: Uint8Array) {
   const boundary = '----v12'
@@ -83,7 +35,10 @@ function multipart(name: string, data: Uint8Array) {
 }
 
 async function boot(overrides: Partial<AppConfig> = {}) {
-  const appConfig = config(overrides)
+  const appConfig = makeConfig(
+    { scratch },
+    { loginMaxFailures: 8, loginRatePerMinute: 60, ...overrides },
+  )
   const db = openDatabase(':memory:')
   migrate(db)
   seedReferenceData(createQueries(db), passwords, samplePath, appConfig.uploadDir, false)
@@ -381,7 +336,7 @@ describe('v1.2 access, registration, and feedback', () => {
     expect(granted.statusCode).toBe(200)
     expect(queries.findUserByUsername('worker1')?.canManageCategories).toBe(true)
 
-    const file = multipart('筆錄.docx', docx('hello'))
+    const file = multipart('筆錄.docx', buildMinimalDocx('hello'))
     const uploaded = await app.inject({
       method: 'POST',
       url: '/api/templates',

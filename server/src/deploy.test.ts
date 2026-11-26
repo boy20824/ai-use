@@ -1,11 +1,16 @@
 import { loginWithCsrf } from './loginTestHelper.ts'
+import {
+  makeConfig,
+  testPasswords as passwords,
+  testSamplePath as samplePath,
+} from './testSupport.ts'
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
-import { loadConfig, resolveServerPath, type AppConfig, type SeedPasswords } from './config.ts'
+import { loadConfig, resolveServerPath } from './config.ts'
 import { createQueries, migrate, openDatabase } from './db.ts'
 import { templateFilePath } from './files.ts'
 import { seedReferenceData } from './seed.ts'
@@ -14,17 +19,14 @@ import { createShutdown } from './shutdown.ts'
 // Configuration tests use only explicit mock env values, never local .env files.
 vi.mock('dotenv', () => ({ config: vi.fn() }))
 
-const passwords: SeedPasswords = {
-  clerk: 'clerk-pass',
-  admin: 'admin-pass',
-  viewer: 'viewer-pass',
-}
-const samplePath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../public/samples/field-note.docx',
-)
 const scratch = mkdtempSync(path.join(tmpdir(), 'ai-use-deploy-'))
 const longSecret = 'a'.repeat(32)
+const deploymentDefaults = {
+  corsOrigins: [],
+  maxZipEntries: 8,
+  maxZipUncompressedBytes: 64 * 1024,
+  loginRatePerMinute: 20,
+}
 
 function withEnv(values: Record<string, string | undefined>, run: () => void) {
   const previous = new Map<string, string | undefined>()
@@ -40,36 +42,6 @@ function withEnv(values: Record<string, string | undefined>, run: () => void) {
       if (value === undefined) delete process.env[key]
       else process.env[key] = value
     }
-  }
-}
-
-function appConfig(overrides: Partial<AppConfig> = {}): AppConfig {
-  return {
-    host: '127.0.0.1',
-    port: 0,
-    databasePath: ':memory:',
-    uploadDir: mkdtempSync(path.join(scratch, 'up-')),
-    sessionSecret: '',
-    sessionTtlHours: 1,
-    cookieSecure: false,
-    corsOrigins: [],
-    maxUploadBytes: 1024 * 1024,
-    maxZipEntries: 8,
-    maxZipUncompressedBytes: 64 * 1024,
-    loginMaxFailures: 5,
-    loginLockoutMinutes: 15,
-    globalRatePerMinute: 120,
-    loginRatePerMinute: 20,
-    registerIpLimit: 5,
-    registerGlobalLimit: 30,
-    registerWindowMs: 60 * 60 * 1000,
-    sampleTemplatePath: samplePath,
-    seedSampleData: false,
-    staticDir: undefined,
-    trustProxy: false,
-    seedDemoUsers: true,
-    passwords,
-    ...overrides,
   }
 }
 
@@ -293,7 +265,10 @@ describe('deployment config', () => {
     expect(
       readFileSync(templateFilePath(uploadDir, 'sample-field-note')).byteLength,
     ).toBeGreaterThan(0)
-    const app = await buildApp(db, appConfig({ uploadDir, databasePath }))
+    const app = await buildApp(
+      db,
+      makeConfig({ scratch }, { ...deploymentDefaults, uploadDir, databasePath }),
+    )
     const shutdown = createShutdown(app, db)
     await shutdown()
     await shutdown()
@@ -353,13 +328,17 @@ describe('deployment config', () => {
     seedReferenceData(createQueries(db), passwords, samplePath, uploadDir, true)
     const app = await buildApp(
       db,
-      appConfig({
-        uploadDir,
-        staticDir,
-        sessionSecret: longSecret,
-        trustProxy: true,
-        corsOrigins: [],
-      }),
+      makeConfig(
+        { scratch },
+        {
+          ...deploymentDefaults,
+          uploadDir,
+          staticDir,
+          sessionSecret: longSecret,
+          trustProxy: true,
+          corsOrigins: [],
+        },
+      ),
     )
 
     const health = await app.inject({ method: 'GET', url: '/healthz' })
