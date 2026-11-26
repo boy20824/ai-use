@@ -102,12 +102,17 @@ beforeEach(() => {
   ) {
     clicks.push(this.download)
   })
-  decodeBitmap = vi.fn(async (file: File, _x: number, y: number, width: number, height: number) => {
+  decodeBitmap = vi.fn(async (file: File, x: number, y: number, width: number, height: number) => {
     const src = synthetic.get(file)!
+    const cropped = new Uint8Array(width * height * 4)
+    for (let row = 0; row < height; row++) {
+      const start = ((y + row) * src.width + x) * 4
+      cropped.set(src.pixels.subarray(start, start + width * 4), row * width * 4)
+    }
     return {
       width,
       height,
-      pixels: src.pixels.subarray(y * width * 4, (y + height) * width * 4),
+      pixels: cropped,
       close: closed,
     }
   })
@@ -156,6 +161,160 @@ describe('local multi-image splitter DOM', () => {
     await nextTick()
     expect(button().disabled).toBe(false)
     expect(fetch).not.toHaveBeenCalled()
+  })
+  it('updates the Word page count, grid and hint from the native radios without decoding images', async () => {
+    const radio = (group: string, value: string) =>
+      host.querySelector<HTMLInputElement>(`input[name="splitter-${group}"][value="${value}"]`)!
+    const summary = () => host.querySelector('.splitter-word-summary')!.textContent
+    expect(radio('per-page', '3').checked).toBe(true)
+    expect(radio('orientation', 'landscape').checked).toBe(true)
+    expect(radio('per-page', '3').closest('label')?.textContent).toContain('原版')
+    await upload([fixture('fake-layout.png', 4, 6 * 1792 + 11)])
+    const input = host.querySelector<HTMLInputElement>('#splitter-victim-name')!
+    input.value = 'Mock'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(summary()).toContain('每頁 3 欄 × 1 列')
+    expect(summary()).toContain('預計 3 頁（原版 3 頁，省 0 頁）')
+    const usedDecodes = decodeBitmap.mock.calls.length
+    radio('per-page', '6').click()
+    await nextTick()
+    expect(radio('per-page', '6').checked).toBe(true)
+    expect(radio('orientation', 'portrait').checked).toBe(true)
+    expect(summary()).toContain('每頁 3 欄 × 2 列')
+    expect(summary()).toContain('預計 2 頁（原版 3 頁，省 1 頁）')
+    expect(host.querySelector('#splitter-word-hint')?.textContent).toContain(
+      '每頁依序放置 6 張切片，使用 A4 直式',
+    )
+    radio('orientation', 'landscape').click()
+    await nextTick()
+    expect(radio('per-page', '6').checked).toBe(true)
+    expect(radio('orientation', 'landscape').checked).toBe(true)
+    expect(summary()).toContain('每頁 3 欄 × 2 列')
+    expect(host.querySelector('#splitter-word-hint')?.textContent).toContain(
+      '每頁依序放置 6 張切片，使用 A4 橫式',
+    )
+    radio('per-page', '4').click()
+    await nextTick()
+    expect(radio('orientation', 'landscape').checked).toBe(true)
+    radio('orientation', 'portrait').click()
+    await nextTick()
+    expect(summary()).toContain('每頁 4 欄 × 1 列')
+    expect(summary()).toContain('預計 2 頁（原版 3 頁，省 1 頁）')
+    expect(summary()).toContain('181 dpi')
+    expect(summary()).toContain('建議把切片高度調整為約 21 px，可讓每張圖再放大約 89%')
+    expect(host.querySelector('#splitter-word-hint')?.textContent).toContain(
+      '每頁依序放置 4 張切片，使用 A4 直式',
+    )
+    radio('per-page', '3').click()
+    await nextTick()
+    expect(radio('orientation', 'portrait').checked).toBe(true)
+    expect(decodeBitmap).toHaveBeenCalledTimes(usedDecodes)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  it('edits both crop edges, updates thumbnails and Word sizing, and exports the clamped crop locally', async () => {
+    const first = fixture('fake-crop-A.png', 60, 70)
+    const second = fixture('fake-crop-B.png', 24, 70)
+    await upload([first, second])
+    host.querySelector<HTMLInputElement>('input[name="splitter-per-page"][value="4"]')!.click()
+    await nextTick()
+    const summary = () => host.querySelector('.splitter-word-summary')!.textContent
+    expect(summary()).toContain('每頁 2 欄 × 2 列')
+    expect(summary()).toContain('96 dpi')
+    expect(summary()).toContain('文字可能偏小')
+    expect(summary()).not.toContain('建議把切片高度調整為約')
+    await click('下載 PNG（切片 1）')
+    await idle()
+    const previousUrl = [...blobs.keys()].at(-1)
+    const left = () => host.querySelector<HTMLInputElement>('#splitter-cropLeft')!
+    const right = () => host.querySelector<HTMLInputElement>('#splitter-cropRight')!
+    const rightRange = host.querySelector<HTMLInputElement>(
+      'input[type=range][aria-labelledby="splitter-label-cropRight"]',
+    )!
+    left().value = '12.3'
+    left().dispatchEvent(new Event('change', { bubbles: true }))
+    await nextTick()
+    rightRange.value = '18'
+    rightRange.dispatchEvent(new Event('input', { bubbles: true }))
+    await idle()
+    expect(left().value).toBe('12')
+    expect(right().value).toBe('18')
+    expect(revoked).toHaveBeenCalledWith(previousUrl)
+    expect(summary()).toContain('每頁 4 欄 × 1 列')
+    expect(host.querySelector('.splitter-slices')?.textContent).toContain('30 × 70px')
+    expect(
+      [...host.querySelectorAll<HTMLElement>('.splitter-crop-shade')].map((bar) => bar.style.width),
+    ).toEqual(['20%', '30%'])
+    expect(decodeBitmap).toHaveBeenCalledWith(first, 12, 0, 30, 70, expect.any(Object))
+    const select = async (name: string) => {
+      host.querySelector<HTMLButtonElement>(`[data-source="${name}"] .splitter-select`)!.click()
+      await idle()
+    }
+    await select(second.name)
+    expect(left().value).toBe('0')
+    expect(right().value).toBe('0')
+    await select(first.name)
+    await click('套用到全部圖片')
+    await select(second.name)
+    expect(left().value).toBe('12')
+    expect(right().value).toBe('9')
+    expect(host.querySelector('.splitter-slices')?.textContent).toContain('3 × 70px')
+    right().value = '999'
+    right().dispatchEvent(new Event('change', { bubbles: true }))
+    await nextTick()
+    expect(right().value).toBe('9')
+    await click('下載 PNG（切片 1）')
+    await idle()
+    expect(dimensions(new Uint8Array(await [...blobs.values()].at(-1)!.arrayBuffer()))).toEqual({
+      width: 3,
+      height: 70,
+    })
+    await click('依序下載 ZIP')
+    expect(host.querySelector<HTMLFieldSetElement>('.splitter-crop')?.disabled).toBe(true)
+    await idle()
+    const zip = await JSZip.loadAsync(await [...blobs.values()].at(-1)!.arrayBuffer())
+    expect(dimensions(await zip.file('001/001.png')!.async('uint8array'))).toEqual({
+      width: 30,
+      height: 70,
+    })
+    expect(dimensions(await zip.file('002/001.png')!.async('uint8array'))).toEqual({
+      width: 3,
+      height: 70,
+    })
+    await click('重設裁切')
+    await idle()
+    expect(left().value).toBe('0')
+    expect(right().value).toBe('0')
+    expect(
+      [...host.querySelectorAll<HTMLElement>('.splitter-crop-shade')].map((bar) => bar.style.width),
+    ).toEqual(['0%', '0%'])
+    const name = host.querySelector<HTMLInputElement>('#splitter-victim-name')!
+    name.value = 'Mock'
+    name.dispatchEvent(new Event('input', { bubbles: true }))
+    host
+      .querySelector<HTMLInputElement>('input[name="splitter-orientation"][value="portrait"]')!
+      .click()
+    await nextTick()
+    const template = Uint8Array.from(
+      readFileSync('public/templates/scam-screenshots-template.docx'),
+    ).buffer
+    const fetchTemplate = vi.fn(async () => ({ ok: true, arrayBuffer: async () => template }))
+    vi.stubGlobal('fetch', fetchTemplate)
+    await click('產出 Word')
+    await idle()
+    const docx = await JSZip.loadAsync(await [...blobs.values()].at(-1)!.arrayBuffer())
+    const xml = await docx.file('word/document.xml')!.async('string')
+    expect(xml).toContain('w:orient="portrait"')
+    expect(xml.match(/<w:tc>/g)).toHaveLength(4)
+    expect(dimensions(await docx.file('word/media/screenshot-1.png')!.async('uint8array'))).toEqual(
+      { width: 30, height: 70 },
+    )
+    expect(dimensions(await docx.file('word/media/screenshot-2.png')!.async('uint8array'))).toEqual(
+      { width: 24, height: 70 },
+    )
+    expect(fetchTemplate.mock.calls).toEqual([
+      ['/templates/scam-screenshots-template.docx', { mode: 'same-origin' }],
+    ])
   })
   it('downloads Word from locally exported PNGs in source order and recovers after template failure', async () => {
     await upload([fixture('fake-word-A.png'), fixture('fake-word-B.png', 9, 1793)])

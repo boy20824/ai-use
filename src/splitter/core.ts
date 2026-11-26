@@ -14,6 +14,36 @@ export interface Source {
   width: number
   height: number
   cuts: number[]
+  cropLeft?: number
+  cropRight?: number
+}
+type CropSource = Pick<Source, 'width' | 'cropLeft' | 'cropRight'>
+export type CropSide = 'cropLeft' | 'cropRight'
+
+function cropBudget(width: number) {
+  return width - Math.ceil(width / 10)
+}
+function clampPixels(value: number, max: number) {
+  return Number.isFinite(value) ? Math.max(0, Math.min(max, Math.round(value))) : 0
+}
+export function clampCrop(source: CropSource) {
+  const budget = cropBudget(source.width)
+  const cropLeft = clampPixels(source.cropLeft ?? 0, budget)
+  const cropRight = clampPixels(source.cropRight ?? 0, budget - cropLeft)
+  return { cropLeft, cropRight }
+}
+export function cropWidth(source: CropSource) {
+  const { cropLeft, cropRight } = clampCrop(source)
+  return source.width - cropLeft - cropRight
+}
+export function cropLimit(source: CropSource, side: CropSide) {
+  const { cropLeft, cropRight } = clampCrop(source)
+  return cropBudget(source.width) - (side === 'cropLeft' ? cropRight : cropLeft)
+}
+export function moveCrop(source: CropSource, side: CropSide, value: number) {
+  const crop = clampCrop(source)
+  if (Number.isFinite(value)) crop[side] = clampPixels(value, cropLimit(source, side))
+  return crop
 }
 export interface Slice {
   start: number
@@ -45,16 +75,19 @@ export function slices(height: number, cuts: number[]): Slice[] {
   return points.slice(0, -1).map((start, i) => ({ start, end: points[i + 1] }))
 }
 export const pad = (index: number) => String(index + 1).padStart(3, '0')
-export function plan(images: Pick<Source, 'width' | 'height' | 'cuts'>[]) {
-  return images.flatMap((image, imageIndex) =>
-    slices(image.height, image.cuts).map((slice, sliceIndex) => ({
+export function plan(images: (CropSource & Pick<Source, 'height' | 'cuts'>)[]) {
+  return images.flatMap((image, imageIndex) => {
+    const { cropLeft: x } = clampCrop(image)
+    const width = cropWidth(image)
+    return slices(image.height, image.cuts).map((slice, sliceIndex) => ({
       ...slice,
       imageIndex,
       sliceIndex,
-      width: image.width,
+      x,
+      width,
       path: `${pad(imageIndex)}/${pad(sliceIndex)}.png`,
-    })),
-  )
+    }))
+  })
 }
 export function reorder<T>(items: T[], from: number, to: number): T[] {
   if (from < 0 || to < 0 || from >= items.length || to >= items.length) return items
@@ -283,13 +316,14 @@ export async function cropBitmap(
   height: number,
   decode: CropDecoder = browserCrop,
   active: () => boolean = () => true,
+  x = 0,
 ) {
   let expired = false
   const previous = decodeQueues.get(decode) ?? Promise.resolve()
   const pending = previous.then(() => {
     if (expired) throw new Error('等待裁切解碼逾時；請重新載入頁面後重試。')
     if (!active()) throw new Error('已取消預覽裁切。')
-    return decode(file, 0, y, width, height)
+    return decode(file, x, y, width, height)
   })
   decodeQueues.set(
     decode,
@@ -332,15 +366,25 @@ export async function cropBitmap(
   }
 }
 export async function readBand(source: Source, start: number, end: number) {
-  const bitmap = await cropBitmap(source.file, start, source.width, end - start)
+  const { cropLeft } = clampCrop(source)
+  const width = cropWidth(source)
+  const bitmap = await cropBitmap(
+    source.file,
+    start,
+    width,
+    end - start,
+    undefined,
+    undefined,
+    cropLeft,
+  )
   const canvas = document.createElement('canvas')
   try {
-    canvas.width = source.width
+    canvas.width = width
     canvas.height = end - start
     const context = canvas.getContext('2d', { willReadFrequently: true })
     if (!context) throw new Error('瀏覽器無法建立畫布；請縮小圖片寬度後重試。')
     context.drawImage(bitmap, 0, 0)
-    return context.getImageData(0, 0, source.width, end - start).data
+    return context.getImageData(0, 0, width, end - start).data
   } finally {
     bitmap.close()
     canvas.width = canvas.height = 0
@@ -363,17 +407,19 @@ export async function batch(
     if (only && imageIndex !== only.imageIndex) continue
     const image = images[imageIndex]
     checkDimensions(image.width, image.height)
+    const width = cropWidth(image)
     const ranges = slices(image.height, image.cuts)
     const first = only ? only.sliceIndex : 0
     const last = only ? only.sliceIndex + 1 : ranges.length
     if (!ranges[first]) throw new Error('切片不存在。')
     let sliceIndex = first
-    let encoder = new PngRows(image.width, ranges[first].end - ranges[first].start)
-    const stride = image.width * 4
+    let encoder = new PngRows(width, ranges[first].end - ranges[first].start)
+    const stride = width * 4
+    const rowsPerBand = bandRows(width)
     const stop = ranges[last - 1].end
-    for (let start = ranges[first].start; start < stop; start += bandRows(image.width)) {
+    for (let start = ranges[first].start; start < stop; start += rowsPerBand) {
       if (!active()) return
-      const end = Math.min(stop, start + bandRows(image.width))
+      const end = Math.min(stop, start + rowsPerBand)
       const rgba = await decode(image, start, end)
       if (!active()) return
       if (rgba.length !== (end - start) * stride)
@@ -389,7 +435,7 @@ export async function batch(
           sliceIndex++
           if (!active()) return
           if (sliceIndex < last)
-            encoder = new PngRows(image.width, ranges[sliceIndex].end - ranges[sliceIndex].start)
+            encoder = new PngRows(width, ranges[sliceIndex].end - ranges[sliceIndex].start)
         }
       }
       await new Promise<void>((resolve) => setTimeout(resolve, 0))

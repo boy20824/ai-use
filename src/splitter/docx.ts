@@ -1,12 +1,18 @@
 import JSZip from 'jszip'
 import { checkDimensions, dimensions } from './core'
+import {
+  cellSize,
+  chooseGrid,
+  fitImage,
+  imageScaleLimit,
+  isOriginalLayout,
+  ORIGINAL_LAYOUT,
+  pageGeometry,
+  type Layout,
+} from './layout'
 
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-export const DOCX_LAYOUT = {
-  columnWidth: (16838 - 2 * 1440) / 3,
-  // Reserve 720 twips for header/footer clearance and trailing paragraphs.
-  imageHeight: 11906 - 1134 - 993 - 720,
-}
+export { DOCX_LAYOUT } from './layout'
 const EMU_PER_TWIP = 635
 const placeholder = '{{被害人姓名}}'
 
@@ -67,24 +73,45 @@ export function replaceHeaderName(xml: string, name: string) {
   if (!found) throw new Error('Word 範本頁首缺少姓名欄位，請聯絡管理員。')
   return output
 }
-function drawing(id: number, width: number, height: number) {
-  const scale = Math.min(
-    Math.floor(DOCX_LAYOUT.columnWidth) / width,
-    DOCX_LAYOUT.imageHeight / height,
-  )
-  const cx = Math.max(1, Math.floor(width * scale * EMU_PER_TWIP))
-  const cy = Math.max(1, Math.floor(height * scale * EMU_PER_TWIP))
+function drawing(id: number, widthTwips: number, heightTwips: number) {
+  const cx = Math.max(1, Math.floor(widthTwips * EMU_PER_TWIP))
+  const cy = Math.max(1, Math.floor(heightTwips * EMU_PER_TWIP))
   return `<w:r><w:drawing><wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${id}" name="Screenshot ${id}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${id}" name="screenshot-${id}.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="splitterImage${id}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>`
 }
 const paragraphProperties =
   '<w:pPr><w:snapToGrid w:val="0"/><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/></w:pPr>'
-function table(cells: string[]) {
-  // OOXML table widths are integral twips; round down to keep every cell inside the page.
-  const width = Math.floor(DOCX_LAYOUT.columnWidth)
-  const borders = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']
-    .map((side) => `<w:${side} w:val="nil"/>`)
-    .join('')
-  return `<w:tbl><w:tblPr><w:tblW w:w="${width * 3}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar>${['top', 'left', 'bottom', 'right'].map((side) => `<w:${side} w:w="0" w:type="dxa"/>`).join('')}</w:tblCellMar></w:tblPr><w:tblGrid>${`<w:gridCol w:w="${width}"/>`.repeat(3)}</w:tblGrid><w:tr><w:trPr><w:cantSplit/></w:trPr>${Array.from({ length: 3 }, (_, i) => `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p>${paragraphProperties}${cells[i] ?? ''}</w:p></w:tc>`).join('')}</w:tr></w:tbl>`
+const smallRunProperties = '<w:rPr><w:sz w:val="2"/></w:rPr>'
+const sides = ['top', 'left', 'bottom', 'right']
+const borders = [...sides, 'insideH', 'insideV'].map((side) => `<w:${side} w:val="nil"/>`).join('')
+const cellMargins = sides.map((side) => `<w:${side} w:w="0" w:type="dxa"/>`).join('')
+function table(cells: string[], cols: number, rows: number, width: number, rowHeight?: number) {
+  const height = rowHeight === undefined ? '' : `<w:trHeight w:val="${rowHeight}" w:hRule="exact"/>`
+  const paragraph =
+    rowHeight === undefined
+      ? paragraphProperties
+      : paragraphProperties.replace('</w:pPr>', `${smallRunProperties}</w:pPr>`)
+  const body = Array.from({ length: rows }, (_, row) => {
+    const columns = Array.from(
+      { length: cols },
+      (_, col) =>
+        `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr><w:p>${paragraph}${cells[row * cols + col] ?? ''}</w:p></w:tc>`,
+    ).join('')
+    return `<w:tr><w:trPr><w:cantSplit/>${height}</w:trPr>${columns}</w:tr>`
+  }).join('')
+  return `<w:tbl><w:tblPr><w:tblW w:w="${width * cols}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar>${cellMargins}</w:tblCellMar></w:tblPr><w:tblGrid>${`<w:gridCol w:w="${width}"/>`.repeat(cols)}</w:tblGrid>${body}</w:tbl>`
+}
+
+function resizeSection(section: string, layout: Layout) {
+  const { width, height, margins } = pageGeometry(layout)
+  const attributes = Object.entries(margins)
+    .map(([name, value]) => `w:${name}="${value}"`)
+    .join(' ')
+  return section
+    .replace(
+      /<w:pgSz\b[^>]*\/>/,
+      `<w:pgSz w:w="${width}" w:h="${height}" w:orient="${layout.orientation}"/>`,
+    )
+    .replace(/<w:pgMar\b[^>]*\/>/, `<w:pgMar ${attributes} w:gutter="0"/>`)
 }
 export interface DocxOptions {
   name: string
@@ -93,6 +120,7 @@ export interface DocxOptions {
   template?: ArrayBuffer
   onProgress?: (processed: number, total: number) => void
   active?: () => boolean
+  layout?: Layout
 }
 
 // The only request is for the same-origin static template. Image bytes are supplied locally.
@@ -127,43 +155,56 @@ export async function createDocx(options: DocxOptions): Promise<Uint8Array<Array
   const section = document.match(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/)?.[0]
   if (!section) throw new Error('Word 範本缺少頁面設定，請聯絡管理員。')
   zip.file('word/header1.xml', replaceHeaderName(await read('word/header1.xml'), name))
-  let rels = await read('word/_rels/document.xml.rels')
-  const pages: string[] = []
-  let cells: string[] = []
-  let count = 0
+  const rels = await read('word/_rels/document.xml.rels')
+  const relations: string[] = []
+  const sizes: { width: number; height: number }[] = []
   await options.images(async (png) => {
     active()
-    if (++count > options.total) throw new Error('切片數量不符，請重新產出。')
+    const count = sizes.length + 1
+    if (count > options.total) throw new Error('切片數量不符，請重新產出。')
     const { width, height } = dimensions(png)
     checkDimensions(width, height)
     if (png[0] !== 137) throw new Error('Word 圖片必須為 PNG。')
     zip.file(`word/media/screenshot-${count}.png`, png, { createFolders: false })
-    rels = rels.replace(
-      '</Relationships>',
-      `<Relationship Id="splitterImage${count}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/screenshot-${count}.png"/></Relationships>`,
+    relations.push(
+      `<Relationship Id="splitterImage${count}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/screenshot-${count}.png"/>`,
     )
-    cells.push(drawing(count, width, height))
-    if (cells.length === 3) {
-      pages.push(table(cells))
-      cells = []
-    }
+    sizes.push({ width, height })
     options.onProgress?.(count, options.total)
   })
   active()
-  if (count !== options.total) throw new Error('切片數量不符，請重新產出。')
-  if (cells.length) pages.push(table(cells))
-  const pageBreak =
-    '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/></w:pPr><w:r><w:br w:type="page"/></w:r></w:p>'
-  const tail =
-    '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/></w:pPr></w:p>'
+  if (sizes.length !== options.total) throw new Error('切片數量不符，請重新產出。')
+  const layout = options.layout ?? ORIGINAL_LAYOUT
+  const original = isOriginalLayout(layout)
+  const grid = chooseGrid(layout.perPage, layout.orientation, sizes)
+  const cell = cellSize(layout, grid)
+  const maxTwipsPerPx = imageScaleLimit(layout)
+  const pages: string[] = []
+  for (let start = 0; start < sizes.length; start += layout.perPage) {
+    const cells = sizes.slice(start, start + layout.perPage).map(({ width, height }, index) => {
+      const { cx, cy } = fitImage(width, height, cell, { maxTwipsPerPx })
+      return drawing(start + index + 1, cx, cy)
+    })
+    pages.push(
+      table(cells, grid.cols, grid.rows, cell.columnWidth, original ? undefined : cell.rowHeight),
+    )
+  }
+  const snap = original ? '' : '<w:snapToGrid w:val="0"/>'
+  const spacerRunProperties = original ? '' : smallRunProperties
+  const spacer = `<w:p><w:pPr>${snap}<w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/>${spacerRunProperties}</w:pPr>`
+  const pageBreak = `${spacer}<w:r>${spacerRunProperties}<w:br w:type="page"/></w:r></w:p>`
+  const tail = `${spacer}${original ? '' : `<w:r>${spacerRunProperties}</w:r>`}</w:p>`
   zip.file(
     'word/document.xml',
     document.replace(
       /<w:body\b[^>]*>[\s\S]*?<\/w:body>/,
-      `<w:body>${pages.join(pageBreak)}${tail}${section}</w:body>`,
+      `<w:body>${pages.join(pageBreak)}${tail}${original ? section : resizeSection(section, layout)}</w:body>`,
     ),
   )
-  zip.file('word/_rels/document.xml.rels', rels)
+  zip.file(
+    'word/_rels/document.xml.rels',
+    rels.replace('</Relationships>', `${relations.join('')}</Relationships>`),
+  )
   let types = await read('[Content_Types].xml')
   if (!/<Default\b[^>]*Extension="png"/i.test(types))
     types = types.replace('</Types>', '<Default Extension="png" ContentType="image/png"/></Types>')
