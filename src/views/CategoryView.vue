@@ -656,7 +656,22 @@ watch(
   },
   { immediate: true },
 )
-defineExpose({ requestLeave })
+function scrollToWorkbench(behavior: ScrollBehavior) {
+  const panel = workbench.value
+  if (!panel) return
+  const actions = panel.querySelector<HTMLElement>('.case-edit-actions')
+  const bottomNav = document.querySelector('.mobile-bottom-nav')
+  const topMargin = parseFloat(getComputedStyle(panel).scrollMarginTop) || 0
+  const availableHeight =
+    window.innerHeight - topMargin - (bottomNav?.getBoundingClientRect().height ?? 0)
+  const actionsBottom = actions
+    ? actions.getBoundingClientRect().bottom - panel.getBoundingClientRect().top
+    : 0
+  const target =
+    actions && actions.childElementCount && actionsBottom > availableHeight ? actions : panel
+  target.scrollIntoView({ block: 'start', behavior })
+}
+defineExpose({ requestLeave, scrollToWorkbench })
 </script>
 
 <template>
@@ -705,9 +720,9 @@ defineExpose({ requestLeave })
       <RouterLink
         v-if="session.canEditCategory"
         :to="`/categories/${category.id}/edit`"
-        class="btn-secondary"
+        class="btn-primary"
       >
-        繼續編輯
+        編輯這個案件範本
       </RouterLink>
     </div>
 
@@ -722,11 +737,11 @@ defineExpose({ requestLeave })
         {{ category.templateCount }} 份範本
       </li>
     </ul>
-    <div class="case-edit-actions mb-4 flex flex-wrap gap-2">
+    <div class="case-edit-actions mb-4 flex flex-wrap gap-x-5 gap-y-2">
       <RouterLink
         v-if="session.canEditCategory && !createdName"
         :to="`/categories/${category.id}/edit`"
-        class="btn-secondary"
+        class="btn-primary"
       >
         編輯這個案件範本
       </RouterLink>
@@ -918,6 +933,17 @@ defineExpose({ requestLeave })
                   >
                     {{ step.title ?? step.body }}
                   </h3>
+                  <RouterLink
+                    v-if="session.canEditCategory"
+                    :to="{
+                      path: `/categories/${category.id}/edit`,
+                      state: { editStepId: step.id },
+                    }"
+                    :aria-label="`編輯此步驟：${step.title ?? step.body}`"
+                    class="focus-control mt-2 inline-block text-sm text-accent-ink underline"
+                  >
+                    編輯此步驟
+                  </RouterLink>
                   <label
                     v-if="step.canRunInParallel"
                     class="mt-2 inline-flex cursor-pointer items-center gap-2 text-sm text-ink"

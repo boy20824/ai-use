@@ -29,6 +29,7 @@ const session = useSessionStore()
 const keyword = ref('')
 const group = ref<CategoryGroup | ''>('')
 const feedback = ref('')
+const uploadError = ref('')
 const feedbackTone = ref<'ok' | 'warn'>('ok')
 const pendingDelete = ref<TemplateSummary | null>(null)
 const deleting = ref(false)
@@ -160,24 +161,27 @@ async function replaceFile(event: Event) {
 
 async function onFiles(files: File[]) {
   if (!session.canUpload) return
-  const result = await templates.addFiles(files)
-  if (result.added === 0 && result.skipped > 0 && result.rejected.length === 0) {
-    feedbackTone.value = 'warn'
-    feedback.value = `範本庫最多 ${templates.limit} 份，沒有再加入。`
-    return
+  uploadError.value = ''
+  feedback.value = ''
+  try {
+    const result = await templates.addFiles(files)
+    if (result.added === 0 && result.skipped > 0 && result.rejected.length === 0) {
+      uploadError.value = `範本庫最多 ${templates.limit} 份，沒有再加入。`
+      return
+    }
+    uploadError.value = result.rejected.join('。')
+    if (result.added === 0) {
+      uploadError.value ||= '沒有可保存的 Word 或 PDF 範本。'
+      return
+    }
+    feedbackTone.value = result.skipped > 0 || result.formatNotice ? 'warn' : 'ok'
+    const notes = [`已上傳 ${result.added} 份到範本庫。可在案件範本工作台選取。`]
+    if (result.skipped > 0) notes.push(`另有 ${result.skipped} 份因筆數上限未加入。`)
+    if (result.formatNotice) notes.push(result.formatNotice)
+    feedback.value = notes.join('')
+  } catch (cause) {
+    uploadError.value = cause instanceof Error ? cause.message : '無法上傳範本。'
   }
-  if (result.added === 0) {
-    feedbackTone.value = 'warn'
-    feedback.value = result.rejected[0] ?? '沒有可保存的 Word 或 PDF 範本。'
-    return
-  }
-  feedbackTone.value =
-    result.rejected.length > 0 || result.skipped > 0 || result.formatNotice ? 'warn' : 'ok'
-  const notes = [`已上傳 ${result.added} 份到範本庫。可在案件範本工作台選取。`]
-  if (result.skipped > 0) notes.push(`另有 ${result.skipped} 份因筆數上限未加入。`)
-  if (result.rejected.length > 0) notes.push(`${result.rejected.join('。')}。`)
-  if (result.formatNotice) notes.push(result.formatNotice)
-  feedback.value = notes.join('')
 }
 </script>
 
@@ -253,6 +257,7 @@ async function onFiles(files: File[]) {
         title="上傳 Word 或 PDF 到範本庫"
         hint="檔案會存在服務上的範本庫。產生文件時填入的欄位不會被保存。"
         :accept="`.pdf,application/pdf,.docx,${docxMimeType}`"
+        :error="uploadError"
         @select="onFiles"
       />
     </div>

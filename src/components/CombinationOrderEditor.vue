@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import type { CaseCategory } from '@/types/domain'
 import { combinationKey, resolveCombination } from '@/workbench/compose'
 import { apiErrorMessage, apiRequest } from '@/services/api'
+import ConfirmDialog from './ConfirmDialog.vue'
+import { focusAlert } from '@/utils/focusAlert'
 import { restoreMoveFocus } from '@/utils/stepFocus'
 import { useCategoryStore } from '@/stores/categories'
 
@@ -14,6 +16,10 @@ const draft = ref<string[]>([])
 const baseline = ref<string[]>([])
 const busy = ref(false)
 const error = ref('')
+const errorAlert = ref<HTMLElement | null>(null)
+const confirming = ref(false)
+let pendingDiscard: Promise<boolean> | undefined
+let resolveDiscard: ((confirmed: boolean) => void) | undefined
 const dragging = ref<string | null>(null)
 const resolved = computed(() => resolveCombination(props.category, selected.value))
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(baseline.value))
@@ -38,27 +44,42 @@ watch(
   { immediate: true },
 )
 function canLeave() {
-  return !busy.value && (!dirty.value || window.confirm('步驟順序尚未儲存，確定放棄調整？'))
+  if (busy.value) return Promise.resolve(false)
+  if (!dirty.value) return Promise.resolve(true)
+  if (pendingDiscard) return pendingDiscard
+  confirming.value = true
+  pendingDiscard = new Promise((resolve) => {
+    resolveDiscard = resolve
+  })
+  return pendingDiscard
 }
+function finishDiscard(confirmed: boolean) {
+  confirming.value = false
+  resolveDiscard?.(confirmed)
+  resolveDiscard = undefined
+  pendingDiscard = undefined
+}
+function dismissConfirmation() {
+  finishDiscard(false)
+}
+onBeforeUnmount(dismissConfirmation)
 if (!props.managedByForm) {
   onBeforeRouteLeave(canLeave)
   onBeforeRouteUpdate(canLeave)
   onMounted(() => window.addEventListener('beforeunload', beforeUnload))
   onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
 }
-defineExpose({ dirty, busy })
+defineExpose({ dirty, busy, dismissConfirmation })
 function beforeUnload(event: BeforeUnloadEvent) {
   if (dirty.value || busy.value) {
     event.preventDefault()
     event.returnValue = ''
   }
 }
-function toggle(id: string, event: Event) {
+async function toggle(id: string, event: Event) {
   const input = event.target as HTMLInputElement
-  if (!canLeave()) {
-    input.checked = selected.value.includes(id)
-    return
-  }
+  input.checked = selected.value.includes(id)
+  if (!(await canLeave())) return
   selected.value = selected.value.includes(id)
     ? selected.value.filter((value) => value !== id)
     : [...selected.value, id]
@@ -116,6 +137,10 @@ async function save() {
     error.value = cause instanceof Error ? cause.message : '無法儲存組合順序。'
   } finally {
     busy.value = false
+    if (error.value) {
+      await nextTick()
+      focusAlert(errorAlert.value)
+    }
   }
 }
 </script>
@@ -157,7 +182,7 @@ async function save() {
         <p class="text-xs">來源：{{ sources(id) }}</p>
         <button
           type="button"
-          class="btn-ghost"
+          class="btn-move"
           :aria-label="`${steps.get(id)?.title ?? steps.get(id)?.body}：上移`"
           :disabled="busy || index === 0"
           data-move="up"
@@ -167,7 +192,7 @@ async function save() {
         </button>
         <button
           type="button"
-          class="btn-ghost"
+          class="btn-move"
           :aria-label="`${steps.get(id)?.title ?? steps.get(id)?.body}：下移`"
           :disabled="busy || index === draft.length - 1"
           data-move="down"
@@ -185,6 +210,23 @@ async function save() {
     >
       儲存為這組情境搭配的預設順序
     </button>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <p
+      v-if="error"
+      ref="errorAlert"
+      role="alert"
+      tabindex="-1"
+      class="scroll-my-20 text-tone-danger-ink"
+    >
+      {{ error }}
+    </p>
+    <ConfirmDialog
+      v-if="confirming"
+      title="放棄步驟順序的修改？"
+      confirm-label="放棄修改"
+      @confirm="finishDiscard(true)"
+      @cancel="dismissConfirmation"
+    >
+      步驟順序尚未儲存。
+    </ConfirmDialog>
   </section>
 </template>

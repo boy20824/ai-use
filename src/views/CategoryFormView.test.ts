@@ -8,6 +8,7 @@ import type { CaseCategory } from '@/types/domain'
 
 const mocks = vi.hoisted(() => ({
   templates: [] as TemplateSummary[],
+  addFiles: vi.fn(),
   create: vi.fn(async () => ({ id: 'created' })),
   update: vi.fn(async () => {}),
   byId: vi.fn<() => CaseCategory | undefined>(() => undefined),
@@ -28,6 +29,7 @@ vi.mock('@/stores/templates', () => ({
     },
     byId: (id: string) => mocks.templates.find((item) => item.id === id),
     reload: async () => {},
+    addFiles: mocks.addFiles,
   }),
 }))
 vi.mock('@/stores/session', () => ({
@@ -46,6 +48,7 @@ afterEach(() => {
   mocks.create.mockClear()
   mocks.update.mockClear()
   mocks.byId.mockReset()
+  mocks.addFiles.mockReset()
   if (execCommandDescriptor) Object.defineProperty(document, 'execCommand', execCommandDescriptor)
   else Reflect.deleteProperty(document, 'execCommand')
 })
@@ -136,12 +139,9 @@ it('widens only the existing SOP step and preserves its reorder across internal 
   })
   const router = await mountForm('/categories/existing/edit')
   const form = host.querySelector('form')!
-  expect(form.classList.contains('xl:max-w-none')).toBe(false)
-  await submit()
-  expect(form.classList.contains('xl:max-w-none')).toBe(false)
-  await submit()
-  expect(form.classList.contains('max-w-3xl')).toBe(true)
   expect(form.classList.contains('xl:max-w-none')).toBe(true)
+  expect(button('步驟與範本').getAttribute('aria-current')).toBe('step')
+  expect(form.classList.contains('max-w-3xl')).toBe(true)
   const editor = host.querySelector('[aria-label="這個情境的步驟順序"]')!
   expect(editor.parentElement?.classList.contains('xl:grid-cols-2')).toBe(true)
   expect(editor.parentElement?.classList.contains('grid-cols-2')).toBe(false)
@@ -151,20 +151,26 @@ it('widens only the existing SOP step and preserves its reorder across internal 
   const order = () =>
     [...editor.querySelectorAll('[data-step-id]')].map((li) => li.getAttribute('data-step-id'))
   expect(order()).toEqual(['B', 'A'])
-  button('上一步').click()
+  button('情境').click()
   await nextTick()
+  expect(button('情境').getAttribute('aria-current')).toBe('step')
+  expect(button('新增情境').closest('section')?.style.display).not.toBe('none')
+  expect((editor as HTMLElement).style.display).toBe('none')
   expect(form.classList.contains('xl:max-w-none')).toBe(false)
+  button('名稱與分類').click()
+  await nextTick()
+  expect(button('名稱與分類').getAttribute('aria-current')).toBe('step')
+  expect(
+    host.querySelector<HTMLInputElement>('#category-name')?.closest('section')?.style.display,
+  ).not.toBe('none')
   expect(host.querySelector('[aria-label="這個情境的步驟順序"]')).toBe(editor)
-  button('上一步').click()
-  await nextTick()
-  expect(form.classList.contains('xl:max-w-none')).toBe(false)
-  await submit()
   const navigation = router.push('/categories')
   await vi.waitFor(() => expect(host.querySelector('[role=dialog]')).not.toBeNull())
   button('繼續編輯').click()
   await navigation
   expect(router.currentRoute.value.path).toBe('/categories/existing/edit')
-  await submit()
+  button('步驟與範本').click()
+  await nextTick()
   expect(form.classList.contains('xl:max-w-none')).toBe(true)
   expect(order()).toEqual(['B', 'A'])
   expect(editor.textContent).toContain('順序尚未儲存')
@@ -295,8 +301,6 @@ it.each(['manual', 'builtin', 'both'])(
       placeholders: ['姓名', '姓名'],
     }))
     await mountForm('/categories/existing/edit')
-    await submit()
-    await submit()
     const dateRow = host.querySelector('[aria-label="系統日期欄位"]')!
     expect(dateRow.textContent).toContain('日期為系統必要欄位')
     expect(dateRow.querySelector('button')!.disabled).toBe(true)
@@ -401,10 +405,7 @@ async function mountStepEditor() {
   })
   vi.stubGlobal('fetch', fetch)
   const router = await mountForm('/categories/existing/edit')
-  await submit()
-  expect(document.activeElement?.textContent).toContain('情境')
-  await submit()
-  expect(document.activeElement?.textContent).toContain('步驟與範本')
+  expect(button('步驟與範本').getAttribute('aria-current')).toBe('step')
   return { router, fetch }
 }
 function stepInput() {
@@ -561,4 +562,74 @@ it('keeps both drafts when the step save fails and renders the friendly API erro
   expect(stepInput()?.value).toBe('Mock revised step')
   expect((host.querySelector('#category-name') as HTMLInputElement).value).toBe('Mock renamed')
   expect(host.textContent).not.toMatch(/引用|實體|案類|類別名稱/)
+})
+
+function checkError(field: Element, message: string) {
+  const error = document.getElementById(field.getAttribute('aria-describedby')!)!
+  expect(field.getAttribute('aria-invalid')).toBe('true')
+  expect(error.getAttribute('role')).toBe('alert')
+  expect(error.textContent?.trim()).toBe(message)
+  expect(document.activeElement).toBe(error)
+  return error
+}
+
+it('uses focused, scrolled Chinese required errors beside the name and the numbered blank step', async () => {
+  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+  await mountForm()
+  expect(host.querySelector('form')!.noValidate).toBe(true)
+  button('下一步').click()
+  await nextTick()
+  const checkField = (selector: string, message: string) => {
+    const field = host.querySelector(selector)!
+    const error = checkError(field, message)
+    expect(field.nextElementSibling).toBe(error)
+    expect(scroll.mock.contexts).toContain(error)
+  }
+  await vi.waitFor(() => checkField('#category-name', '請填寫案件範本名稱。'))
+  await type('#category-name', 'Mock name')
+  await submit()
+  await type('#category-step-0', 'Mock first')
+  button('新增步驟').click()
+  await nextTick()
+  button('建立案件範本').click()
+  await vi.waitFor(() => checkField('#category-step-1', '第 2 個步驟還沒有填內容。'))
+  expect(host.querySelector('#category-step-0')?.hasAttribute('aria-invalid')).toBe(false)
+  expect(mocks.create).not.toHaveBeenCalled()
+})
+
+it('switches to the name tab and focuses the duplicate-name error under the field', async () => {
+  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+  await mountStepEditor()
+  const message = '這個案件範本名稱已經存在。'
+  mocks.update.mockRejectedValueOnce(new Error(message))
+  await submit()
+  const field = host.querySelector<HTMLInputElement>('#category-name')!
+  await vi.waitFor(() => {
+    const error = checkError(field, message)
+    expect(field.nextElementSibling).toBe(error)
+    expect(scroll.mock.contexts).toContain(error)
+  })
+  expect(button('名稱與分類').getAttribute('aria-current')).toBe('step')
+})
+
+it('focuses and scrolls a rejected upload error directly below its file control', async () => {
+  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+  await mountForm()
+  await type('#category-name', 'Mock name')
+  await submit()
+  button('從範本庫選取').click()
+  await nextTick()
+  const message = 'mock.txt：只支援 Word 或 PDF 範本。'
+  mocks.addFiles.mockResolvedValueOnce({ ids: [], rejected: [message], formatNotice: '' })
+  const fileInput = host.querySelector<HTMLInputElement>('input[type="file"]')!
+  const drop = new Event('drop', { bubbles: true, cancelable: true })
+  Object.defineProperty(drop, 'dataTransfer', {
+    value: { files: [new File(['mock'], 'mock.txt')] },
+  })
+  fileInput.parentElement!.dispatchEvent(drop)
+  await vi.waitFor(() => {
+    const error = checkError(fileInput, message)
+    expect(fileInput.parentElement?.nextElementSibling).toBe(error)
+    expect(scroll.mock.contexts).toContain(error)
+  })
 })

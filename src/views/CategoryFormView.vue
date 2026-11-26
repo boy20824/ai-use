@@ -8,6 +8,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import FileDropzone from '@/components/FileDropzone.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import { createdCategoryNotice, editPermissionHint } from '@/stores/categoryNotices'
+import { focusAlert } from '@/utils/focusAlert'
 import { restoreMoveFocus } from '@/utils/stepFocus'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
@@ -89,7 +90,7 @@ const session = useSessionStore()
 
 const name = ref('')
 const group = ref<CategoryGroup>('criminal')
-const wizard = ref(1)
+const wizard = ref(route.name === 'category-edit' ? 3 : 1)
 const variants = ref<Variant[]>([])
 const fields = ref<FieldDef[]>([])
 const builtinName = ref(false)
@@ -153,6 +154,17 @@ const steps = ref<DraftStep[]>([blankStep()])
 const populated = ref(false)
 const saving = ref(false)
 const formError = ref('')
+const nameError = ref('')
+const invalidStepKey = ref('')
+const uploadErrors = ref<Record<string, string>>({})
+const formAlert = ref<HTMLElement | null>(null)
+const nameAlert = ref<HTMLElement | null>(null)
+const stepAlert = ref<HTMLElement[]>([])
+const initialStepId = computed(() => {
+  if (!editingId.value) return
+  const id = router.options.history.state.editStepId
+  return typeof id === 'string' ? id : undefined
+})
 const formNotice = ref('')
 const savedNotice = ref('')
 const editor = ref<InstanceType<typeof SopEditor> | null>(null)
@@ -171,7 +183,7 @@ const editingId = computed(() => {
 const isEdit = computed(() => editingId.value.length > 0)
 const existing = computed(() => (editingId.value ? categories.byId(editingId.value) : undefined))
 const wizardSteps = computed(() => [
-  { label: '命名與分類', value: 1 },
+  { label: '名稱與分類', value: 1 },
   ...(isEdit.value ? [{ label: '情境', value: 2 }] : []),
   { label: '步驟與範本', value: 3 },
 ])
@@ -250,7 +262,10 @@ watch([() => route.name, editingId], () => {
   formError.value = ''
   formNotice.value = ''
   savedNotice.value = ''
-  wizard.value = 1
+  wizard.value = isEdit.value ? 3 : 1
+  nameError.value = ''
+  invalidStepKey.value = ''
+  uploadErrors.value = {}
   sopScope.value = 'base'
   pendingRemoveStep.value = null
   if (existing.value) return
@@ -304,6 +319,8 @@ onUnmounted(() => {
 defineExpose({ requestLeave: requestLogout })
 
 async function changeWizard(value: number) {
+  if (saving.value || editor.value?.isBusy) return
+  formError.value = ''
   savedNotice.value = ''
   wizard.value = value
   await nextTick()
@@ -345,6 +362,7 @@ function onStep(index: number, event: Event) {
   if (!current) return
   next[index] = { ...current, body: target.value }
   steps.value = next
+  if (current.key === invalidStepKey.value) invalidStepKey.value = ''
 }
 
 function templateName(id: string) {
@@ -395,7 +413,12 @@ function toggleTemplate(index: number, templateId: string, event: Event) {
   steps.value = next
 }
 
-function moveTemplate(index: number, templateIndex: number, delta: number) {
+function moveTemplate(
+  index: number,
+  templateIndex: number,
+  delta: number,
+  button: HTMLButtonElement,
+) {
   const next = [...steps.value]
   const current = next[index]
   if (!current) return
@@ -407,25 +430,31 @@ function moveTemplate(index: number, templateIndex: number, delta: number) {
   templateIds.splice(nextIndex, 0, item)
   next[index] = { ...current, templateIds }
   steps.value = next
+  void restoreMoveFocus(button)
 }
 
-async function onUpload(index: number, files: File[]) {
-  const current = steps.value[index]
+async function onUpload(key: string, files: File[]) {
+  const current = steps.value.find((step) => step.key === key)
   if (!current) return
-  const result = await templates.addFiles(files, current.id)
-  formNotice.value = result.formatNotice
-  if (result.ids.length === 0) {
-    formError.value = result.rejected[0] ?? '沒有可保存的 Word 或 PDF 範本。'
-    return
+  delete uploadErrors.value[key]
+  try {
+    const result = await templates.addFiles(files, current.id)
+    const step = steps.value.find((step) => step.key === key)
+    if (!step) return
+    formNotice.value = result.formatNotice
+    step.templateIds = [...new Set([...step.templateIds, ...result.ids])]
+    uploadErrors.value[key] =
+      result.rejected.join('。') || (result.ids.length ? '' : '沒有可保存的 Word 或 PDF 範本。')
+  } catch (cause) {
+    uploadErrors.value[key] = cause instanceof Error ? cause.message : '無法上傳範本。'
   }
-  const next = [...steps.value]
-  const templateIds = [...current.templateIds]
-  for (const id of result.ids) {
-    if (!templateIds.includes(id)) templateIds.push(id)
-  }
-  next[index] = { ...current, templateIds, pickerOpen: true }
-  steps.value = next
-  formError.value = result.rejected.length > 0 ? result.rejected.join('。') : ''
+}
+
+async function showNameError(message: string) {
+  wizard.value = 1
+  nameError.value = message
+  await nextTick()
+  focusAlert(nameAlert.value)
 }
 
 const newId = () => crypto.randomUUID()
@@ -434,7 +463,7 @@ async function submit() {
   if (saving.value || editor.value?.isBusy) return
   formError.value = ''
   savedNotice.value = ''
-  if (wizard.value === 3 && editor.value?.dirtyStep) {
+  if (editor.value?.dirtyStep) {
     confirmSave.value = true
     return
   }
@@ -443,18 +472,21 @@ async function submit() {
 async function resolveSave(saveStep: boolean) {
   confirmSave.value = false
   const stepEditor = editor.value
-  if (saveStep && !(await stepEditor?.saveStep(false))) return
+  if (saveStep) {
+    wizard.value = 3
+    await nextTick()
+    if (!(await stepEditor?.saveStep(false))) return
+  }
   if (!saveStep) await stepEditor?.discardStep(false)
   await saveForm()
 }
 async function saveForm() {
   if (!name.value.trim()) {
-    void changeWizard(1)
-    formError.value = '請填寫案件範本名稱。'
+    await showNameError('請填寫案件範本名稱。')
     return
   }
-  if (wizard.value < 3) {
-    await changeWizard(!isEdit.value && wizard.value === 1 ? 3 : wizard.value + 1)
+  if (!isEdit.value && wizard.value === 1) {
+    await changeWizard(3)
     return
   }
   if (isEdit.value && categories.error) {
@@ -481,8 +513,11 @@ async function saveForm() {
     variantIds: step.variantIds,
     templateIds: step.templateIds,
   }))
-  if (prepared.some((step) => step.body.length === 0)) {
-    formError.value = '請填寫每個步驟的內容，或移除空白步驟。'
+  const blankIndex = prepared.findIndex((step) => !step.body)
+  if (!isEdit.value && blankIndex !== -1) {
+    invalidStepKey.value = steps.value[blankIndex]!.key
+    await nextTick()
+    focusAlert(stepAlert.value[0])
     return
   }
   const mappedFields = fields.value.map((field) =>
@@ -521,7 +556,15 @@ async function saveForm() {
     const failure = await router.push(`/categories/${created.id}`)
     if (failure && createdCategoryNotice.value?.id === notice.id) createdCategoryNotice.value = null
   } catch (cause) {
-    formError.value = cause instanceof Error ? cause.message : '無法儲存案件範本。'
+    const message = cause instanceof Error ? cause.message : '無法儲存案件範本。'
+    saving.value = false
+    if (message.includes('這個案件範本名稱已經存在')) {
+      await showNameError(message)
+    } else {
+      formError.value = message
+      await nextTick()
+      focusAlert(formAlert.value)
+    }
   } finally {
     saving.value = false
   }
@@ -602,9 +645,24 @@ async function saveForm() {
     ref="form"
     class="max-w-3xl rounded-2xl border border-edge bg-surface p-5 shadow-card sm:p-6"
     :class="{ 'xl:max-w-none': isEdit && wizard === 3 }"
+    novalidate
     @submit.prevent="submit"
   >
-    <ol class="mb-6 flex gap-3 text-sm" aria-label="表單區段">
+    <nav v-if="isEdit" class="mb-6 flex flex-wrap gap-2" aria-label="表單區段">
+      <button
+        v-for="step in wizardSteps"
+        :key="step.value"
+        type="button"
+        class="btn-secondary"
+        :class="{ 'font-semibold': wizard === step.value }"
+        :aria-current="wizard === step.value ? 'step' : undefined"
+        :data-wizard-current="wizard === step.value ? '' : undefined"
+        @click="changeWizard(step.value)"
+      >
+        {{ step.label }}
+      </button>
+    </nav>
+    <ol v-else class="mb-6 flex gap-3 text-sm" aria-label="表單區段">
       <li
         v-for="(step, i) in wizardSteps"
         :key="step.value"
@@ -619,6 +677,15 @@ async function saveForm() {
         </h2>
       </li>
     </ol>
+    <p
+      v-if="formError"
+      ref="formAlert"
+      class="mb-4 scroll-my-20 text-sm text-tone-danger-ink"
+      role="alert"
+      tabindex="-1"
+    >
+      {{ formError }}
+    </p>
     <section v-show="wizard === 1" :inert="saving">
       <div>
         <label for="category-name" class="block text-sm font-medium text-stone-800">
@@ -629,12 +696,25 @@ async function saveForm() {
           v-model="name"
           type="text"
           name="name"
-          :required="wizard === 1"
+          required
+          :aria-invalid="nameError ? true : undefined"
+          :aria-describedby="nameError ? 'category-name-error' : undefined"
+          @input="nameError = ''"
           maxlength="80"
           autocomplete="off"
           placeholder="請輸入案件範本名稱"
           class="field mt-2 w-full"
         />
+        <p
+          v-if="nameError"
+          id="category-name-error"
+          ref="nameAlert"
+          role="alert"
+          tabindex="-1"
+          class="mt-2 scroll-my-20 text-sm text-tone-danger-ink"
+        >
+          {{ nameError }}
+        </p>
       </div>
       <label class="mt-4 block text-sm font-medium" for="category-group">大類</label>
       <select id="category-group" v-model="group" class="field mt-2 w-full">
@@ -655,19 +735,18 @@ async function saveForm() {
         ></textarea>
       </div>
     </section>
-    <section v-if="isEdit" v-show="wizard === 2" :inert="saving" aria-label="情境設定">
-      <h2 class="font-semibold">情境</h2>
-      <p class="mt-2 text-sm">下一頁可以新增情境，並調整情境的步驟順序。</p>
-    </section>
+    <SopEditor
+      v-if="isEdit && existing"
+      v-show="wizard !== 1"
+      ref="editor"
+      :key="existing.id"
+      :category="existing"
+      :saving-form="saving"
+      :scenarios-only="wizard === 2"
+      :initial-step-id="initialStepId"
+      @scope-change="sopScope = $event"
+    />
     <section v-show="wizard === 3" :inert="saving">
-      <SopEditor
-        v-if="isEdit && existing"
-        ref="editor"
-        :key="existing.id"
-        :category="existing"
-        :saving-form="saving"
-        @scope-change="sopScope = $event"
-      />
       <fieldset v-if="!isEdit" class="mt-6">
         <legend class="text-sm font-medium text-stone-800">基本步驟</legend>
         <p class="mt-1 text-sm leading-6 text-stone-600">
@@ -688,8 +767,20 @@ async function saveForm() {
               rows="2"
               maxlength="500"
               class="field mt-2 w-full"
+              :aria-invalid="invalidStepKey === step.key ? true : undefined"
+              :aria-describedby="invalidStepKey === step.key ? `step-error-${step.key}` : undefined"
               @input="onStep(index, $event)"
             ></textarea>
+            <p
+              v-if="invalidStepKey === step.key"
+              :id="`step-error-${step.key}`"
+              ref="stepAlert"
+              role="alert"
+              tabindex="-1"
+              class="mt-2 scroll-my-20 text-sm text-tone-danger-ink"
+            >
+              第 {{ index + 1 }} 個步驟還沒有填內容。
+            </p>
             <label class="mt-3 block text-sm"
               >步驟內容（每行一項）<textarea
                 v-model="step.items"
@@ -712,7 +803,7 @@ async function saveForm() {
             <div class="mt-2 flex flex-wrap gap-3">
               <button
                 type="button"
-                class="btn-ghost text-sm text-stone-600 hover:text-ink"
+                class="btn-move text-sm"
                 :disabled="index === 0"
                 data-move="up"
                 :aria-label="`${step.body || '步驟 ' + (index + 1)}：上移`"
@@ -722,7 +813,7 @@ async function saveForm() {
               </button>
               <button
                 type="button"
-                class="btn-ghost text-sm text-stone-600 hover:text-ink"
+                class="btn-move text-sm"
                 :disabled="index === steps.length - 1"
                 data-move="down"
                 :aria-label="`${step.body || '步驟 ' + (index + 1)}：下移`"
@@ -754,17 +845,35 @@ async function saveForm() {
                 <span class="flex shrink-0 gap-2">
                   <button
                     type="button"
-                    class="btn-ghost text-sm text-stone-600 hover:text-ink"
+                    class="btn-move text-sm"
                     :disabled="templateIndex === 0"
-                    @click="moveTemplate(index, templateIndex, -1)"
+                    data-move="up"
+                    :aria-label="`上移：${step.body || '步驟 ' + (index + 1)}的範本 ${templateName(templateId)}`"
+                    @click="
+                      moveTemplate(
+                        index,
+                        templateIndex,
+                        -1,
+                        $event.currentTarget as HTMLButtonElement,
+                      )
+                    "
                   >
                     上移
                   </button>
                   <button
                     type="button"
-                    class="btn-ghost text-sm text-stone-600 hover:text-ink"
+                    class="btn-move text-sm"
                     :disabled="templateIndex === step.templateIds.length - 1"
-                    @click="moveTemplate(index, templateIndex, 1)"
+                    data-move="down"
+                    :aria-label="`下移：${step.body || '步驟 ' + (index + 1)}的範本 ${templateName(templateId)}`"
+                    @click="
+                      moveTemplate(
+                        index,
+                        templateIndex,
+                        1,
+                        $event.currentTarget as HTMLButtonElement,
+                      )
+                    "
                   >
                     下移
                   </button>
@@ -823,7 +932,8 @@ async function saveForm() {
                   title="上傳 Word 或 PDF 並連結到這個步驟"
                   hint="檔案會存進範本庫，並出現在這個步驟的範本清單。"
                   :accept="`.pdf,application/pdf,.docx,${docxMimeType}`"
-                  @select="onUpload(index, $event)"
+                  :error="uploadErrors[step.key]"
+                  @select="onUpload(step.key, $event)"
                 />
               </div>
             </div>
@@ -948,33 +1058,19 @@ async function saveForm() {
     >
       {{ formNotice }}
     </p>
-    <p v-if="formError" class="mt-4 text-sm text-tone-danger-ink" role="alert">{{ formError }}</p>
     <div class="mt-6 flex flex-wrap gap-3">
       <button
-        v-if="wizard > 1"
+        v-if="!isEdit && wizard > 1"
         :disabled="saving"
         type="button"
         class="btn-secondary py-2"
-        @click="changeWizard(!isEdit && wizard === 3 ? 1 : wizard - 1)"
+        @click="changeWizard(1)"
       >
         上一步
       </button>
-      <button
-        type="submit"
-        class="btn-primary"
-        :disabled="saving"
-        :aria-busy="wizard === 3 ? saving : undefined"
-      >
-        <span v-if="wizard === 3 && saving" class="btn-spinner" aria-hidden="true"></span>
-        {{
-          wizard === 2 && !variants.length
-            ? '繼續設定步驟'
-            : wizard < 3
-              ? '下一步'
-              : isEdit
-                ? '儲存名稱與欄位'
-                : '建立案件範本'
-        }}
+      <button type="submit" class="btn-primary" :disabled="saving" :aria-busy="saving">
+        <span v-if="saving" class="btn-spinner" aria-hidden="true"></span>
+        {{ isEdit ? '儲存名稱與欄位' : wizard === 1 ? '下一步' : '建立案件範本' }}
       </button>
       <RouterLink :to="isEdit ? `/categories/${editingId}` : '/categories'" class="btn-secondary">
         取消

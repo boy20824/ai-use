@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, useId, watch } from 'vue'
+import { focusAlert } from '@/utils/focusAlert'
 
-defineProps<{
+const props = defineProps<{
   enabled: boolean
   disabledReason: string
   title: string
   hint: string
   compact?: boolean
   accept?: string
+  error?: string
 }>()
 
 const emit = defineEmits<{
@@ -15,6 +17,13 @@ const emit = defineEmits<{
 }>()
 
 const dragging = ref(false)
+const errorId = useId()
+const alert = ref<HTMLElement | null>(null)
+watch(
+  () => props.error,
+  () => focusAlert(alert.value),
+  { flush: 'post' },
+)
 
 function emitFiles(list: FileList | null) {
   if (!list || list.length === 0) return
@@ -65,8 +74,26 @@ function onChange(event: Event) {
     @dragleave="onDragLeave"
     @drop.prevent="onDrop"
   >
-    <input type="file" class="sr-only" multiple :accept="accept" @change="onChange" />
+    <input
+      type="file"
+      class="sr-only"
+      multiple
+      :accept="accept"
+      :aria-invalid="error ? true : undefined"
+      :aria-describedby="error ? errorId : undefined"
+      @change="onChange"
+    />
     <p class="text-sm font-medium text-ink">{{ title }}</p>
     <p class="mx-auto mt-2 max-w-sm text-sm leading-6 text-stone-600">{{ hint }}</p>
   </label>
+  <p
+    v-if="enabled && error"
+    :id="errorId"
+    ref="alert"
+    role="alert"
+    tabindex="-1"
+    class="mt-2 scroll-my-20 text-sm text-tone-danger-ink"
+  >
+    {{ error }}
+  </p>
 </template>

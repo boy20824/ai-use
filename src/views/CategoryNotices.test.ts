@@ -17,7 +17,20 @@ const sample: CaseCategory = {
   updatedAt: '',
   summary: '',
   templateCount: 0,
-  steps: [{ id: 'mock-step', body: 'Mock step', templateIds: [] }],
+  steps: [
+    { id: 'mock-step', body: 'Mock step', templateIds: [] },
+    { id: 'scenario-step', body: 'Mock scenario step', templateIds: [] },
+  ],
+  baseSteps: [{ stepId: 'mock-step', sortOrder: 0 }],
+  modules: [
+    {
+      id: 'scenario',
+      categoryId: 'mock',
+      name: 'Mock scenario',
+      sortOrder: 0,
+      steps: [{ stepId: 'scenario-step', sortOrder: 0 }],
+    },
+  ],
 }
 let app: App | undefined
 let host: HTMLDivElement
@@ -41,6 +54,7 @@ async function mount(role: 'user' | 'sysadmin', path: string, empty = false) {
       return Response.json({ category: created }, { status: 201 })
     }
     if (url === '/api/categories') return Response.json({ categories })
+    if (url.endsWith('/impact')) return Response.json({ impact: { base: [], modules: [{}] } })
     if (url.startsWith('/api/templates')) return Response.json({ templates: [] })
     if (url === '/api/release-notes') return Response.json({ items: [] })
     if (url === '/api/auth/logout') return Response.json({})
@@ -134,7 +148,7 @@ it('uses the real create route and announces the new template once at its workbe
   expect(host.textContent).not.toContain(editPermissionHint)
   expect(
     [...host.querySelectorAll('a')]
-      .find((node) => node.textContent?.trim() === '繼續編輯')
+      .find((node) => node.textContent?.trim() === '編輯這個案件範本')
       ?.getAttribute('href'),
   ).toBe('/categories/created/edit')
   await router.push('/categories')
@@ -160,4 +174,29 @@ it('asks before logout from a dirty wizard and does not prompt twice', async () 
   buttons('放棄修改', host.querySelector('[role="dialog"]')!).click()
   await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/login'))
   expect(fetch.mock.calls.filter(([url]) => url === '/api/auth/logout')).toHaveLength(1)
+})
+
+it('opens a scenario step directly from the workbench without adding URL state', async () => {
+  await mount('sysadmin', '/categories/mock')
+  const link = () =>
+    host.querySelector<HTMLAnchorElement>('[aria-label="編輯此步驟：Mock scenario step"]')
+  await vi.waitFor(() =>
+    expect(host.querySelector('.case-edit-actions .btn-primary')).not.toBeNull(),
+  )
+  const scenario = [...host.querySelectorAll('label')].find(
+    (node) => node.textContent?.trim() === 'Mock scenario',
+  )
+  scenario!.querySelector('input')!.click()
+  await nextTick()
+  expect(link()?.getAttribute('href')).toBe('/categories/mock/edit')
+  link()!.click()
+  await vi.waitFor(() => expect(host.querySelector('[role="dialog"] .btn-primary')).not.toBeNull())
+  host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-primary')!.click()
+  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/mock/edit'))
+  expect(router.options.history.state.editStepId).toBe('scenario-step')
+  const editorInput = () => host.querySelector<HTMLInputElement>('input[maxlength="500"]')
+  await vi.waitFor(() => expect(editorInput()?.value).toBe('Mock scenario step'))
+  expect(document.activeElement).toBe(editorInput())
+  expect(router.currentRoute.value.fullPath).toBe('/categories/mock/edit')
+  expect(host.querySelector('[aria-current="step"]')?.textContent?.trim()).toBe('步驟與範本')
 })

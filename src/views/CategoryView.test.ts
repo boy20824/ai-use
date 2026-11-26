@@ -244,3 +244,67 @@ it('uses the shared danger modal to delete a category, with Escape and focus res
   expect(dialog()).toBeNull()
   expect(document.activeElement).toBe(opener)
 })
+
+it.each([
+  [true, false, 'smooth'],
+  [true, true, 'instant'],
+  [false, false, undefined],
+])(
+  'only scrolls the workbench after a mobile selection (mobile %s, reduced motion %s)',
+  async (mobile, reducedMotion, behavior) => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query) =>
+        ({
+          matches: query === '(max-width: 767px)' ? mobile : reducedMotion,
+        }) as MediaQueryList,
+    )
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+    await mount('/categories')
+    const listButton = host.querySelectorAll<HTMLButtonElement>('.case-select-row')[1]!
+    listButton.focus()
+    listButton.click()
+    await vi.waitFor(() =>
+      expect(host.querySelector('.case-workbench h1')?.textContent).toContain('Mock two'),
+    )
+    expect(media).toHaveBeenCalledWith('(max-width: 767px)')
+    if (behavior) {
+      expect(scroll.mock.contexts).toContain(host.querySelector('.case-workbench'))
+      expect(scroll).toHaveBeenCalledWith({ block: 'start', behavior })
+    } else {
+      expect(scroll.mock.contexts).not.toContain(host.querySelector('.case-workbench'))
+      expect(document.activeElement).toBe(listButton)
+      expect(media).not.toHaveBeenCalledWith('(prefers-reduced-motion: reduce)')
+    }
+  },
+)
+
+it('keeps per-step edit links behind the existing edit permission', async () => {
+  mocks.session.canEditCategory = false
+  await mount()
+  expect(host.querySelector('.fixed-step')).not.toBeNull()
+  expect(host.querySelector('[aria-label^="編輯此步驟"]')).toBeNull()
+})
+
+it('scrolls to the first action row when mobile browser chrome would cover it', async () => {
+  vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query) =>
+      ({
+        matches: query === '(max-width: 767px)',
+      }) as MediaQueryList,
+  )
+  const mockBounds = { x: 0, y: 0, height: 0, width: 0, top: 0, left: 0, right: 0 }
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const bottom = this.classList.contains('case-edit-actions') ? window.innerHeight + 50 : 0
+    return { ...mockBounds, bottom, toJSON: () => ({ ...mockBounds, bottom }) }
+  })
+  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+  await mount('/categories')
+  host.querySelectorAll<HTMLButtonElement>('.case-select-row')[1]!.click()
+  await vi.waitFor(() =>
+    expect(host.querySelector('.case-workbench h1')?.textContent).toContain('Mock two'),
+  )
+  expect(scroll.mock.contexts).toContain(host.querySelector('.case-edit-actions'))
+  expect(scroll).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' })
+})

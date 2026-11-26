@@ -39,7 +39,8 @@ function containFocus(event: FocusEvent) {
 }
 onMounted(() => {
   previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  cancelButton.value?.focus()
+  const initialFocus = dialog.value?.querySelector<HTMLElement>('[data-dialog-initial-focus]')
+  ;(initialFocus ?? cancelButton.value)?.focus()
   document.addEventListener('keydown', keydown, true)
   document.addEventListener('focusin', containFocus)
 })

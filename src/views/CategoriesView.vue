@@ -8,7 +8,7 @@ import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import CategoryView from './CategoryView.vue'
 import AppIcon from '@/components/AppIcon.vue'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 const categories = useCategoryStore()
@@ -48,19 +48,28 @@ async function changeBrowser(
   const choices = filtered(nextGroup, nextKeyword)
   const next = choices.find((item) => item.id === nextSelection) ?? choices[0]
   if (next?.id !== selected.value?.id && workbench.value && !(await workbench.value.requestLeave()))
-    return
+    return false
   selection.value = nextSelection
   group.value = nextGroup
   keyword.value = nextKeyword
+  return true
 }
 async function search(event: Event) {
   const input = event.target as HTMLInputElement
   await changeBrowser(selection.value, group.value, input.value)
   input.value = keyword.value
 }
+async function selectCategory(id: string) {
+  if (!(await changeBrowser(id))) return
+  if (!window.matchMedia?.('(max-width: 767px)').matches) return
+  await nextTick()
+  if (selected.value?.id !== id) return
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  workbench.value?.scrollToWorkbench(reducedMotion ? 'instant' : 'smooth')
+}
 async function choose(event: Event) {
   const select = event.target as HTMLSelectElement
-  await changeBrowser(select.value)
+  await selectCategory(select.value)
   select.value = selected.value?.id ?? ''
 }
 </script>
@@ -152,7 +161,7 @@ async function choose(event: Event) {
           class="case-select-row focus-control"
           :class="{ selected: selected?.id === item.id }"
           :aria-pressed="selected?.id === item.id"
-          @click="changeBrowser(item.id)"
+          @click="selectCategory(item.id)"
         >
           <AppIcon name="folder" /><span
             ><strong>{{ item.name }}</strong

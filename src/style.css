@@ -96,6 +96,10 @@
   @apply border border-edge bg-surface text-ink hover:bg-surface-muted disabled:bg-tone-neutral disabled:text-ink-disabled;
 }
 
+@utility btn-move {
+  @apply btn-secondary disabled:cursor-not-allowed disabled:bg-transparent disabled:opacity-45;
+}
+
 @utility btn-ghost {
   @apply button-focus rounded-control text-body transition-colors hover:bg-surface-muted hover:text-ink disabled:bg-tone-neutral disabled:text-ink-disabled;
 }
@@ -1713,5 +1717,19 @@ label:has(> input[type='file']:focus-visible) {
 @media (max-width: 767px) {
   .parallel-entry {
     margin-inline: 12px;
+  }
+}
+
+@media (max-width: 767px) {
+  .case-browser .case-workbench.embedded,
+  .case-browser .case-edit-actions {
+    scroll-margin-top: 72px;
+  }
+  .case-browser .case-workbench.embedded {
+    padding-bottom: calc(57px + max(8px, env(safe-area-inset-bottom)));
+  }
+  .case-browser .case-edit-actions,
+  .case-browser .case-edit-actions > * {
+    scroll-margin-bottom: calc(57px + max(8px, env(safe-area-inset-bottom)));
   }
 }
