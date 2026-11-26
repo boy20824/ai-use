@@ -6,40 +6,20 @@ import { RouterLink, useRouter } from 'vue-router'
 
 const session = useSessionStore()
 const router = useRouter()
-const name = ref('')
 const nickname = ref('')
 const username = ref('')
-const password = ref('')
-const confirmPassword = ref('')
 const message = ref('')
 const pending = ref(false)
 
 async function submit() {
   if (pending.value) return
   message.value = ''
-  if (!password.value.trim()) {
-    message.value = '請填寫密碼。'
-    return
-  }
-  if (new TextEncoder().encode(password.value).length > 72) {
-    message.value = '密碼不可超過 72 個 UTF-8 位元組。'
-    return
-  }
-  if (password.value !== confirmPassword.value) {
-    message.value = '兩次密碼不一致。'
-    return
-  }
   pending.value = true
   try {
     const result = await session.register({
-      name: name.value,
       nickname: nickname.value,
       username: username.value,
-      password: password.value,
-      confirmPassword: confirmPassword.value,
     })
-    password.value = ''
-    confirmPassword.value = ''
     if (!result.ok) {
       message.value = result.message
       return
@@ -63,42 +43,14 @@ async function submit() {
           註冊帳號
         </h1>
         <p class="mt-3 text-sm leading-6 text-stone-600">
-          填寫名稱、暱稱、帳號與密碼。註冊完成後會直接進入工作台。
+          填寫帳號與使用者綽號。註冊完成後會直接進入工作台。
         </p>
 
         <form class="mt-6 space-y-4" @submit.prevent="submit">
           <div>
-            <label for="register-name" class="block text-sm font-medium text-stone-800">名稱</label>
-            <input
-              id="register-name"
-              v-model="name"
-              type="text"
-              name="name"
-              autocomplete="name"
-              required
-              maxlength="40"
-              class="field mt-2 w-full"
-            />
-          </div>
-          <div>
-            <label for="register-nickname" class="block text-sm font-medium text-stone-800"
-              >暱稱</label
-            >
-            <input
-              id="register-nickname"
-              v-model="nickname"
-              type="text"
-              name="nickname"
-              autocomplete="nickname"
-              required
-              maxlength="40"
-              class="field mt-2 w-full"
-            />
-          </div>
-          <div>
-            <label for="register-username" class="block text-sm font-medium text-stone-800"
-              >帳號</label
-            >
+            <label for="register-username" class="block text-sm font-medium text-stone-800">
+              帳號 <span class="ml-2 font-normal">知識互聯網</span>
+            </label>
             <input
               id="register-username"
               v-model="username"
@@ -116,32 +68,17 @@ async function submit() {
             </p>
           </div>
           <div>
-            <label for="register-password" class="block text-sm font-medium text-stone-800"
-              >密碼</label
-            >
+            <label for="register-nickname" class="block text-sm font-medium text-stone-800">
+              使用者綽號
+            </label>
             <input
-              id="register-password"
-              v-model="password"
-              type="password"
-              name="password"
-              autocomplete="new-password"
+              id="register-nickname"
+              v-model="nickname"
+              type="text"
+              name="nickname"
+              autocomplete="nickname"
               required
-              minlength="1"
-              class="field mt-2 w-full"
-            />
-          </div>
-          <div>
-            <label for="register-confirm" class="block text-sm font-medium text-stone-800"
-              >確認密碼</label
-            >
-            <input
-              id="register-confirm"
-              v-model="confirmPassword"
-              type="password"
-              name="confirmPassword"
-              autocomplete="new-password"
-              required
-              minlength="1"
+              maxlength="40"
               class="field mt-2 w-full"
             />
           </div>

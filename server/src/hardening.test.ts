@@ -384,7 +384,7 @@ async function boot(overrides: Partial<AppConfig> = {}) {
     const result = await loginWithCsrf(app, {
       method: 'POST',
       url: '/api/auth/login',
-      payload: { username, password: 'p'.repeat(73) },
+      payload: { username },
     })
     expect(result.statusCode).toBe(200)
     const cookies = Object.fromEntries(result.cookies.map((c) => [c.name, c.value]))
@@ -393,8 +393,10 @@ async function boot(overrides: Partial<AppConfig> = {}) {
   return { db, app, queries, auth, dir, config }
 }
 
-it('normalizes historical and alternating ASCII login names for counting and clearing', async () => {
+it('locks inactive accounts across ASCII casing, revokes sessions, and clears failures on active login', async () => {
   const { db, queries, app } = await boot()
+  db.prepare('UPDATE users SET active = 0 WHERE id = ?').run('admin')
+  queries.insertSession('mock-stale-session', 'admin', new Date(Date.now() + 60_000).toISOString())
   db.prepare('INSERT INTO login_events(username, ip, success, created_at) VALUES (?, ?, 0, ?)').run(
     'AdMiN',
     'old',
@@ -402,85 +404,53 @@ it('normalizes historical and alternating ASCII login names for counting and cle
   )
   migrate(db)
   expect(queries.recentFailures('ADMIN', 0)).toBe(1)
+  const attempt = (username: string) =>
+    loginWithCsrf(app, { method: 'POST', url: '/api/auth/login', payload: { username } })
   for (const username of ['aDmIn', 'ADmin']) {
-    expect(
-      (
-        await loginWithCsrf(app, {
-          method: 'POST',
-          url: '/api/auth/login',
-          payload: { username, password: 'wrong' },
-        })
-      ).statusCode,
-    ).toBe(401)
+    const denied = await attempt(username)
+    expect(denied.statusCode).toBe(401)
+    expect(denied.json()).toEqual({ error: 'unauthorized', message: '帳號不正確。' })
   }
-  expect(
-    (
-      await loginWithCsrf(app, {
-        method: 'POST',
-        url: '/api/auth/login',
-        payload: { username: 'ADMIN', password: 'p'.repeat(73) },
-      })
-    ).statusCode,
-  ).toBe(429)
-  queries.clearFailures('AdMiN')
+  expect(db.prepare('SELECT * FROM sessions WHERE user_id = ?').all('admin')).toEqual([])
+  const locked = await attempt('ADMIN')
+  expect(locked.statusCode).toBe(429)
+  expect(locked.json().error).toBe('locked')
+  db.prepare('UPDATE users SET active = 1 WHERE id = ?').run('admin')
+  expect((await attempt('ADMIN')).statusCode).toBe(200)
   expect(queries.recentFailures('admin', 0)).toBe(0)
 })
 
-it('rejects over-72-byte new passwords at every entry point while preserving legacy login', async () => {
+it('rejects over-72-byte passwords on change-password and ignores long login passwords', async () => {
   const { app, auth } = await boot()
   const admin = await auth()
   for (const password of ['a'.repeat(73), '密'.repeat(25)]) {
-    const account = { name: '測試', nickname: '測試', username: 'newuser', password }
-    expect(
-      (
-        await app.inject({
-          method: 'POST',
-          url: '/api/auth/register',
-          ...admin,
-          payload: { ...account, confirmPassword: password },
-        })
-      ).statusCode,
-    ).toBe(400)
-    expect(
-      (await app.inject({ method: 'POST', url: '/api/members', ...admin, payload: account }))
-        .statusCode,
-    ).toBe(400)
-    expect(
-      (
-        await app.inject({
-          method: 'POST',
-          url: '/api/auth/change-password',
-          ...admin,
-          payload: { currentPassword: 'p'.repeat(73), newPassword: password },
-        })
-      ).statusCode,
-    ).toBe(400)
+    const changed = await app.inject({
+      method: 'POST',
+      url: '/api/auth/change-password',
+      ...admin,
+      payload: { currentPassword: 'p'.repeat(73), newPassword: password },
+    })
+    expect(changed.statusCode).toBe(400)
+    expect(changed.json().message).toContain('72')
   }
-  expect(
-    (
-      await app.inject({
-        method: 'POST',
-        url: '/api/auth/register',
-        ...admin,
-        payload: {
-          name: '測試',
-          nickname: '測試',
-          username: 'boundary',
-          password: '密'.repeat(24),
-          confirmPassword: '密'.repeat(24),
-        },
-      })
-    ).statusCode,
-  ).toBe(201)
   expect(
     (
       await loginWithCsrf(app, {
         method: 'POST',
         url: '/api/auth/login',
-        payload: { username: 'admin', password: 'p'.repeat(72) },
+        payload: { username: 'admin', password: '密'.repeat(201) },
       })
     ).statusCode,
   ).toBe(200)
+})
+
+it('preserves the login username format for existing accounts', async () => {
+  const { queries, auth } = await boot()
+  const fixture = queries.findUserById('other')!
+  for (const username of ['_', `.${'a'.repeat(79)}`]) {
+    queries.insertUser({ ...fixture, id: username, username })
+    await auth(username)
+  }
 })
 
 it('enforces account/global quotas, bounded pages, and keeps shared reading', async () => {

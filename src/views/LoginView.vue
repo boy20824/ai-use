@@ -11,7 +11,6 @@ const session = useSessionStore()
 const route = useRoute()
 const router = useRouter()
 const username = ref('')
-const password = ref('')
 const failed = ref(false)
 const offline = ref(false)
 const pending = ref(false)
@@ -23,8 +22,7 @@ async function submit() {
   offline.value = false
   pending.value = true
   try {
-    const result = await session.login(username.value, password.value)
-    password.value = ''
+    const result = await session.login(username.value)
     if (result === 'invalid') {
       failed.value = true
       return
@@ -71,7 +69,7 @@ async function submit() {
         </h1>
         <form class="corgi-form" aria-label="登入" @submit.prevent="submit">
           <div class="corgi-field">
-            <label for="username">帳號</label>
+            <label for="username">帳號 <span class="ml-2 font-normal">知識互聯網</span></label>
             <input
               id="username"
               v-model="username"
@@ -83,20 +81,7 @@ async function submit() {
               :class="{ 'corgi-field-error': failed }"
             />
           </div>
-          <div class="corgi-field">
-            <label for="password">密碼</label>
-            <input
-              id="password"
-              v-model="password"
-              type="password"
-              name="password"
-              autocomplete="current-password"
-              required
-              placeholder="請輸入密碼"
-              :class="{ 'corgi-field-error': failed }"
-            />
-          </div>
-          <p v-if="failed" class="corgi-error" role="alert">帳號或密碼不正確。</p>
+          <p v-if="failed" class="corgi-error" role="alert">帳號不正確。</p>
           <p v-if="offline" class="corgi-error" role="alert">無法連線。請確認服務已啟動。</p>
           <div class="corgi-actions">
             <button type="submit" class="corgi-submit" :disabled="pending" :aria-busy="pending">
@@ -109,7 +94,7 @@ async function submit() {
             </p>
           </div>
         </form>
-        <p class="corgi-description">輸入帳號與密碼，進入案件範本。</p>
+        <p class="corgi-description">輸入帳號，進入案件範本。</p>
       </section>
     </section>
   </main>

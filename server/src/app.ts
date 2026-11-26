@@ -59,7 +59,6 @@ declare module 'fastify' {
 
 const sessionCookieName = 'session'
 const csrfCookieName = 'csrf'
-const dummyHash = bcrypt.hashSync(randomBytes(16).toString('hex'), 12)
 const mutatingMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
 const loginSchema = z
@@ -70,8 +69,8 @@ const loginSchema = z
       .min(1)
       .max(80)
       .regex(/^[\w.-]+$/),
-    // Preserve legacy bcrypt truncation for existing accounts; new secrets are byte limited.
-    password: z.string().min(1).max(200),
+    // Older clients may still send this field.
+    password: z.unknown().optional(),
   })
   .strict()
 
@@ -195,34 +194,14 @@ const usernameSchema = z
   .trim()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/)
 
-const passwordSchema = z
-  .string()
-  .min(1)
-  .max(200)
-  .refine((value) => value.trim().length > 0, '請填寫密碼。')
-  .refine(passwordByteLimit, '密碼不可超過 72 UTF-8 bytes。')
-
 const registerSchema = z
   .object({
-    name: personNameSchema,
-    nickname: personNameSchema,
     username: usernameSchema,
-    password: passwordSchema,
-    confirmPassword: z.string().min(1).max(200),
+    nickname: personNameSchema,
   })
   .strict()
-  .refine((value) => value.password === value.confirmPassword, { path: ['confirmPassword'] })
 
 const memberIdSchema = z.string().regex(/^[A-Za-z0-9-]{1,64}$/)
-
-const memberCreateSchema = z
-  .object({
-    name: personNameSchema,
-    nickname: personNameSchema,
-    username: usernameSchema,
-    password: passwordSchema,
-  })
-  .strict()
 
 const memberPatchSchema = z
   .object({
@@ -374,15 +353,15 @@ function categoryInputMessage(error: {
   return '輸入格式不正確。'
 }
 
-function registerMessage(error: { issues: { path: PropertyKey[]; code?: string }[] }): string {
-  const issue = error.issues[0]
-  const field = issue?.path[0]
-  if (field === 'confirmPassword') return '兩次密碼不一致。'
-  if (field === 'password' && issue?.code === 'too_small') return '請填寫密碼。'
+function registerMessage(error: { issues: { path: PropertyKey[] }[] }): string {
+  const field = error.issues[0]?.path[0]
   if (field === 'username') return '帳號格式不正確。'
-  if (field === 'name') return '請填寫名稱。'
-  if (field === 'nickname') return '請填寫暱稱。'
+  if (field === 'nickname') return '使用者綽號格式不正確。'
   return '輸入格式不正確。'
+}
+
+function unusablePasswordHash(): string {
+  return bcrypt.hashSync(randomBytes(32).toString('hex'), 12)
 }
 
 function memberFailure(reply: FastifyReply, error: MemberUpdateError) {
@@ -809,17 +788,15 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     if (queries.recentAttempts(ip, now - 60_000) >= config.loginRatePerMinute) {
       return fail(reply, 429, 'rate-limited', '登入嘗試過多，請稍後再試。')
     }
-    const lockoutAfter = now - config.loginLockoutMinutes * 60_000
-    if (queries.recentFailures(username, lockoutAfter) >= config.loginMaxFailures) {
-      return fail(reply, 429, 'locked', '登入嘗試過多，請稍後再試。')
-    }
-
     const user = queries.findUserByUsername(username)
-    const matches = bcrypt.compareSync(parsed.data.password, user?.passwordHash ?? dummyHash)
-    if (!user || !matches || !user.active) {
+    if (!user?.active) {
+      if (user) queries.deleteUserSessions(user.id)
+      const lockoutAfter = now - config.loginLockoutMinutes * 60_000
+      if (queries.recentFailures(username, lockoutAfter) >= config.loginMaxFailures) {
+        return fail(reply, 429, 'locked', '登入嘗試過多，請稍後再試。')
+      }
       queries.recordLogin(username, ip, false)
-      if (user && matches && !user.active) queries.deleteUserSessions(user.id)
-      return fail(reply, 401, 'unauthorized', '帳號或密碼不正確。')
+      return fail(reply, 401, 'unauthorized', '帳號不正確。')
     }
 
     queries.clearFailures(username)
@@ -899,19 +876,15 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       config.registerGlobalLimit,
     )
     if (!allowed) return fail(reply, 429, 'rate-limited', '註冊嘗試過多，請稍後再試。')
-    const proposedPassword = (request.body as { password?: unknown } | null)?.password
-    if (typeof proposedPassword === 'string' && !passwordByteLimit(proposedPassword))
-      return fail(reply, 400, 'invalid-input', '密碼不可超過 72 UTF-8 bytes。')
     const parsed = registerSchema.safeParse(request.body)
     if (!parsed.success) return fail(reply, 400, 'invalid-input', registerMessage(parsed.error))
-    const passwordHash = bcrypt.hashSync(parsed.data.password, 12)
     const id = randomBytes(16).toString('hex')
     try {
       queries.insertUser({
         id,
         username: parsed.data.username,
-        passwordHash,
-        displayName: parsed.data.name,
+        passwordHash: unusablePasswordHash(),
+        displayName: parsed.data.nickname,
         nickname: parsed.data.nickname,
         role: 'user',
         canManageCategories: false,
@@ -1616,18 +1589,15 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
   app.post('/api/members', async (request, reply) => {
     const user = requireSysadmin(request, reply, 'member_create', '只有系統管理員可以管理會員。')
     if (!user) return
-    const proposedPassword = (request.body as { password?: unknown } | null)?.password
-    if (typeof proposedPassword === 'string' && !passwordByteLimit(proposedPassword))
-      return fail(reply, 400, 'invalid-input', '密碼不可超過 72 UTF-8 bytes。')
-    const parsed = memberCreateSchema.safeParse(request.body)
+    const parsed = registerSchema.safeParse(request.body)
     if (!parsed.success) return fail(reply, 400, 'invalid-input', registerMessage(parsed.error))
     const id = randomBytes(16).toString('hex')
     try {
       queries.insertUser({
         id,
         username: parsed.data.username,
-        passwordHash: bcrypt.hashSync(parsed.data.password, 12),
-        displayName: parsed.data.name,
+        passwordHash: unusablePasswordHash(),
+        displayName: parsed.data.nickname,
         nickname: parsed.data.nickname,
         role: 'user',
         canManageCategories: false,

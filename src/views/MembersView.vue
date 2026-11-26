@@ -15,10 +15,8 @@ const message = ref('')
 const tone = ref<'ok' | 'warn'>('warn')
 const pendingId = ref('')
 const showForm = ref(false)
-const name = ref('')
 const nickname = ref('')
 const username = ref('')
-const password = ref('')
 
 const activeSysadmins = computed(
   () => members.value.filter((member) => member.role === 'sysadmin' && member.active).length,
@@ -103,25 +101,13 @@ async function deleteMember(member: MemberAccount) {
 async function createMember() {
   if (pendingId.value) return
   message.value = ''
-  if (!password.value.trim()) {
-    tone.value = 'warn'
-    message.value = '請填寫密碼。'
-    return
-  }
-  if (new TextEncoder().encode(password.value).length > 72) {
-    tone.value = 'warn'
-    message.value = '密碼不可超過 72 個 UTF-8 位元組。'
-    return
-  }
   pendingId.value = 'new'
   try {
     const response = await apiRequest('/api/members', {
       method: 'POST',
       body: JSON.stringify({
-        name: name.value.trim(),
         nickname: nickname.value.trim(),
         username: username.value.trim(),
-        password: password.value,
       }),
     })
     if (!response.ok) {
@@ -129,10 +115,8 @@ async function createMember() {
       message.value = await apiErrorMessage(response, '無法新增會員。')
       return
     }
-    name.value = ''
     nickname.value = ''
     username.value = ''
-    password.value = ''
     showForm.value = false
     tone.value = 'ok'
     message.value = '已新增會員。'
@@ -171,21 +155,9 @@ onMounted(() => {
     @submit.prevent="createMember"
   >
     <div>
-      <label for="member-name" class="block text-sm font-medium text-stone-800">名稱</label>
-      <input id="member-name" v-model="name" required maxlength="40" class="field mt-2 w-full" />
-    </div>
-    <div>
-      <label for="member-nickname" class="block text-sm font-medium text-stone-800">暱稱</label>
-      <input
-        id="member-nickname"
-        v-model="nickname"
-        required
-        maxlength="40"
-        class="field mt-2 w-full"
-      />
-    </div>
-    <div>
-      <label for="member-username" class="block text-sm font-medium text-stone-800">帳號</label>
+      <label for="member-username" class="block text-sm font-medium text-stone-800">
+        帳號 <span class="ml-2 font-normal">知識互聯網</span>
+      </label>
       <input
         id="member-username"
         v-model="username"
@@ -197,14 +169,14 @@ onMounted(() => {
       />
     </div>
     <div>
-      <label for="member-password" class="block text-sm font-medium text-stone-800">初始密碼</label>
+      <label for="member-nickname" class="block text-sm font-medium text-stone-800">
+        使用者綽號
+      </label>
       <input
-        id="member-password"
-        v-model="password"
-        type="password"
+        id="member-nickname"
+        v-model="nickname"
         required
-        minlength="1"
-        autocomplete="new-password"
+        maxlength="40"
         class="field mt-2 w-full"
       />
     </div>

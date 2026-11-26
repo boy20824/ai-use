@@ -107,7 +107,7 @@ async function boot(overrides: Partial<AppConfig> = {}) {
 async function login(
   app: Awaited<ReturnType<typeof boot>>['app'],
   username: string,
-  password: string,
+  password?: string,
 ) {
   return loginWithCsrf(app, {
     method: 'POST',
@@ -359,8 +359,8 @@ describe('security controls', () => {
       const audit = JSON.stringify(db.prepare('SELECT * FROM audit_log').all())
       expect(audit).not.toContain('replacement-password-123')
       expect(audit).not.toContain(hash)
-      expect((await login(app, 'clerk', passwords.clerk)).statusCode).toBe(401)
-      expect((await login(app, 'clerk', 'replacement-password-123')).statusCode).toBe(200)
+      expect((await login(app, 'clerk')).statusCode).toBe(200)
+      expect((await login(app, 'clerk', passwords.clerk)).statusCode).toBe(200)
     } finally {
       await app.close()
     }
@@ -458,22 +458,64 @@ describe('security controls', () => {
     }
   })
 
-  it('locks login after repeated failures and limits the request rate', async () => {
+  it('locks unknown usernames after repeated failures', async () => {
     const { app, db } = await boot()
     databases.push(db)
-    expect((await login(app, 'clerk', 'wrong-1')).statusCode).toBe(401)
-    expect((await login(app, 'clerk', 'wrong-2')).statusCode).toBe(401)
-    const locked = await login(app, 'clerk', passwords.clerk)
-    expect(locked.statusCode).toBe(429)
-    expect(locked.json()).toEqual({ error: 'locked', message: '登入嘗試過多，請稍後再試。' })
-    expect(JSON.stringify(locked.json())).not.toContain('stack')
+    try {
+      for (const username of ['missing-user', 'MISSING-USER']) {
+        const denied = await login(app, username)
+        expect(denied.statusCode).toBe(401)
+        expect(denied.json()).toEqual({ error: 'unauthorized', message: '帳號不正確。' })
+      }
+      const locked = await login(app, 'missing-user')
+      expect(locked.statusCode).toBe(429)
+      expect(locked.json()).toEqual({ error: 'locked', message: '登入嘗試過多，請稍後再試。' })
+    } finally {
+      await app.close()
+    }
+  })
 
-    const limited = await boot({ loginMaxFailures: 50, loginRatePerMinute: 2 })
-    databases.push(limited.db)
-    expect((await login(limited.app, 'clerk', passwords.clerk)).statusCode).toBe(200)
-    expect((await login(limited.app, 'clerk', passwords.clerk)).statusCode).toBe(200)
-    expect((await login(limited.app, 'clerk', passwords.clerk)).statusCode).toBe(429)
-    await limited.app.close()
+  it('counts valid login attempts by peer IP and skips invalid bodies and probes', async () => {
+    const { app, db } = await boot({ loginRatePerMinute: 3 })
+    databases.push(db)
+    const attempt = (payload?: Record<string, unknown>, forwardedIp = '192.0.2.1') =>
+      loginWithCsrf(app, {
+        method: 'POST',
+        url: '/api/auth/login',
+        remoteAddress: '192.0.2.10',
+        headers: { 'x-forwarded-for': forwardedIp },
+        payload,
+      })
+    try {
+      expect((await app.inject('/healthz')).statusCode).toBe(200)
+      expect((await app.inject('/api/auth/me')).statusCode).toBe(401)
+      for (const payload of [
+        undefined,
+        {},
+        { password: passwords.clerk },
+        { username: ' ' },
+        { username: 'a'.repeat(81) },
+        { username: 'clerk', extra: true },
+      ]) {
+        const invalid = await attempt(payload)
+        expect(invalid.statusCode).toBe(400)
+        expect(invalid.json().error).toBe('invalid-input')
+      }
+      const queries = createQueries(db)
+      expect(queries.recentAttempts('192.0.2.10', 0)).toBe(0)
+
+      expect((await attempt({ username: 'unknown' })).statusCode).toBe(401)
+      for (const password of ['wrong-1', 'wrong-2']) {
+        expect((await attempt({ username: 'clerk', password })).statusCode).toBe(200)
+      }
+      expect(queries.recentFailures('clerk', 0)).toBe(0)
+      expect(queries.recentAttempts('192.0.2.10', 0)).toBe(3)
+      const limited = await attempt({ username: 'clerk' }, '192.0.2.2')
+      expect(limited.statusCode).toBe(429)
+      expect(limited.json().error).toBe('rate-limited')
+    } finally {
+      await app.close()
+    }
   })
 
   it('rotates the session on login and sets Secure in production', async () => {
