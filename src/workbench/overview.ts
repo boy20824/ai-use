@@ -1,5 +1,4 @@
 import { photoFields } from '../../server/src/photoBlocks'
-import { displayFileName } from '@/utils/fileName'
 import { isDerivedDateTag, parseRocDate } from '@/utils/rocDate'
 
 export interface OverviewTemplate {
@@ -20,26 +19,6 @@ export function dedupedIds(steps: { templateIds: string[] }[]): string[] {
     }
   }
   return ids
-}
-
-export function overviewCatalog(
-  categoryIds: string[],
-  temporaryIds: string[],
-  lookup: (id: string) => OverviewTemplate | undefined,
-): OverviewTemplate[] {
-  const ids: string[] = []
-  const seen = new Set<string>()
-  for (const id of [...categoryIds, ...temporaryIds]) {
-    if (seen.has(id)) continue
-    seen.add(id)
-    ids.push(id)
-  }
-  const templates: OverviewTemplate[] = []
-  for (const id of ids) {
-    const item = lookup(id)
-    if (item && item.kind !== 'pdf') templates.push(item)
-  }
-  return templates
 }
 
 export function checkedTemplates<T extends { id: string }>(
@@ -104,8 +83,4 @@ export function missingOverviewFields(fields: string[], values: Record<string, s
     if (name === '日期' && !parseRocDate(raw)) missing.push('日期格式')
   }
   return missing
-}
-
-export function overviewDownloadName(fileName: string): string {
-  return `產生-${displayFileName(fileName)}`
 }

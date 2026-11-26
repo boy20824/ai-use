@@ -12,6 +12,7 @@ dist-ssr
 *.sqlite
 *.sqlite-*
 server/data/
+evidence/
 npm-debug.log*
 pnpm-debug.log*
 

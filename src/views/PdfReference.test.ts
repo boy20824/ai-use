@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { docxMimeType } from '../../shared/templateUpload'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, type App } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
@@ -61,7 +62,7 @@ async function mount(mixed = false) {
     id,
     kind: 'docx' as const,
     fileName: `${id}.docx`,
-    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    mimeType: docxMimeType,
     placeholders: ['MockField'],
     data: buildDocx({ document: wordDocument(paragraph(run('', '{{MockField}}'))) }),
   })

@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { readFileSync } from 'node:fs'
 import type { SeedPasswords } from './config.ts'
+import { docxMimeType } from '../../shared/templateUpload.ts'
 import { listPlaceholders } from './docx.ts'
 import type { AppQueries, Role } from './db.ts'
 import { writeTemplateFile } from './files.ts'
@@ -71,7 +72,7 @@ export function seedReferenceData(
     kind: 'docx',
     id: sampleTemplateId,
     fileName: '欄位示範範本.docx',
-    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    mimeType: docxMimeType,
     sizeBytes: data.byteLength,
     addedAt: '2026-10-29 09:00',
     placeholders: listPlaceholders(data),

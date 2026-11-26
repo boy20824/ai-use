@@ -1,9 +1,9 @@
 import JSZip from 'jszip'
 
-export const SLICE_HEIGHT = 1792
+const SLICE_HEIGHT = 1792
 export const LIMITS = { fileBytes: 200 * 1024 ** 2 }
 // Bound application-owned decode/canvas/RGBA buffers; browser codecs may decode more internally.
-export const BAND_BYTES = 16 * 1024 ** 2
+const BAND_BYTES = 16 * 1024 ** 2
 export function bandRows(width: number) {
   return Math.max(1, Math.min(16384, Math.floor(BAND_BYTES / (width * 4))))
 }
@@ -75,20 +75,6 @@ export function slices(height: number, cuts: number[]): Slice[] {
   return points.slice(0, -1).map((start, i) => ({ start, end: points[i + 1] }))
 }
 export const pad = (index: number) => String(index + 1).padStart(3, '0')
-export function plan(images: (CropSource & Pick<Source, 'height' | 'cuts'>)[]) {
-  return images.flatMap((image, imageIndex) => {
-    const { cropLeft: x } = clampCrop(image)
-    const width = cropWidth(image)
-    return slices(image.height, image.cuts).map((slice, sliceIndex) => ({
-      ...slice,
-      imageIndex,
-      sliceIndex,
-      x,
-      width,
-      path: `${pad(imageIndex)}/${pad(sliceIndex)}.png`,
-    }))
-  })
-}
 export function reorder<T>(items: T[], from: number, to: number): T[] {
   if (from < 0 || to < 0 || from >= items.length || to >= items.length) return items
   const result = [...items]
@@ -219,7 +205,7 @@ export function encodeSlice(
   return output
 }
 // Each PNG is encoded incrementally. Only encoded chunks are retained, never whole-slice RGBA.
-export class PngRows {
+class PngRows {
   private parts: BlobPart[]
   private rows = 0
   private a = 1

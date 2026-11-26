@@ -1,3 +1,4 @@
+import { docxMimeType } from '../../shared/templateUpload.ts'
 import { loginWithCsrf } from './loginTestHelper.ts'
 import bcrypt from 'bcryptjs'
 import { createHash, randomBytes } from 'node:crypto'
@@ -549,11 +550,7 @@ describe('security controls', () => {
     const clerk = await login(app, 'clerk', passwords.clerk)
     const viewer = await login(app, 'viewer', passwords.viewer)
     const admin = await login(app, 'admin', passwords.admin)
-    const file = multipart(
-      'note.docx',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      docx('CASE-SECRET-VALUE {{姓名}}'),
-    )
+    const file = multipart('note.docx', docxMimeType, docx('CASE-SECRET-VALUE {{姓名}}'))
     const clerkAuth = auth(clerk)
     const crossSite = await app.inject({
       method: 'POST',
@@ -666,11 +663,7 @@ describe('security controls', () => {
     const { app, db } = await boot()
     databases.push(db)
     const admin = auth(await login(app, 'admin', passwords.admin))
-    const traversal = multipart(
-      '../../etc/passwd.docx',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      docx('ok'),
-    )
+    const traversal = multipart('../../etc/passwd.docx', docxMimeType, docx('ok'))
     const stored = await app.inject({
       method: 'POST',
       url: '/api/templates',
@@ -682,11 +675,7 @@ describe('security controls', () => {
     expect(stored.json().template.fileName).toBe('passwd.docx')
     expect(stored.json().template.fileName).not.toContain('..')
 
-    const bomb = multipart(
-      'bomb.docx',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      docx('too many', 8),
-    )
+    const bomb = multipart('bomb.docx', docxMimeType, docx('too many', 8))
     const rejectedBomb = await app.inject({
       method: 'POST',
       url: '/api/templates',

@@ -1,3 +1,4 @@
+import { docxMimeType } from '../../shared/templateUpload.ts'
 import { loginWithCsrf } from './loginTestHelper.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -70,7 +71,7 @@ function multipart(name: string, data: Uint8Array) {
   const boundary = '----v12'
   const payload = Buffer.concat([
     Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: ${docxMimeType}\r\n\r\n`,
     ),
     data,
     Buffer.from(`\r\n--${boundary}--\r\n`),

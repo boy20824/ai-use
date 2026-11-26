@@ -1,11 +1,9 @@
 import JSZip from 'jszip'
 
-const docxMimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-
-export const templateMimeType = docxMimeType
+export { docxMimeType as templateMimeType, hasZipHeader } from '../../shared/templateUpload'
 export const maxTemplateBytes = 8 * 1024 * 1024
 
-export { listPlaceholders, placeholdersInText } from '../../server/src/docxXml.ts'
+export { listPlaceholders } from '../../server/src/docxXml.ts'
 export { renderDocx } from '../../shared/docxRender.ts'
 
 export function safeFileName(name: string): string {
@@ -16,12 +14,6 @@ export function safeFileName(name: string): string {
     .trim()
   if (!cleaned || cleaned.includes('..')) return ''
   return cleaned.slice(0, 180)
-}
-
-export function hasZipHeader(data: ArrayBuffer): boolean {
-  if (data.byteLength < 4) return false
-  const bytes = new Uint8Array(data, 0, 4)
-  return bytes[0] === 0x50 && bytes[1] === 0x4b
 }
 
 export async function zipGeneratedFiles(

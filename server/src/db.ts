@@ -95,13 +95,13 @@ export interface FeedbackPatch {
   adminReply?: string
 }
 
-export type CategoryGroup = 'criminal' | 'admin' | 'internal'
-export interface VariantRecord {
+type CategoryGroup = 'criminal' | 'admin' | 'internal'
+interface VariantRecord {
   id: string
   categoryId: string
   name: string
 }
-export interface FieldDefRecord {
+interface FieldDefRecord {
   /** Explicit standalone base definition; absent means legacy mapping rules. */
   scope?: 'base'
   id: string
@@ -110,7 +110,7 @@ export interface FieldDefRecord {
   key: string
   type: 'text' | 'number'
 }
-export interface StepDetails {
+interface StepDetails {
   canRunInParallel?: boolean
   categoryId?: string
   order?: number
@@ -133,11 +133,11 @@ export interface TemplateUsage {
   sortOrder: number
 }
 
-export interface StepRef {
+interface StepRef {
   stepId: string
   sortOrder: number
 }
-export interface ModuleRecord {
+interface ModuleRecord {
   id: string
   categoryId: string
   name: string
@@ -618,7 +618,7 @@ export function isUniqueConstraint(error: unknown): boolean {
   return message.includes('UNIQUE')
 }
 
-export function normalizeLoginAccount(value: string): string {
+function normalizeLoginAccount(value: string): string {
   return value.replace(/[A-Z]/g, (char) => char.toLowerCase())
 }
 

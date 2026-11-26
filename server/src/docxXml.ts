@@ -55,7 +55,7 @@ function escapeXml(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-export function placeholdersInText(text: string): string[] {
+function placeholdersInText(text: string): string[] {
   const names: string[] = []
   const seen = new Set<string>()
   for (const match of text.matchAll(placeholderPattern)) {
@@ -91,7 +91,7 @@ function leafParagraphRanges(xml: string): ParagraphRange[] {
   return all
 }
 
-export function placeholderNamesInXml(xml: string): string[] {
+function placeholderNamesInXml(xml: string): string[] {
   const ranges = leafParagraphRanges(xml)
   const chunks =
     ranges.length > 0

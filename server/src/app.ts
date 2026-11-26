@@ -1,4 +1,5 @@
 import {
+  docxMimeType,
   hasPdfHeader,
   isAllowedPdfMime,
   maxPdfUploadBytes,
@@ -1507,10 +1508,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       id: replacing ? replaceId : randomBytes(16).toString('hex'),
       fileName,
       kind,
-      mimeType:
-        kind === 'pdf'
-          ? pdfMimeType
-          : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      mimeType: kind === 'pdf' ? pdfMimeType : docxMimeType,
       sizeBytes: storedBytes.byteLength,
       addedAt: replacing ? new Date().toISOString() : stamp(),
       placeholders,

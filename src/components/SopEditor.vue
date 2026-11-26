@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { docxMimeType } from '../../shared/templateUpload'
 import { computed, ref, watch } from 'vue'
 import { apiRequest, apiErrorMessage } from '@/services/api'
 import { useCategoryStore } from '@/stores/categories'
@@ -315,7 +316,7 @@ async function upload(files: File[]) {
           disabled-reason=""
           title="上傳 Word 或 PDF 範本"
           hint="存入既有範本庫"
-          accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+          :accept="`.docx,.pdf,${docxMimeType},application/pdf`"
           @select="upload"
         />
         <button type="button" class="btn-secondary" @click="saveStep">儲存共用步驟</button

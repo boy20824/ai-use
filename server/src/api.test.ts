@@ -1,3 +1,4 @@
+import { docxMimeType } from '../../shared/templateUpload.ts'
 import { loginWithCsrf } from './loginTestHelper.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -539,12 +540,11 @@ describe('api', () => {
       }
       const data = buildMockPdf()
       const pdf = await send('POST', '/api/templates', 'Mock.pdf', 'application/pdf', data)
-      const wordMime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       const docx = await send(
         'POST',
         '/api/templates',
         'Mock.docx',
-        wordMime,
+        docxMimeType,
         buildDocx('{{MockField}}'),
       )
       expect(pdf.statusCode).toBe(201)
@@ -552,9 +552,9 @@ describe('api', () => {
       expect(docx.json().template).toMatchObject({ kind: 'docx', placeholders: ['MockField'] })
       const pdfUrl = `/api/templates/${pdf.json().template.id}/file`
       const docxUrl = `/api/templates/${docx.json().template.id}/file`
-      expect((await send('PUT', pdfUrl, 'Mock.docx', wordMime, buildDocx('Mock'))).statusCode).toBe(
-        400,
-      )
+      expect(
+        (await send('PUT', pdfUrl, 'Mock.docx', docxMimeType, buildDocx('Mock'))).statusCode,
+      ).toBe(400)
       expect((await send('PUT', docxUrl, 'Mock.pdf', 'application/pdf', data)).statusCode).toBe(400)
       const replacement = Buffer.concat([data, Buffer.from('% Mock replacement\n')])
       expect(
@@ -564,12 +564,12 @@ describe('api', () => {
         replacement,
       )
       expect(
-        (await send('PUT', docxUrl, 'Mock-new.docx', wordMime, buildDocx('{{MockNew}}')))
+        (await send('PUT', docxUrl, 'Mock-new.docx', docxMimeType, buildDocx('{{MockNew}}')))
           .statusCode,
       ).toBe(200)
       const file = await app.inject({ url: docxUrl, cookies: admin.cookies })
       expect(file.statusCode).toBe(200)
-      expect(file.headers['content-type']).toBe(wordMime)
+      expect(file.headers['content-type']).toBe(docxMimeType)
       expect(file.headers['x-content-type-options']).toBe('nosniff')
     } finally {
       await app.close()
@@ -760,7 +760,7 @@ describe('api', () => {
       { categoryId },
       {
         name: 'summary.docx',
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        type: docxMimeType,
         data: buildDocx('申請人：{{姓名}}　日期：{{日期}}'),
       },
     )
@@ -811,7 +811,7 @@ describe('api', () => {
       { categoryId },
       {
         name: 'fake.docx',
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        type: docxMimeType,
         data: Buffer.from('this is not a zip'),
       },
     )
@@ -870,7 +870,7 @@ describe('api', () => {
         {},
         {
           name: 'large.docx',
-          type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          type: docxMimeType,
           data,
         },
       )
@@ -916,7 +916,7 @@ describe('api', () => {
       {},
       {
         name: 'big.docx',
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        type: docxMimeType,
         data: Buffer.alloc(64, 1),
       },
     )

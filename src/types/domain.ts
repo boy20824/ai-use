@@ -18,7 +18,7 @@ export interface FieldDef {
   key: string
   type: 'text' | 'number'
 }
-export interface StepDetails {
+interface StepDetails {
   canRunInParallel?: boolean
   categoryId?: string
   order?: number
@@ -63,7 +63,7 @@ export interface CaseCategory {
   templateCount: number
 }
 
-export interface CategoryStepInput extends StepDetails {
+interface CategoryStepInput extends StepDetails {
   id?: string
   body: string
   templateIds: string[]

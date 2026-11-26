@@ -1,3 +1,4 @@
+import { docxMimeType } from '../../shared/templateUpload.ts'
 import { describe, expect, it } from 'vitest'
 import { createQueries, migrate, openDatabase, seededCategoryIds, type AppDatabase } from './db.ts'
 
@@ -113,7 +114,7 @@ describe('category migration', () => {
       'sample-field-note',
       'general-assist',
       '欄位示範範本.docx',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      docxMimeType,
       11,
       '2026-10-01 09:00',
       '[]',
@@ -124,7 +125,7 @@ describe('category migration', () => {
       'user-template',
       'user-keep',
       '自建範本.docx',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      docxMimeType,
       9,
       '2026-10-20 09:00',
       '["姓名"]',

@@ -31,7 +31,7 @@ interface Marker {
   text: string
   range: Range
 }
-export interface PhotoCellRange {
+interface PhotoCellRange {
   start: number
   end: number
   imageStart: number

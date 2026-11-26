@@ -11,7 +11,7 @@ import {
   type Layout,
 } from './layout'
 
-export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+export { docxMimeType as DOCX_MIME } from '../../shared/templateUpload'
 export { DOCX_LAYOUT } from './layout'
 const EMU_PER_TWIP = 635
 const placeholder = '{{被害人姓名}}'
@@ -28,7 +28,7 @@ function validName(value: string) {
   if (error) throw new Error(error)
   return value.trim()
 }
-export function escapeXml(value: string) {
+function escapeXml(value: string) {
   return value.replace(/[&<>"']/g, (char) => {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[char]!
   })

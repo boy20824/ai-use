@@ -1,6 +1,6 @@
 import type { TemplateOrigin } from '@/types/domain'
 
-export interface TemplateUsage {
+interface TemplateUsage {
   categoryId: string
   categoryName: string
   stepId: string
@@ -24,7 +24,7 @@ export interface StoredTemplate extends TemplateSummary {
   data: ArrayBuffer
 }
 
-export interface PutTemplateResult {
+interface PutTemplateResult {
   id: string
   formatNotices: string[]
 }
