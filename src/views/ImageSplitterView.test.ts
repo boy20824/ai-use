@@ -177,7 +177,26 @@ describe('local multi-image splitter DOM', () => {
     expect(summary()).toContain('每頁 3 欄 × 1 列')
     expect(summary()).toContain('預計 3 頁（原版 3 頁，省 0 頁）')
     const usedDecodes = decodeBitmap.mock.calls.length
+    radio('per-page', '6').click()
+    await nextTick()
+    expect(radio('per-page', '6').checked).toBe(true)
+    expect(radio('orientation', 'portrait').checked).toBe(true)
+    expect(summary()).toContain('每頁 3 欄 × 2 列')
+    expect(summary()).toContain('預計 2 頁（原版 3 頁，省 1 頁）')
+    expect(host.querySelector('#splitter-word-hint')?.textContent).toContain(
+      '每頁依序放置 6 張切片，使用 A4 直式',
+    )
+    radio('orientation', 'landscape').click()
+    await nextTick()
+    expect(radio('per-page', '6').checked).toBe(true)
+    expect(radio('orientation', 'landscape').checked).toBe(true)
+    expect(summary()).toContain('每頁 3 欄 × 2 列')
+    expect(host.querySelector('#splitter-word-hint')?.textContent).toContain(
+      '每頁依序放置 6 張切片，使用 A4 橫式',
+    )
     radio('per-page', '4').click()
+    await nextTick()
+    expect(radio('orientation', 'landscape').checked).toBe(true)
     radio('orientation', 'portrait').click()
     await nextTick()
     expect(summary()).toContain('每頁 4 欄 × 1 列')
@@ -187,9 +206,9 @@ describe('local multi-image splitter DOM', () => {
     expect(host.querySelector('#splitter-word-hint')?.textContent).toContain(
       '每頁依序放置 4 張切片，使用 A4 直式',
     )
-    radio('per-page', '6').click()
+    radio('per-page', '3').click()
     await nextTick()
-    expect(summary()).toContain('每頁 6 欄 × 1 列')
+    expect(radio('orientation', 'portrait').checked).toBe(true)
     expect(decodeBitmap).toHaveBeenCalledTimes(usedDecodes)
     expect(fetch).not.toHaveBeenCalled()
   })

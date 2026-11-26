@@ -42,8 +42,6 @@ const grids: Record<PerPage, Grid[]> = {
   6: [
     { cols: 3, rows: 2 },
     { cols: 2, rows: 3 },
-    { cols: 6, rows: 1 },
-    { cols: 1, rows: 6 },
   ],
 }
 
@@ -116,7 +114,12 @@ export function chooseGrid(
 ) {
   const layout = { perPage, orientation }
   let best = grids[perPage][0]
-  if (isOriginalLayout(layout) || !sliceSizes.length) return { ...best }
+  if (
+    isOriginalLayout(layout) ||
+    (perPage === 6 && orientation === 'landscape') ||
+    !sliceSizes.length
+  )
+    return { ...best }
   let bestScale = 0
   for (const grid of grids[perPage]) {
     const cell = cellSize(layout, grid)

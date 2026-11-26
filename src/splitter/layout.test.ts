@@ -39,14 +39,16 @@ describe('A4 screenshot layout', () => {
     [4, 'landscape', 100, 3000, 4],
     [4, 'landscape', 1000, 1000, 2],
     [4, 'landscape', 3000, 100, 1],
-    [6, 'portrait', 100, 3000, 6],
+    [6, 'portrait', 100, 3000, 3],
     [6, 'portrait', 500, 1000, 3],
+    [6, 'portrait', 1080, 1350, 2],
+    [6, 'portrait', 1080, 1792, 3],
     [6, 'portrait', 1000, 1000, 2],
-    [6, 'portrait', 3000, 100, 1],
-    [6, 'landscape', 100, 3000, 6],
+    [6, 'portrait', 3000, 100, 2],
+    [6, 'landscape', 100, 3000, 3],
     [6, 'landscape', 1000, 1000, 3],
-    [6, 'landscape', 1000, 500, 2],
-    [6, 'landscape', 3000, 100, 1],
+    [6, 'landscape', 1000, 500, 3],
+    [6, 'landscape', 3000, 100, 3],
   ])(
     'fits %i slices in %s for %i × %i pixels (%i columns)',
     (perPage, orientation, width, height, cols) => {
@@ -54,6 +56,23 @@ describe('A4 screenshot layout', () => {
         cols,
         rows: perPage / cols,
       })
+    },
+  )
+
+  it.each(['landscape', 'portrait'] as const)(
+    'keeps six-up grids multi-row and multi-column in %s',
+    (orientation) => {
+      const sizes = [
+        { width: 100, height: 3000 },
+        { width: 1000, height: 1000 },
+        { width: 3000, height: 100 },
+      ]
+      for (const slices of [[], ...sizes.map((size) => [size]), sizes]) {
+        const { cols, rows } = chooseGrid(6, orientation, slices)
+        expect(cols).toBeGreaterThan(1)
+        expect(rows).toBeGreaterThan(1)
+        expect(cols * rows).toBe(6)
+      }
     },
   )
 
@@ -71,6 +90,8 @@ describe('A4 screenshot layout', () => {
       expect(fitImage(tie.width, tie.height, cellSize(layout, grid)).scale).toBe(1)
     }
     expect(chooseGrid(3, 'portrait', [tie])).toEqual({ cols: 1, rows: 3 })
+    expect(chooseGrid(6, 'portrait', [tall, wide])).toEqual({ cols: 2, rows: 3 })
+    expect(chooseGrid(6, 'portrait', [tie])).toEqual({ cols: 2, rows: 3 })
   })
 
   it('fits width or height proportionally and caps the scale at 15 twips per pixel for new layouts', () => {

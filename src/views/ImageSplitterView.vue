@@ -32,7 +32,7 @@ import {
   type PerPage,
 } from '@/splitter/layout'
 import { createPreviewRenderer, type PreviewState, type PreviewTarget } from '@/splitter/preview'
-import { computed, onBeforeUnmount, ref, shallowRef, watchPostEffect } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch, watchPostEffect } from 'vue'
 
 const victimName = ref('')
 const nameError = computed(() => victimNameError(victimName.value))
@@ -46,6 +46,9 @@ const current = computed(() => images.value.find((image) => image.id === selecte
 const currentWidth = computed(() => (current.value ? cropWidth(current.value) : 0))
 const perPage = ref<PerPage>(ORIGINAL_LAYOUT.perPage)
 const orientation = ref<Orientation>(ORIGINAL_LAYOUT.orientation)
+watch(perPage, (count) => {
+  if (count === 6) orientation.value = 'portrait'
+})
 const layout = computed(() => ({ perPage: perPage.value, orientation: orientation.value }))
 const orientationLabels = { landscape: '橫式', portrait: '直式' }
 const pageOptions = [3, 4, 6] as const
