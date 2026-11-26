@@ -1,8 +1,17 @@
+import type {
+  CategoryGroup,
+  CategoryModule as ModuleRecord,
+  CategoryStep as CategoryStepRecord,
+  StepDetails,
+  StepRef,
+} from '../../shared/domainTypes.ts'
 import { applyRemoveBaseName } from './builtinFields.ts'
 import { migrateCombinationOrders, migrateModules } from './modules.ts'
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
+
+export type { CategoryStep as CategoryStepRecord } from '../../shared/domainTypes.ts'
 
 export type AppDatabase = Database.Database
 
@@ -95,7 +104,6 @@ export interface FeedbackPatch {
   adminReply?: string
 }
 
-type CategoryGroup = 'criminal' | 'admin' | 'internal'
 interface VariantRecord {
   id: string
   categoryId: string
@@ -110,39 +118,12 @@ interface FieldDefRecord {
   key: string
   type: 'text' | 'number'
 }
-interface StepDetails {
-  canRunInParallel?: boolean
-  categoryId?: string
-  order?: number
-  title?: string
-  items?: string[]
-  note?: string
-  variantIds?: string[]
-}
-export interface CategoryStepRecord extends StepDetails {
-  id: string
-  body: string
-  templateIds: string[]
-}
-
 export interface TemplateUsage {
   categoryId: string
   categoryName: string
   stepId: string
   stepBody: string
   sortOrder: number
-}
-
-interface StepRef {
-  stepId: string
-  sortOrder: number
-}
-interface ModuleRecord {
-  id: string
-  categoryId: string
-  name: string
-  sortOrder: number
-  steps: StepRef[]
 }
 
 export interface CategoryRecord {

@@ -1,9 +1,23 @@
+import type {
+  CategoryGroup,
+  CategoryModule,
+  CategoryStep,
+  StepDetails,
+  StepRef,
+} from '../../shared/domainTypes.ts'
+
+export type {
+  CategoryGroup,
+  CategoryModule,
+  CategoryStep,
+  StepRef,
+} from '../../shared/domainTypes.ts'
+
 export type AppRole = 'sysadmin' | 'user'
 export type TemplateOrigin = 'sample' | 'upload'
 export type StatusTone = 'neutral' | 'warn' | 'ok' | 'danger'
 export type FeedbackStatus = 'pending' | 'in_progress' | 'done'
 
-export type CategoryGroup = 'criminal' | 'admin' | 'internal'
 export interface Variant {
   id: string
   categoryId?: string
@@ -18,34 +32,6 @@ export interface FieldDef {
   key: string
   type: 'text' | 'number'
 }
-interface StepDetails {
-  canRunInParallel?: boolean
-  categoryId?: string
-  order?: number
-  title?: string
-  items?: string[]
-  note?: string
-  variantIds?: string[]
-}
-
-export interface CategoryStep extends StepDetails {
-  id: string
-  body: string
-  templateIds: string[]
-}
-
-export interface StepRef {
-  stepId: string
-  sortOrder: number
-}
-export interface CategoryModule {
-  id: string
-  categoryId: string
-  name: string
-  sortOrder: number
-  steps: StepRef[]
-}
-
 export interface CaseCategory {
   builtinFields?: Record<string, boolean>
   baseSteps?: StepRef[]
