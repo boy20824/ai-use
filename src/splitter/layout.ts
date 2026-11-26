@@ -13,7 +13,11 @@ interface Grid {
   rows: number
 }
 
-export const ORIGINAL_LAYOUT = { perPage: 3, orientation: 'landscape' } as const
+export function orientationFor(perPage: PerPage): Orientation {
+  return perPage === 6 ? 'portrait' : 'landscape'
+}
+
+export const ORIGINAL_LAYOUT = { perPage: 3, orientation: orientationFor(3) } as const
 const A4 = { width: 11906, height: 16838 }
 const originalMargins = {
   top: 1134,

@@ -25,14 +25,14 @@ import {
   cellSize,
   chooseGrid,
   imageScaleLimit,
+  orientationFor,
   ORIGINAL_LAYOUT,
   pagesNeeded,
   summarizeSliceFit,
-  type Orientation,
   type PerPage,
 } from '@/splitter/layout'
 import { createPreviewRenderer, type PreviewState, type PreviewTarget } from '@/splitter/preview'
-import { computed, onBeforeUnmount, ref, shallowRef, watch, watchPostEffect } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watchPostEffect } from 'vue'
 
 const victimName = ref('')
 const nameError = computed(() => victimNameError(victimName.value))
@@ -45,11 +45,10 @@ const selected = ref<number>()
 const current = computed(() => images.value.find((image) => image.id === selected.value))
 const currentWidth = computed(() => (current.value ? cropWidth(current.value) : 0))
 const perPage = ref<PerPage>(ORIGINAL_LAYOUT.perPage)
-const orientation = ref<Orientation>(ORIGINAL_LAYOUT.orientation)
-watch(perPage, (count) => {
-  if (count === 6) orientation.value = 'portrait'
-})
-const layout = computed(() => ({ perPage: perPage.value, orientation: orientation.value }))
+const layout = computed(() => ({
+  perPage: perPage.value,
+  orientation: orientationFor(perPage.value),
+}))
 const orientationLabels = { landscape: '橫式', portrait: '直式' }
 const pageOptions = [3, 4, 6] as const
 const cropLabels = { cropLeft: '左側裁掉 px', cropRight: '右側裁掉 px' }
@@ -387,13 +386,6 @@ async function exportWord() {
             {{ count }} 張{{ count === 3 ? '（原版）' : '' }}
           </label>
         </fieldset>
-        <fieldset class="splitter-choice">
-          <legend>紙張方向</legend>
-          <label v-for="(label, value) in orientationLabels" :key="value">
-            <input v-model="orientation" type="radio" name="splitter-orientation" :value="value" />
-            {{ label }}
-          </label>
-        </fieldset>
       </fieldset>
       <div v-if="wordSummary" class="splitter-word-summary" aria-live="polite">
         <p>每頁 {{ wordSummary.grid.cols }} 欄 × {{ wordSummary.grid.rows }} 列</p>
@@ -418,10 +410,8 @@ async function exportWord() {
         產出 Word
       </button>
       <p id="splitter-word-hint">
-        {{
-          wordHint ||
-          `每頁依序放置 ${perPage} 張切片，使用 A4 ${orientationLabels[orientation]}。姓名僅用於本機產出 Word。`
-        }}
+        每頁依序放置 {{ perPage }} 張切片，使用 A4 {{ orientationLabels[layout.orientation] }}。
+        {{ wordHint || '姓名僅用於本機產出 Word。' }}
       </p>
       <p v-if="wordProgress" role="status">{{ wordProgress }}</p>
     </div>
