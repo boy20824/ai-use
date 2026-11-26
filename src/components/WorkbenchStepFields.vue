@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import MissingFieldsHint from './MissingFieldsHint.vue'
 import ReferenceDocuments from './ReferenceDocuments.vue'
 import StepFields from './StepFields.vue'
 import StepDateField from './StepDateField.vue'
@@ -66,15 +67,12 @@ const emit = defineEmits<{
       <slot name="photos" :template-id="item.id" />
     </div>
   </section>
-  <p v-if="missing.length" class="mt-2 text-xs text-ink-muted">
-    請先填寫：
-    <template v-for="(key, index) in [...new Set(missing)]" :key="key">
-      {{ index ? '、' : ''
-      }}<button type="button" class="focus-control underline" @click="emit('focusField', key)">
-        {{ key }}
-      </button>
-    </template>
-  </p>
+  <MissingFieldsHint
+    v-if="missing.length"
+    :missing="missing"
+    class="mt-2"
+    @focus="emit('focusField', $event)"
+  />
   <p v-if="templates.length === 0" class="mt-3 text-sm text-ink-muted">這個步驟還沒有範本。</p>
   <div v-if="documents.length" class="step-documents">
     <h4 class="text-sm font-semibold text-ink">產出文件</h4>
@@ -87,15 +85,11 @@ const emit = defineEmits<{
       >
         產生本步驟全部
       </button>
-      <p v-if="missing.length" class="text-xs text-ink-muted">
-        請先填寫：
-        <template v-for="(key, index) in [...new Set(missing)]" :key="key">
-          {{ index ? '、' : ''
-          }}<button type="button" class="focus-control underline" @click="emit('focusField', key)">
-            {{ key }}
-          </button>
-        </template>
-      </p>
+      <MissingFieldsHint
+        v-if="missing.length"
+        :missing="missing"
+        @focus="emit('focusField', $event)"
+      />
     </div>
     <ul class="step-template-list divide-y divide-edge">
       <li
@@ -122,19 +116,11 @@ const emit = defineEmits<{
           >
             產生
           </button>
-          <p v-if="missing.length" class="text-xs text-ink-muted">
-            請先填寫：
-            <template v-for="(key, index) in [...new Set(missing)]" :key="key">
-              {{ index ? '、' : ''
-              }}<button
-                type="button"
-                class="focus-control underline"
-                @click="emit('focusField', key)"
-              >
-                {{ key }}
-              </button>
-            </template>
-          </p>
+          <MissingFieldsHint
+            v-if="missing.length"
+            :missing="missing"
+            @focus="emit('focusField', $event)"
+          />
         </div>
       </li>
     </ul>

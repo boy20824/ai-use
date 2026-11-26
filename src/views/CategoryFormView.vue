@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { docxMimeType } from '../../shared/templateUpload'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import { categoryGroups } from '@/config/app'
 import type { CaseCategory, CategoryGroup, Variant, FieldDef } from '@/types/domain'
@@ -668,7 +669,7 @@ async function submit() {
                   disabled-reason=""
                   title="上傳 Word 或 PDF 並連結到這個步驟"
                   hint="檔案會存進範本庫，並出現在這個步驟的範本清單。"
-                  accept=".pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  :accept="`.pdf,application/pdf,.docx,${docxMimeType}`"
                   @select="onUpload(index, $event)"
                 />
               </div>

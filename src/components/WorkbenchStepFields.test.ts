@@ -14,7 +14,7 @@ it('explains missing fields beside each disabled generate action and lets users 
         fields: [],
         values: {},
         prefix: 'mock',
-        missing: ['姓名', '姓名'],
+        missing: ['姓名', '姓名', '日期'],
         templates: ['one', 'two'].map((id) => ({
           id,
           fileName: `${id}.docx`,
@@ -28,6 +28,25 @@ it('explains missing fields beside each disabled generate action and lets users 
   })
   app.mount(host)
   try {
+    const hints = [...host.querySelectorAll('p.text-xs.text-ink-muted')]
+    expect(hints.map((hint) => hint.className)).toEqual([
+      'mt-2 text-xs text-ink-muted',
+      'text-xs text-ink-muted',
+      'text-xs text-ink-muted',
+      'text-xs text-ink-muted',
+    ])
+    for (const hint of hints) {
+      expect(hint.textContent).toBe(' 請先填寫： 姓名、日期')
+      const buttons = [...hint.querySelectorAll('button')]
+      expect(buttons.map((button) => button.className)).toEqual([
+        'focus-control underline',
+        'focus-control underline',
+      ])
+      for (const [index, key] of ['姓名', '日期'].entries()) {
+        buttons[index]!.click()
+        expect(focus).toHaveBeenLastCalledWith(key)
+      }
+    }
     const generate = [...host.querySelectorAll<HTMLButtonElement>('button')].filter((b) =>
       b.textContent?.trim().startsWith('產生'),
     )
@@ -35,10 +54,7 @@ it('explains missing fields beside each disabled generate action and lets users 
     for (const button of generate) {
       expect(button.disabled).toBe(true)
       const hint = button.parentElement!.querySelector('p')!
-      expect(hint.textContent).toContain('請先填寫：')
-      expect(hint.querySelectorAll('button')).toHaveLength(1)
-      hint.querySelector('button')!.click()
-      expect(focus).toHaveBeenLastCalledWith('姓名')
+      expect(hints).toContain(hint)
     }
   } finally {
     app.unmount()

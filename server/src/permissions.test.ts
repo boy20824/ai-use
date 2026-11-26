@@ -1,76 +1,30 @@
+import { docxMimeType } from '../../shared/templateUpload.ts'
 import { loginWithCsrf } from './loginTestHelper.ts'
+import {
+  buildMinimalDocx,
+  makeConfig,
+  testOrigin as origin,
+  testPasswords as passwords,
+  testSamplePath as samplePath,
+} from './testSupport.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import PizZip from 'pizzip'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { buildApp } from './app.ts'
-import type { AppConfig, SeedPasswords } from './config.ts'
+import type { SeedPasswords } from './config.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
 import { seedReferenceData } from './seed.ts'
 
-const passwords: SeedPasswords = {
-  clerk: 'clerk-pass',
-  admin: 'admin-pass',
-  viewer: 'viewer-pass',
-}
-const origin = 'http://localhost:5173'
-const samplePath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../public/samples/field-note.docx',
-)
 const scratch = mkdtempSync(path.join(tmpdir(), 'ai-use-permissions-'))
 const secretMarker = 'CASE-SECRET-VALUE'
 const personMarker = '王小明'
-
-function config(): AppConfig {
-  return {
-    host: '127.0.0.1',
-    port: 0,
-    databasePath: ':memory:',
-    uploadDir: mkdtempSync(path.join(scratch, 'up-')),
-    sessionSecret: '',
-    sessionTtlHours: 1,
-    cookieSecure: false,
-    corsOrigins: [origin],
-    maxUploadBytes: 1024 * 1024,
-    maxZipEntries: 32,
-    maxZipUncompressedBytes: 8 * 1024 * 1024,
-    loginMaxFailures: 5,
-    loginLockoutMinutes: 15,
-    globalRatePerMinute: 120,
-    loginRatePerMinute: 30,
-    registerIpLimit: 5,
-    registerGlobalLimit: 30,
-    registerWindowMs: 60 * 60 * 1000,
-    sampleTemplatePath: samplePath,
-    seedSampleData: false,
-    staticDir: undefined,
-    trustProxy: false,
-    seedDemoUsers: true,
-    passwords,
-  }
-}
-
-function docx(text: string) {
-  const zip = new PizZip()
-  zip.file(
-    '[Content_Types].xml',
-    '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
-  )
-  zip.file(
-    'word/document.xml',
-    `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`,
-  )
-  return zip.generate({ type: 'nodebuffer' }) as Uint8Array
-}
 
 function multipart(name: string, data: Uint8Array) {
   const boundary = '----permissions'
   const payload = Buffer.concat([
     Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: ${docxMimeType}\r\n\r\n`,
     ),
     data,
     Buffer.from(`\r\n--${boundary}--\r\n`),
@@ -82,7 +36,7 @@ function multipart(name: string, data: Uint8Array) {
 }
 
 async function boot() {
-  const appConfig = config()
+  const appConfig = makeConfig({ scratch })
   const db = openDatabase(':memory:')
   migrate(db)
   seedReferenceData(createQueries(db), passwords, samplePath, appConfig.uploadDir, false)
@@ -136,7 +90,10 @@ describe('admin-only mutations', () => {
     expect(created.statusCode).toBe(201)
     const categoryId = created.json().category.id as string
     const stepId = created.json().category.steps[0].id as string
-    const file = multipart('筆錄.docx', docx(`${personMarker} {{姓名}} ${secretMarker}`))
+    const file = multipart(
+      '筆錄.docx',
+      buildMinimalDocx(`${personMarker} {{姓名}} ${secretMarker}`),
+    )
     const uploaded = await app.inject({
       method: 'POST',
       url: '/api/templates',
@@ -319,7 +276,7 @@ describe('admin-only mutations', () => {
     const { app, db } = await boot()
     databases.push(db)
     const adminAuth = auth(await login(app, 'admin'))
-    const file = multipart('筆錄.docx', docx(`${personMarker} {{姓名}}`))
+    const file = multipart('筆錄.docx', buildMinimalDocx(`${personMarker} {{姓名}}`))
     const uploaded = await app.inject({
       method: 'POST',
       url: '/api/templates',

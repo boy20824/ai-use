@@ -1,14 +1,20 @@
+import { docxMimeType } from '../../shared/templateUpload.ts'
 import { loginWithCsrf } from './loginTestHelper.ts'
+import {
+  buildMinimalDocx,
+  makeConfig,
+  testOrigin as origin,
+  testPasswords as passwords,
+  testSamplePath as samplePath,
+} from './testSupport.ts'
 import bcrypt from 'bcryptjs'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import PizZip from 'pizzip'
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildApp } from './app.ts'
-import type { AppConfig, SeedPasswords } from './config.ts'
+import type { AppConfig } from './config.ts'
 import { cookieSecureFromEnv } from './config.ts'
 import { buildMockPdf } from '../../shared/mockPdfFixture'
 import { templateFilePath } from './files.ts'
@@ -16,60 +22,12 @@ import { sanitizeTemplateFileName } from './docx.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
 import { seedReferenceData } from './seed.ts'
 
-const passwords: SeedPasswords = {
-  clerk: 'clerk-pass',
-  admin: 'admin-pass',
-  viewer: 'viewer-pass',
-}
-const origin = 'http://localhost:5173'
-const samplePath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../public/samples/field-note.docx',
-)
 const scratch = mkdtempSync(path.join(tmpdir(), 'ai-use-security-'))
-
-function config(overrides: Partial<AppConfig> = {}): AppConfig {
-  return {
-    host: '127.0.0.1',
-    port: 0,
-    databasePath: ':memory:',
-    uploadDir: mkdtempSync(path.join(scratch, 'up-')),
-    sessionSecret: '',
-    sessionTtlHours: 1,
-    cookieSecure: false,
-    corsOrigins: [origin],
-    maxUploadBytes: 1024 * 1024,
-    maxZipEntries: 4,
-    maxZipUncompressedBytes: 64 * 1024,
-    loginMaxFailures: 2,
-    loginLockoutMinutes: 15,
-    globalRatePerMinute: 120,
-    loginRatePerMinute: 20,
-    registerIpLimit: 5,
-    registerGlobalLimit: 30,
-    registerWindowMs: 60 * 60 * 1000,
-    sampleTemplatePath: samplePath,
-    seedSampleData: false,
-    staticDir: undefined,
-    trustProxy: false,
-    seedDemoUsers: true,
-    passwords,
-    ...overrides,
-  }
-}
-
-function docx(text: string, extraFiles = 0) {
-  const zip = new PizZip()
-  zip.file(
-    '[Content_Types].xml',
-    '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
-  )
-  zip.file(
-    'word/document.xml',
-    `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`,
-  )
-  for (let index = 0; index < extraFiles; index += 1) zip.file(`word/extra-${index}.xml`, '<x/>')
-  return zip.generate({ type: 'nodebuffer' }) as Uint8Array
+const securityDefaults = {
+  maxZipEntries: 4,
+  maxZipUncompressedBytes: 64 * 1024,
+  loginMaxFailures: 2,
+  loginRatePerMinute: 20,
 }
 
 function multipart(name: string, type: string, data: Uint8Array, categoryId?: string) {
@@ -96,7 +54,7 @@ function multipart(name: string, type: string, data: Uint8Array, categoryId?: st
 }
 
 async function boot(overrides: Partial<AppConfig> = {}) {
-  const appConfig = config(overrides)
+  const appConfig = makeConfig({ scratch }, { ...securityDefaults, ...overrides })
   const db = openDatabase(':memory:')
   migrate(db)
   seedReferenceData(createQueries(db), passwords, samplePath, appConfig.uploadDir, false)
@@ -428,7 +386,7 @@ describe('security controls', () => {
       ).statusCode,
     ).toBe(429)
     await app.close()
-    const restarted = await buildApp(db, config())
+    const restarted = await buildApp(db, makeConfig({ scratch }, securityDefaults))
     const clock = vi.spyOn(Date, 'now')
     try {
       expect(
@@ -551,8 +509,8 @@ describe('security controls', () => {
     const admin = await login(app, 'admin', passwords.admin)
     const file = multipart(
       'note.docx',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      docx('CASE-SECRET-VALUE {{姓名}}'),
+      docxMimeType,
+      buildMinimalDocx('CASE-SECRET-VALUE {{姓名}}'),
     )
     const clerkAuth = auth(clerk)
     const crossSite = await app.inject({
@@ -666,11 +624,7 @@ describe('security controls', () => {
     const { app, db } = await boot()
     databases.push(db)
     const admin = auth(await login(app, 'admin', passwords.admin))
-    const traversal = multipart(
-      '../../etc/passwd.docx',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      docx('ok'),
-    )
+    const traversal = multipart('../../etc/passwd.docx', docxMimeType, buildMinimalDocx('ok'))
     const stored = await app.inject({
       method: 'POST',
       url: '/api/templates',
@@ -682,11 +636,7 @@ describe('security controls', () => {
     expect(stored.json().template.fileName).toBe('passwd.docx')
     expect(stored.json().template.fileName).not.toContain('..')
 
-    const bomb = multipart(
-      'bomb.docx',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      docx('too many', 8),
-    )
+    const bomb = multipart('bomb.docx', docxMimeType, buildMinimalDocx('too many', 8))
     const rejectedBomb = await app.inject({
       method: 'POST',
       url: '/api/templates',

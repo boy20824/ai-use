@@ -151,10 +151,7 @@ function seedPassword(nodeEnv: string | undefined, name: string): string {
   return value
 }
 
-export function seedDemoUsersFromEnv(
-  nodeEnv: string | undefined,
-  raw: string | undefined,
-): boolean {
+function seedDemoUsersFromEnv(nodeEnv: string | undefined, raw: string | undefined): boolean {
   const value = raw?.trim() ?? ''
   if (value === '') return nodeEnv !== 'production'
   if (value === 'true') return true
@@ -170,7 +167,7 @@ function loadSeedPasswords(nodeEnv: string | undefined): SeedPasswords {
   }
 }
 
-export function sessionSecretFromEnv(
+function sessionSecretFromEnv(
   nodeEnv: string | undefined,
   raw: string | undefined,
   passwords: SeedPasswords | undefined,

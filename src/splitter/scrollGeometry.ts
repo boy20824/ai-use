@@ -1,6 +1,6 @@
 import { bandRows } from './core'
 
-export const TILE_ROWS = 2048
+const TILE_ROWS = 2048
 export const clampScroll = (scroll: number, height: number, viewport: number) =>
   Math.max(0, Math.min(scroll, Math.max(0, height - viewport)))
 export const sourceScale = (width: number, available: number) =>

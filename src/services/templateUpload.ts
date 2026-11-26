@@ -13,7 +13,8 @@ export async function validateTemplateFile(file: File) {
       `${fileName} MIME 不正確${kind === 'pdf' ? '，PDF 必須為 application/pdf' : ''}。`,
     )
   const data = await file.arrayBuffer()
-  if (kind === 'pdf' ? !hasPdfHeader(new Uint8Array(data)) : !hasZipHeader(data))
+  const bytes = new Uint8Array(data)
+  if (kind === 'pdf' ? !hasPdfHeader(bytes) : !hasZipHeader(bytes))
     throw new Error(
       `${fileName} ${kind === 'pdf' ? '不是 PDF（缺少 %PDF- 檔頭）' : '不是有效的 Word 檔'}。`,
     )

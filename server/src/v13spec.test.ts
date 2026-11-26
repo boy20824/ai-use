@@ -1,64 +1,30 @@
+import { docxMimeType } from '../../shared/templateUpload.ts'
 import { loginWithCsrf } from './loginTestHelper.ts'
+import {
+  makeConfig,
+  testOrigin as origin,
+  testPasswords as passwords,
+  testSamplePath as samplePath,
+} from './testSupport.ts'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import PizZip from 'pizzip'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 import { buildDocx, kaiBoldRPr, paragraph, run, wordDocument } from '../../shared/docxFixture.ts'
 import { renderDocx } from '../../shared/docxRender.ts'
 import { buildApp } from './app.ts'
-import type { AppConfig, SeedPasswords } from './config.ts'
+import type { SeedPasswords } from './config.ts'
 import { createQueries, migrate, openDatabase, type AppDatabase } from './db.ts'
 import { seedReferenceData } from './seed.ts'
 
-const passwords: SeedPasswords = {
-  clerk: 'clerk-pass',
-  admin: 'admin-pass',
-  viewer: 'viewer-pass',
-}
-const origin = 'http://localhost:5173'
-const samplePath = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../../public/samples/field-note.docx',
-)
 const scratch = mkdtempSync(path.join(tmpdir(), 'ai-use-v13spec-'))
-
-function config(overrides: Partial<AppConfig> = {}): AppConfig {
-  return {
-    host: '127.0.0.1',
-    port: 0,
-    databasePath: ':memory:',
-    uploadDir: mkdtempSync(path.join(scratch, 'up-')),
-    sessionSecret: '',
-    sessionTtlHours: 1,
-    cookieSecure: false,
-    corsOrigins: [origin],
-    maxUploadBytes: 1024 * 1024,
-    maxZipEntries: 32,
-    maxZipUncompressedBytes: 8 * 1024 * 1024,
-    loginMaxFailures: 8,
-    loginLockoutMinutes: 15,
-    globalRatePerMinute: 120,
-    loginRatePerMinute: 60,
-    registerIpLimit: 5,
-    registerGlobalLimit: 30,
-    registerWindowMs: 60 * 60 * 1000,
-    sampleTemplatePath: samplePath,
-    seedSampleData: false,
-    staticDir: undefined,
-    trustProxy: false,
-    seedDemoUsers: true,
-    passwords,
-    ...overrides,
-  }
-}
 
 function multipart(name: string, data: Uint8Array) {
   const boundary = '----v13'
   const payload = Buffer.concat([
     Buffer.from(
-      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: ${docxMimeType}\r\n\r\n`,
     ),
     data,
     Buffer.from(`\r\n--${boundary}--\r\n`),
@@ -70,7 +36,7 @@ function multipart(name: string, data: Uint8Array) {
 }
 
 async function boot() {
-  const appConfig = config()
+  const appConfig = makeConfig({ scratch }, { loginMaxFailures: 8, loginRatePerMinute: 60 })
   const db = openDatabase(':memory:')
   migrate(db)
   seedReferenceData(createQueries(db), passwords, samplePath, appConfig.uploadDir, false)

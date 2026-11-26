@@ -2,10 +2,7 @@ import type { CaseCategory, CategoryStep, StepRef } from '@/types/domain'
 const compareId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 const refOrder = (a: StepRef, b: StepRef) =>
   a.sortOrder - b.sortOrder || compareId(a.stepId, b.stepId)
-export function composeOriginalSteps(
-  category: CaseCategory,
-  selected: readonly string[],
-): CategoryStep[] {
+function composeOriginalSteps(category: CaseCategory, selected: readonly string[]): CategoryStep[] {
   const steps = new Map(category.steps.map((step) => [step.id, step]))
   const seen = new Set<string>()
   const result: CategoryStep[] = []

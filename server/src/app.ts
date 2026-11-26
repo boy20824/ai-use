@@ -1,4 +1,5 @@
 import {
+  docxMimeType,
   hasPdfHeader,
   isAllowedPdfMime,
   maxPdfUploadBytes,
@@ -865,6 +866,28 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     return reply.code(204).send()
   })
 
+  function createMemberAccount(data: z.infer<typeof registerSchema>) {
+    const id = randomBytes(16).toString('hex')
+    try {
+      queries.insertUser({
+        id,
+        username: data.username,
+        passwordHash: unusablePasswordHash(),
+        displayName: data.nickname,
+        nickname: data.nickname,
+        role: 'user',
+        canManageCategories: false,
+        active: true,
+      })
+    } catch (error) {
+      if (isUniqueConstraint(error)) return { ok: false, reason: 'duplicate' } as const
+      throw error
+    }
+    const user = queries.findUserById(id)
+    if (!user) return { ok: false, reason: 'missing' } as const
+    return { ok: true, user } as const
+  }
+
   app.post('/api/auth/register', async (request, reply) => {
     const ip = request.ip || 'unknown'
     const now = Date.now()
@@ -878,26 +901,14 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     if (!allowed) return fail(reply, 429, 'rate-limited', '註冊嘗試過多，請稍後再試。')
     const parsed = registerSchema.safeParse(request.body)
     if (!parsed.success) return fail(reply, 400, 'invalid-input', registerMessage(parsed.error))
-    const id = randomBytes(16).toString('hex')
-    try {
-      queries.insertUser({
-        id,
-        username: parsed.data.username,
-        passwordHash: unusablePasswordHash(),
-        displayName: parsed.data.nickname,
-        nickname: parsed.data.nickname,
-        role: 'user',
-        canManageCategories: false,
-        active: true,
-      })
-    } catch (error) {
-      if (isUniqueConstraint(error)) {
+    const result = createMemberAccount(parsed.data)
+    if (!result.ok) {
+      if (result.reason === 'duplicate') {
         return fail(reply, 400, 'invalid-input', '無法完成註冊，請確認資料後再試。')
       }
-      throw error
+      return fail(reply, 500, 'internal', '伺服器暫時無法完成這項操作。')
     }
-    const created = queries.findUserById(id)
-    if (!created) return fail(reply, 500, 'internal', '伺服器暫時無法完成這項操作。')
+    const created = result.user
     queries.recordLogin(created.username, ip, true)
     const token = randomBytes(32).toString('hex')
     const expiresAt = new Date(now + config.sessionTtlHours * 60 * 60 * 1000).toISOString()
@@ -1507,10 +1518,7 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
       id: replacing ? replaceId : randomBytes(16).toString('hex'),
       fileName,
       kind,
-      mimeType:
-        kind === 'pdf'
-          ? pdfMimeType
-          : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      mimeType: kind === 'pdf' ? pdfMimeType : docxMimeType,
       sizeBytes: storedBytes.byteLength,
       addedAt: replacing ? new Date().toISOString() : stamp(),
       placeholders,
@@ -1591,24 +1599,12 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
     if (!user) return
     const parsed = registerSchema.safeParse(request.body)
     if (!parsed.success) return fail(reply, 400, 'invalid-input', registerMessage(parsed.error))
-    const id = randomBytes(16).toString('hex')
-    try {
-      queries.insertUser({
-        id,
-        username: parsed.data.username,
-        passwordHash: unusablePasswordHash(),
-        displayName: parsed.data.nickname,
-        nickname: parsed.data.nickname,
-        role: 'user',
-        canManageCategories: false,
-        active: true,
-      })
-    } catch (error) {
-      if (isUniqueConstraint(error)) return fail(reply, 409, 'conflict', '這個帳號已經存在。')
-      throw error
+    const result = createMemberAccount(parsed.data)
+    if (!result.ok) {
+      if (result.reason === 'duplicate') return fail(reply, 409, 'conflict', '這個帳號已經存在。')
+      return fail(reply, 500, 'internal', '伺服器暫時無法完成這項操作。')
     }
-    const created = queries.findUserById(id)
-    if (!created) return fail(reply, 500, 'internal', '伺服器暫時無法完成這項操作。')
+    const created = result.user
     queries.insertAudit(
       user.username,
       'member_create',

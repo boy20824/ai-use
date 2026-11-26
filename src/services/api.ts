@@ -1,4 +1,4 @@
-export function apiUrl(path: string): string {
+function apiUrl(path: string): string {
   const configured = import.meta.env.VITE_API_BASE_URL
   const base = typeof configured === 'string' ? configured.trim().replace(/\/$/, '') : ''
   return `${base}${path}`

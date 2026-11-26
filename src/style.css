@@ -1313,19 +1313,6 @@
   line-height: 1.8;
 }
 @media (max-width: 767px) {
-  .mobile-case-select {
-    display: block;
-    margin-bottom: 16px;
-  }
-  .case-selector {
-    display: none;
-  }
-  .case-browser:has(.case-selector > p) .case-selector {
-    display: block;
-  }
-  .step-content {
-    display: block;
-  }
   .step-documents {
     margin-top: 8px;
   }
@@ -1347,21 +1334,26 @@
   .case-browser {
     display: block;
   }
-  .mobile-case-select {
-    display: block;
-    margin-bottom: 16px;
-  }
-  .case-selector {
-    display: none;
-  }
-  .case-browser:has(.case-selector > p) .case-selector {
-    display: block;
-  }
-  .step-content {
-    display: block;
-  }
   .step-documents {
     margin-top: 12px;
+  }
+}
+@media (max-width: 1099px) {
+  /* Preserve the gap between the original breakpoints at fractional widths. */
+  @media (max-width: 767px), (min-width: 768px) {
+    .mobile-case-select {
+      display: block;
+      margin-bottom: 16px;
+    }
+    .case-selector {
+      display: none;
+    }
+    .case-browser:has(.case-selector > p) .case-selector {
+      display: block;
+    }
+    .step-content {
+      display: block;
+    }
   }
 }
 @media (max-width: 767px) {

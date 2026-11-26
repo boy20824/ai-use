@@ -1,6 +1,6 @@
-export const ROC_EPOCH = 1911
-export const MIN_ROC_YEAR = 1
-export const MAX_ROC_YEAR = 300
+const ROC_EPOCH = 1911
+const MIN_ROC_YEAR = 1
+const MAX_ROC_YEAR = 300
 
 export interface RocDate {
   rocYear: number
@@ -10,22 +10,22 @@ export interface RocDate {
 
 const monthLengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
-export function isLeapYear(adYear: number): boolean {
+function isLeapYear(adYear: number): boolean {
   if (!Number.isInteger(adYear)) return false
   if (adYear % 400 === 0) return true
   if (adYear % 100 === 0) return false
   return adYear % 4 === 0
 }
 
-export function adYearFromRoc(rocYear: number): number {
+function adYearFromRoc(rocYear: number): number {
   return rocYear + ROC_EPOCH
 }
 
-export function rocYearFromAd(adYear: number): number {
+function rocYearFromAd(adYear: number): number {
   return adYear - ROC_EPOCH
 }
 
-export function daysInMonth(adYear: number, month: number): number {
+function daysInMonth(adYear: number, month: number): number {
   if (!Number.isInteger(month) || month < 1 || month > 12) return 0
   if (month === 2 && isLeapYear(adYear)) return 29
   return monthLengths[month - 1] ?? 0
@@ -70,7 +70,7 @@ function taipeiPart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatP
 }
 
 /** Gregorian year, month, and day in Asia/Taipei. Does not use the browser's local zone. */
-export function taipeiCalendarDate(now: Date = new Date()): {
+function taipeiCalendarDate(now: Date = new Date()): {
   year: number
   month: number
   day: number

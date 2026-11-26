@@ -1,19 +1,18 @@
+import { docxMimeType } from '../../shared/templateUpload.ts'
+
 // Loaded at runtime from this package. The production image does not contain frontend src/.
-export { assertSafeZip, listPlaceholders, normalizeDocx, type ZipLimits } from './docxXml.ts'
+export { hasZipHeader } from '../../shared/templateUpload.ts'
+export { listPlaceholders, normalizeDocx } from './docxXml.ts'
 
 const allowedMimeTypes = new Set([
   '',
   'text/plain', // Busboy's fallback for a missing or empty multipart Content-Type.
   'application/x-zip-compressed',
   'application/x-zip',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  docxMimeType,
   'application/octet-stream',
   'application/zip',
 ])
-
-export function hasZipHeader(data: Uint8Array): boolean {
-  return data.byteLength >= 4 && data[0] === 0x50 && data[1] === 0x4b
-}
 
 export function isAllowedDocxMime(mimeType: string): boolean {
   return allowedMimeTypes.has(mimeType.trim().toLowerCase())

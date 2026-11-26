@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { docxMimeType } from '../../shared/templateUpload'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import { categoryGroups } from '@/config/app'
@@ -253,7 +254,7 @@ async function onFiles(files: File[]) {
         :disabled-reason="disabledReason"
         title="上傳 Word 或 PDF 到範本庫"
         hint="檔案會存在服務上的範本庫。產生文件時填入的欄位不會被保存。"
-        accept=".pdf,application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        :accept="`.pdf,application/pdf,.docx,${docxMimeType}`"
         @select="onFiles"
       />
     </div>

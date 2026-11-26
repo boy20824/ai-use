@@ -16,7 +16,6 @@ import {
   makeZip,
   moveCrop,
   moveCut,
-  plan,
   reorder,
   slices,
   type Source,
@@ -153,23 +152,24 @@ describe('source row splitting and real PNG pipeline', () => {
     })
     expect(cropWidth({ width: 1, cropLeft: 5, cropRight: 9 })).toBe(1)
   })
-  it('plans, batches and packages cropped pixels in the original row and slice order', async () => {
+  it('batches and packages cropped pixels in the original row and slice order', async () => {
     const image = { ...source(17, 5, 1), cuts: [2], cropLeft: 3, cropRight: 5 }
     const original = pixels(image.width, image.height)
     const croppedRow = (y: number) => original.slice((y * 17 + 3) * 4, (y * 17 + 12) * 4)
     const read = async (_source: Source, start: number, end: number) =>
       Buffer.concat(Array.from({ length: end - start }, (_, i) => croppedRow(start + i)))
-    const entries = plan([image])
-    expect(entries.map(({ x, width, start, end }) => ({ x, width, start, end }))).toEqual([
-      { x: 3, width: 9, start: 0, end: 2 },
-      { x: 3, width: 9, start: 2, end: 5 },
-    ])
+    expect(clampCrop(image).cropLeft).toBe(3)
     const zip = await JSZip.loadAsync((await makeZip([image], () => true, read))!, {
       checkCRC32: true,
     })
-    for (const { path, width, start, end } of entries) {
+    const entries = [
+      { path: '001/001.png', start: 0, end: 2 },
+      { path: '001/002.png', start: 2, end: 5 },
+    ]
+    expect(Object.keys(zip.files)).toEqual(entries.map(({ path }) => path))
+    for (const { path, start, end } of entries) {
       const png = decode(await zip.file(path)!.async('uint8array'))
-      expect(png).toEqual({ width, height: end - start, pixels: await read(image, start, end) })
+      expect(png).toEqual({ width: 9, height: end - start, pixels: await read(image, start, end) })
     }
     const single: string[] = []
     await batch(
@@ -202,8 +202,12 @@ describe('source row splitting and real PNG pipeline', () => {
     const zipBytes = await makeZip(sources, () => true, decodeSource)
     expect(calls).toEqual([2, 1])
     const zip = await JSZip.loadAsync(zipBytes!, { checkCRC32: true })
-    const manifest = plan(sources)
-    expect(Object.keys(zip.files)).toEqual(manifest.map((entry) => entry.path))
+    const paths = [
+      ['001/001.png', '001/002.png'],
+      ['002/001.png', '002/002.png', '002/003.png', '002/004.png', '002/005.png', '002/006.png'],
+    ]
+    expect(Object.keys(zip.files)).toEqual(paths.flat())
+    const manifest = []
     for (const [imageIndex, image] of sources.entries()) {
       const reconstructed: Buffer[] = []
       const original = encodeSlice(
@@ -213,13 +217,15 @@ describe('source row splitting and real PNG pipeline', () => {
         { start: 0, end: image.height },
       )
       writeFileSync(new URL(`synthetic-source-${imageIndex + 1}.png`, evidence), original)
-      for (const entry of manifest.filter((entry) => entry.imageIndex === imageIndex)) {
-        const png = await zip.file(entry.path)!.async('uint8array')
+      for (const [sliceIndex, { start, end }] of slices(image.height, image.cuts).entries()) {
+        const path = paths[imageIndex][sliceIndex]
+        const png = await zip.file(path)!.async('uint8array')
         const decoded = decode(png)
-        expect([decoded.width, decoded.height]).toEqual([image.width, entry.end - entry.start])
+        expect([decoded.width, decoded.height]).toEqual([image.width, end - start])
         reconstructed.push(decoded.pixels)
-        mkdirSync(new URL(`${entry.path.split('/')[0]}/`, evidence), { recursive: true })
-        writeFileSync(new URL(entry.path, evidence), png)
+        manifest.push({ start, end, imageIndex, sliceIndex, x: 0, width: image.width, path })
+        mkdirSync(new URL(`${path.split('/')[0]}/`, evidence), { recursive: true })
+        writeFileSync(new URL(path, evidence), png)
       }
       expect(
         Buffer.concat(reconstructed).equals(

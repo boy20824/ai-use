@@ -7,7 +7,7 @@ export function prefersReducedMotion() {
   )
 }
 
-export function hasFineHover() {
+function hasFineHover() {
   return (
     typeof window !== 'undefined' &&
     (window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? false)

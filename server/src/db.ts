@@ -1,8 +1,17 @@
+import type {
+  CategoryGroup,
+  CategoryModule as ModuleRecord,
+  CategoryStep as CategoryStepRecord,
+  StepDetails,
+  StepRef,
+} from '../../shared/domainTypes.ts'
 import { applyRemoveBaseName } from './builtinFields.ts'
 import { migrateCombinationOrders, migrateModules } from './modules.ts'
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
+
+export type { CategoryStep as CategoryStepRecord } from '../../shared/domainTypes.ts'
 
 export type AppDatabase = Database.Database
 
@@ -95,13 +104,12 @@ export interface FeedbackPatch {
   adminReply?: string
 }
 
-export type CategoryGroup = 'criminal' | 'admin' | 'internal'
-export interface VariantRecord {
+interface VariantRecord {
   id: string
   categoryId: string
   name: string
 }
-export interface FieldDefRecord {
+interface FieldDefRecord {
   /** Explicit standalone base definition; absent means legacy mapping rules. */
   scope?: 'base'
   id: string
@@ -110,39 +118,12 @@ export interface FieldDefRecord {
   key: string
   type: 'text' | 'number'
 }
-export interface StepDetails {
-  canRunInParallel?: boolean
-  categoryId?: string
-  order?: number
-  title?: string
-  items?: string[]
-  note?: string
-  variantIds?: string[]
-}
-export interface CategoryStepRecord extends StepDetails {
-  id: string
-  body: string
-  templateIds: string[]
-}
-
 export interface TemplateUsage {
   categoryId: string
   categoryName: string
   stepId: string
   stepBody: string
   sortOrder: number
-}
-
-export interface StepRef {
-  stepId: string
-  sortOrder: number
-}
-export interface ModuleRecord {
-  id: string
-  categoryId: string
-  name: string
-  sortOrder: number
-  steps: StepRef[]
 }
 
 export interface CategoryRecord {
@@ -618,7 +599,7 @@ export function isUniqueConstraint(error: unknown): boolean {
   return message.includes('UNIQUE')
 }
 
-export function normalizeLoginAccount(value: string): string {
+function normalizeLoginAccount(value: string): string {
   return value.replace(/[A-Z]/g, (char) => char.toLowerCase())
 }
 

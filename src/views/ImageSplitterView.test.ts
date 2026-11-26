@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { docxMimeType } from '../../shared/templateUpload'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
@@ -340,10 +341,7 @@ describe('local multi-image splitter DOM', () => {
     await click('產出 Word')
     await idle()
     expect(clicks[0]).toMatch(/^詐騙對話截圖_王小明\(Mock\)_\d{7}\.docx$/)
-    const blob = [...blobs.values()].find(
-      (blob) =>
-        blob.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    )!
+    const blob = [...blobs.values()].find((blob) => blob.type === docxMimeType)!
     const zip = await JSZip.loadAsync(await blob.arrayBuffer())
     expect(await zip.file('word/document.xml')!.async('string')).toContain('w:orient="landscape"')
     expect(
