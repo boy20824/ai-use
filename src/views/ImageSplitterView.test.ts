@@ -162,55 +162,64 @@ describe('local multi-image splitter DOM', () => {
     expect(button().disabled).toBe(false)
     expect(fetch).not.toHaveBeenCalled()
   })
-  it('updates the Word page count, grid and hint from the native radios without decoding images', async () => {
-    const radio = (group: string, value: string) =>
-      host.querySelector<HTMLInputElement>(`input[name="splitter-${group}"][value="${value}"]`)!
+  it('uses the fixed Word orientation for each native per-page radio and exports six-up in portrait', async () => {
+    const radio = (value: number) =>
+      host.querySelector<HTMLInputElement>(
+        `input[type="radio"][name="splitter-per-page"][value="${value}"]`,
+      )!
     const summary = () => host.querySelector('.splitter-word-summary')!.textContent
-    expect(radio('per-page', '3').checked).toBe(true)
-    expect(radio('orientation', 'landscape').checked).toBe(true)
-    expect(radio('per-page', '3').closest('label')?.textContent).toContain('原版')
+    const hint = () => host.querySelector('#splitter-word-hint')!.textContent
     await upload([fixture('fake-layout.png', 4, 6 * 1792 + 11)])
+    expect(host.querySelector('input[name="splitter-orientation"]')).toBeNull()
+    expect([...host.querySelectorAll('legend')].map((legend) => legend.textContent)).not.toContain(
+      '紙張方向',
+    )
+    expect(radio(3).checked).toBe(true)
+    expect(radio(3).closest('label')?.textContent).toContain('原版')
+    expect(hint()).toContain('每頁依序放置 3 張切片，使用 A4 橫式')
+    expect(summary()).toContain('每頁 3 欄 × 1 列')
+    expect(summary()).toContain('預計 3 頁（原版 3 頁，省 0 頁）')
+    const usedDecodes = decodeBitmap.mock.calls.length
+    radio(4).click()
+    await nextTick()
+    expect(radio(4).checked).toBe(true)
+    expect(hint()).toContain('每頁依序放置 4 張切片，使用 A4 橫式')
+    expect(summary()).toContain('每頁 4 欄 × 1 列')
+    expect(summary()).toContain('預計 2 頁（原版 3 頁，省 1 頁）')
+    expect(summary()).toContain('277 dpi')
+    expect(summary()).toContain('建議把切片高度調整為約 10 px，可讓每張圖再放大約 189%')
+    radio(6).click()
+    await nextTick()
+    expect(radio(6).checked).toBe(true)
+    expect(hint()).toContain('每頁依序放置 6 張切片，使用 A4 直式')
+    expect(summary()).toContain('每頁 3 欄 × 2 列')
+    expect(summary()).toContain('預計 2 頁（原版 3 頁，省 1 頁）')
+    expect(decodeBitmap).toHaveBeenCalledTimes(usedDecodes)
+    expect(fetch).not.toHaveBeenCalled()
+
     const input = host.querySelector<HTMLInputElement>('#splitter-victim-name')!
     input.value = 'Mock'
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await nextTick()
-    expect(summary()).toContain('每頁 3 欄 × 1 列')
-    expect(summary()).toContain('預計 3 頁（原版 3 頁，省 0 頁）')
-    const usedDecodes = decodeBitmap.mock.calls.length
-    radio('per-page', '6').click()
+    const template = Uint8Array.from(
+      readFileSync('public/templates/scam-screenshots-template.docx'),
+    ).buffer
+    const fetchTemplate = vi.fn(async () => ({ ok: true, arrayBuffer: async () => template }))
+    vi.stubGlobal('fetch', fetchTemplate)
+    await click('產出 Word')
+    await idle()
+    const docx = await JSZip.loadAsync(await [...blobs.values()].at(-1)!.arrayBuffer())
+    expect(await docx.file('word/document.xml')!.async('string')).toContain('w:orient="portrait"')
+    expect(fetchTemplate.mock.calls).toEqual([
+      ['/templates/scam-screenshots-template.docx', { mode: 'same-origin' }],
+    ])
+
+    radio(4).click()
     await nextTick()
-    expect(radio('per-page', '6').checked).toBe(true)
-    expect(radio('orientation', 'portrait').checked).toBe(true)
-    expect(summary()).toContain('每頁 3 欄 × 2 列')
-    expect(summary()).toContain('預計 2 頁（原版 3 頁，省 1 頁）')
-    expect(host.querySelector('#splitter-word-hint')?.textContent).toContain(
-      '每頁依序放置 6 張切片，使用 A4 直式',
-    )
-    radio('orientation', 'landscape').click()
+    expect(hint()).toContain('每頁依序放置 4 張切片，使用 A4 橫式')
+    radio(3).click()
     await nextTick()
-    expect(radio('per-page', '6').checked).toBe(true)
-    expect(radio('orientation', 'landscape').checked).toBe(true)
-    expect(summary()).toContain('每頁 3 欄 × 2 列')
-    expect(host.querySelector('#splitter-word-hint')?.textContent).toContain(
-      '每頁依序放置 6 張切片，使用 A4 橫式',
-    )
-    radio('per-page', '4').click()
-    await nextTick()
-    expect(radio('orientation', 'landscape').checked).toBe(true)
-    radio('orientation', 'portrait').click()
-    await nextTick()
-    expect(summary()).toContain('每頁 4 欄 × 1 列')
-    expect(summary()).toContain('預計 2 頁（原版 3 頁，省 1 頁）')
-    expect(summary()).toContain('181 dpi')
-    expect(summary()).toContain('建議把切片高度調整為約 21 px，可讓每張圖再放大約 89%')
-    expect(host.querySelector('#splitter-word-hint')?.textContent).toContain(
-      '每頁依序放置 4 張切片，使用 A4 直式',
-    )
-    radio('per-page', '3').click()
-    await nextTick()
-    expect(radio('orientation', 'portrait').checked).toBe(true)
-    expect(decodeBitmap).toHaveBeenCalledTimes(usedDecodes)
-    expect(fetch).not.toHaveBeenCalled()
+    expect(hint()).toContain('每頁依序放置 3 張切片，使用 A4 橫式')
   })
   it('edits both crop edges, updates thumbnails and Word sizing, and exports the clamped crop locally', async () => {
     const first = fixture('fake-crop-A.png', 60, 70)
@@ -291,9 +300,6 @@ describe('local multi-image splitter DOM', () => {
     const name = host.querySelector<HTMLInputElement>('#splitter-victim-name')!
     name.value = 'Mock'
     name.dispatchEvent(new Event('input', { bubbles: true }))
-    host
-      .querySelector<HTMLInputElement>('input[name="splitter-orientation"][value="portrait"]')!
-      .click()
     await nextTick()
     const template = Uint8Array.from(
       readFileSync('public/templates/scam-screenshots-template.docx'),
@@ -304,7 +310,7 @@ describe('local multi-image splitter DOM', () => {
     await idle()
     const docx = await JSZip.loadAsync(await [...blobs.values()].at(-1)!.arrayBuffer())
     const xml = await docx.file('word/document.xml')!.async('string')
-    expect(xml).toContain('w:orient="portrait"')
+    expect(xml).toContain('w:orient="landscape"')
     expect(xml.match(/<w:tc>/g)).toHaveLength(4)
     expect(dimensions(await docx.file('word/media/screenshot-1.png')!.async('uint8array'))).toEqual(
       { width: 30, height: 70 },
@@ -339,6 +345,7 @@ describe('local multi-image splitter DOM', () => {
         blob.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     )!
     const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+    expect(await zip.file('word/document.xml')!.async('string')).toContain('w:orient="landscape"')
     expect(
       await Promise.all(
         [1, 2, 3, 4].map(async (i) =>

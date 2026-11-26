@@ -5,6 +5,7 @@ import {
   DOCX_LAYOUT,
   fitImage,
   imageScaleLimit,
+  orientationFor,
   ORIGINAL_LAYOUT,
   pageGeometry,
   pagesNeeded,
@@ -14,6 +15,14 @@ import {
 } from './layout'
 
 describe('A4 screenshot layout', () => {
+  it.each([
+    [3, 'landscape'],
+    [4, 'landscape'],
+    [6, 'portrait'],
+  ] as const)('uses %s images per page in %s', (perPage, orientation) => {
+    expect(orientationFor(perPage)).toBe(orientation)
+  })
+
   it('keeps the original section geometry, three columns, and uncapped image sizing', () => {
     expect(pageGeometry(ORIGINAL_LAYOUT)).toEqual({
       width: 16838,
