@@ -246,7 +246,7 @@ it('hides unselected module fields without blocking generation and shares tempor
   await fill(field(main('二'), '姓名'), 'Mock')
   await fill(field(main('五'), '案由'), '詐欺（Mock）')
   expect(button(main('二'), '產生').disabled).toBe(false)
-  const module = host.querySelector<HTMLInputElement>('[aria-label="情境模組選擇"] input')!
+  const module = host.querySelector<HTMLInputElement>('[aria-label="情境選擇"] input')!
   module.checked = true
   module.dispatchEvent(new Event('change', { bubbles: true }))
   await nextTick()

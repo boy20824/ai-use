@@ -114,7 +114,7 @@ async function check(element: HTMLInputElement, checked: boolean) {
   await nextTick()
 }
 async function select(id: string, checked = true) {
-  await check(host.querySelector(`[aria-label="情境模組選擇"] input[value="${id}"]`)!, checked)
+  await check(host.querySelector(`[aria-label="情境選擇"] input[value="${id}"]`)!, checked)
 }
 async function fill(input: HTMLInputElement, value: string) {
   input.value = value

@@ -27,6 +27,7 @@ import {
   type GenerationContext,
 } from '@/workbench/stepFields'
 import EmptyState from '@/components/EmptyState.vue'
+import { createdCategoryNotice, editPermissionHint } from '@/stores/categoryNotices'
 import PageIntro from '@/components/PageIntro.vue'
 import PlaceholderGuide from '@/components/PlaceholderGuide.vue'
 import RocDateField from '@/components/RocDateField.vue'
@@ -57,8 +58,6 @@ import {
 } from 'vue-router'
 
 const props = defineProps<{ selectedId?: string; embedded?: boolean }>()
-
-const fieldKeyHint = '{{欄位鍵}}'
 
 const route = useRoute()
 const router = useRouter()
@@ -239,7 +238,7 @@ const dateValue = computed({
 watch(
   category,
   (value) => {
-    document.title = value ? `${value.name} · ${appName}` : `找不到流程 · ${appName}`
+    document.title = value ? `${value.name} · ${appName}` : `找不到案件範本 · ${appName}`
   },
   { immediate: true },
 )
@@ -647,6 +646,16 @@ onUnmounted(() => {
   finishLeave(false)
   clearDraft()
 })
+const createdName = ref('')
+watch(
+  () => category.value?.id,
+  (id) => {
+    const notice = createdCategoryNotice.value
+    createdName.value = id && notice?.id === id ? notice.name : ''
+    if (createdName.value) createdCategoryNotice.value = null
+  },
+  { immediate: true },
+)
 defineExpose({ requestLeave })
 </script>
 
@@ -683,9 +692,26 @@ defineExpose({ requestLeave })
       :eyebrow="categoryGroups[category.group ?? 'criminal']"
       :title="category.name"
       :description="category.summary || '依固定步驟挑選範本，填寫基本資料並產出 .docx。'"
-    />
+    >
+      <template v-if="!session.canEditCategory" #description>
+        <p class="mt-2 text-sm text-ink-muted">{{ editPermissionHint }}</p>
+      </template>
+    </PageIntro>
 
-    <ul class="case-meta mb-4 flex flex-wrap gap-2" aria-label="流程資訊">
+    <div v-if="createdName" class="mb-4 flex flex-wrap items-center gap-3">
+      <p role="status" class="min-w-0 text-sm [overflow-wrap:anywhere]">
+        已建立「{{ createdName }}」
+      </p>
+      <RouterLink
+        v-if="session.canEditCategory"
+        :to="`/categories/${category.id}/edit`"
+        class="btn-secondary"
+      >
+        繼續編輯
+      </RouterLink>
+    </div>
+
+    <ul class="case-meta mb-4 flex flex-wrap gap-2" aria-label="案件範本資訊">
       <li class="rounded-full bg-surface px-3 py-1 text-xs text-stone-700 ring-1 ring-stone-200">
         案件範本
       </li>
@@ -698,11 +724,11 @@ defineExpose({ requestLeave })
     </ul>
     <div class="case-edit-actions mb-4 flex flex-wrap gap-2">
       <RouterLink
-        v-if="session.canEditCategory"
+        v-if="session.canEditCategory && !createdName"
         :to="`/categories/${category.id}/edit`"
         class="btn-secondary"
       >
-        繼續編輯
+        編輯這個案件範本
       </RouterLink>
       <button
         v-if="session.canDeleteCategory"
@@ -710,7 +736,7 @@ defineExpose({ requestLeave })
         class="btn-secondary"
         @click="confirmDelete = !confirmDelete"
       >
-        刪除流程
+        刪除案件範本
       </button>
     </div>
 
@@ -723,7 +749,7 @@ defineExpose({ requestLeave })
       @confirm="removeCategory"
       @cancel="confirmDelete = false"
     >
-      只會刪除這個流程、它的步驟，以及步驟和範本的連結。範本檔仍留在範本庫。
+      只會刪除這個案件範本、它的步驟，以及步驟和範本的連結。範本檔仍留在範本庫。
     </ConfirmDialog>
 
     <section
@@ -753,7 +779,7 @@ defineExpose({ requestLeave })
             基本資料會套進各步驟的範本。日期預設為台北今天。
           </p>
           <details class="mt-3 text-xs text-ink-muted">
-            <summary class="focus-control cursor-pointer">範本欄位說明</summary>
+            <summary class="focus-control cursor-pointer">怎麼寫欄位標記</summary>
             <PlaceholderGuide class="mt-3" />
           </details>
           <div class="mt-4 grid max-w-xl gap-4">
@@ -779,11 +805,7 @@ defineExpose({ requestLeave })
       </details>
     </section>
 
-    <div
-      v-if="category.modules?.length"
-      class="mb-5 flex flex-wrap gap-2"
-      aria-label="情境模組選擇"
-    >
+    <div v-if="category.modules?.length" class="mb-5 flex flex-wrap gap-2" aria-label="情境選擇">
       <label
         v-for="variant in category.modules"
         :key="variant.id"
@@ -858,7 +880,7 @@ defineExpose({ requestLeave })
         >
           <h2 class="text-base font-semibold text-ink-strong">範本步驟</h2>
           <p class="mt-1 text-sm leading-6 text-stone-600">
-            基本資料的欄位只留在這個畫面。離開這個流程或登出後會清除，也不會送到服務。
+            基本資料的欄位只留在這個畫面。離開這個案件範本或登出後會清除，也不會送到服務。
           </p>
           <ol class="fixed-steps-list mt-4">
             <li v-if="visibleSteps.length === 0" class="py-5 text-sm text-ink-muted">
@@ -993,10 +1015,10 @@ defineExpose({ requestLeave })
         >
           <h2 class="text-base font-semibold text-ink-strong">全部文件總覽</h2>
           <p class="mt-1 text-sm leading-6 text-stone-600">
-            列出這個流程各步驟的範本，依所屬步驟分列，預設全部勾選。取消勾選，或從範本庫暫時加入其他範本，只影響這次產生，不會改動流程設定。欄位與範本步驟的基本資料共用，離開這個流程或登出後清除，也不會送到服務。
+            列出這個案件範本各步驟的範本，依所屬步驟分列，預設全部勾選。取消勾選，或從範本庫暫時加入其他範本，只影響這次產生，不會改動案件範本設定。欄位與範本步驟的基本資料共用，離開這個案件範本或登出後清除，也不會送到服務。
           </p>
 
-          <ol aria-label="完整流程總覽" class="mt-4 space-y-2">
+          <ol aria-label="案件範本總覽" class="mt-4 space-y-2">
             <li v-for="step in visibleSteps" :key="step.id">
               <span>{{ step.title ?? step.body }}</span>
               <span v-if="step.canRunInParallel" class="ml-2 text-sm"
@@ -1019,7 +1041,7 @@ defineExpose({ requestLeave })
                 </button>
               </div>
               <p v-if="overviewList.length === 0" class="text-sm text-ink-muted">
-                這個流程還沒有範本。可從範本庫暫時加入。
+                這個案件範本還沒有範本。可從範本庫暫時加入。
               </p>
               <ul v-else class="divide-y divide-stone-200 rounded-2xl border border-edge">
                 <li v-for="item in overviewList" :key="item.id" class="px-4 py-3">
@@ -1071,7 +1093,7 @@ defineExpose({ requestLeave })
                   @input="onPickerQuery"
                 />
                 <p class="mt-2 text-xs leading-5 text-ink-muted">
-                  這裡勾選的範本只加進這次清單，不會寫進流程或步驟。
+                  這裡勾選的範本只加進這次清單，不會寫進案件範本或步驟。
                 </p>
                 <p v-if="templates.items.length === 0" class="mt-3 text-sm text-ink-muted">
                   範本庫還沒有文件。
@@ -1221,7 +1243,7 @@ defineExpose({ requestLeave })
       <div class="workbench-sidebar">
         <aside class="workbench-library self-start rounded-2xl border border-edge bg-surface p-4">
           <h2 class="font-semibold">全部範本</h2>
-          <p class="mt-2 text-xs text-ink-muted">{{ fieldKeyHint }}：{{ fieldNames.join('、') }}</p>
+          <p class="mt-2 text-xs text-ink-muted">可用欄位：{{ fieldNames.join('、') }}</p>
           <ul class="mt-3 space-y-3">
             <li v-for="item in contexts" :key="item.id">
               <button
@@ -1338,10 +1360,10 @@ defineExpose({ requestLeave })
   <div v-else>
     <PageIntro
       eyebrow="案件範本"
-      title="找不到這個流程"
-      description="這個流程不存在，或已經刪除。請回到列表重新選擇。"
+      title="找不到這個案件範本"
+      description="這個案件範本不存在，或已經刪除。請回到列表重新選擇。"
     />
-    <EmptyState title="沒有對應的工作台" description="流程可能已刪除，或連結不完整。">
+    <EmptyState title="沒有對應的工作台" description="案件範本可能已刪除，或連結不完整。">
       <RouterLink to="/categories" class="btn-primary"> 回到案件範本 </RouterLink>
     </EmptyState>
   </div>

@@ -204,7 +204,7 @@ describe('workflow acceptance UI', () => {
     mocks.category.steps = steps.map((step) => ({ ...step, variantIds: [] }))
     try {
       await mount()
-      expect(host.querySelector('[aria-label="情境模組選擇"]')).toBeNull()
+      expect(host.querySelector('[aria-label="情境選擇"]')).toBeNull()
       for (const step of steps) expect(host.textContent).toContain(step.title)
     } finally {
       mocks.category.variants = variants
@@ -501,7 +501,7 @@ it('shows the exact parallel hint in steps and full overview only when enabled',
     expect(stop.textContent).not.toContain('此步驟可請其他人同步進行')
     host.querySelector<HTMLButtonElement>('#tab-overview')!.click()
     await nextTick()
-    const overview = host.querySelector('[aria-label="完整流程總覽"]')!
+    const overview = host.querySelector('[aria-label="案件範本總覽"]')!
     expect(overview.textContent).toContain('此步驟可請其他人同步進行')
     expect(
       [...overview.querySelectorAll('li')].filter((li) =>

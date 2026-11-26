@@ -18,6 +18,7 @@ defineProps<{
         {{ title }}
       </h1>
       <p class="mt-2 max-w-3xl text-sm leading-relaxed text-ink-muted">{{ description }}</p>
+      <slot name="description" />
     </div>
     <div v-if="$slots.default" class="w-full md:w-auto md:shrink-0">
       <slot />

@@ -1,7 +1,13 @@
 import { appName } from '@/config/app'
+import { categoryEditDenied } from '@/stores/categoryNotices'
 import { useSessionStore } from '@/stores/session'
 import { safeRedirect } from '@/utils/redirect'
-import { createRouter, createWebHistory } from 'vue-router'
+import {
+  createRouter,
+  createWebHistory,
+  isNavigationFailure,
+  NavigationFailureType,
+} from 'vue-router'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -142,7 +148,14 @@ router.beforeEach(async (to) => {
   if (needsSysadmin && !session.isSysadmin) return { name: 'home' }
 })
 
-router.afterEach((to) => {
+router.afterEach((to, _from, failure) => {
+  if (failure && !isNavigationFailure(failure, NavigationFailureType.duplicated)) return
+  const denied =
+    to.redirectedFrom?.meta.requiresCategoryManager === true &&
+    (to.name === 'category' || to.name === 'categories') &&
+    !useSessionStore().canEditCategory
+  if (denied || !failure) categoryEditDenied.value = denied
+  if (failure) return
   const titled = [...to.matched].reverse().find((record) => typeof record.meta.title === 'string')
   const title = titled?.meta.title ?? appName
   document.title = title === appName ? appName : `${title} · ${appName}`

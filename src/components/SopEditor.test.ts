@@ -67,8 +67,8 @@ afterEach(() => {
 })
 it('shows both sections, hides entity deletes for maintainers, and removes only a reference', async () => {
   await mount()
-  expect(host.querySelector('[aria-label="基本 SOP"]')).not.toBeNull()
-  expect(host.querySelector('[aria-label="情境模組"]')).not.toBeNull()
+  expect(host.querySelector('[aria-label="基本步驟"]')).not.toBeNull()
+  expect(host.querySelector('[aria-label="情境"]')).not.toBeNull()
   expect(host.textContent).not.toContain('共用步驟實體（含未引用步驟）')
   expect(host.querySelector('details')).toBeNull()
   expect(category.steps).toHaveLength(3)
@@ -81,8 +81,8 @@ it('shows both sections, hides entity deletes for maintainers, and removes only 
   expect(host.textContent).not.toContain('來源樣態')
   expect(host.textContent).not.toContain('目標樣態')
   expect(host.textContent).not.toContain('刪除共用步驟實體')
-  expect(host.textContent).not.toContain('刪除模組實體')
-  button('移除引用（保留共用步驟）').click()
+  expect(host.textContent).not.toContain('刪除這個情境')
+  button('從這裡拿掉（步驟本身還在）').click()
   await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledOnce())
   expect(mocks.request).toHaveBeenCalledExactlyOnceWith('/api/categories/mock/refs/base/s', {
     method: 'DELETE',
@@ -92,7 +92,7 @@ it('keeps source ordering controls but removes reference-existing-step entry poi
   await mount()
   expect(host.querySelector('[aria-label="引用既有步驟"]')).toBeNull()
   expect(host.textContent).not.toContain('引用既有步驟')
-  button('引用下移').click()
+  button('下移').click()
   await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledOnce())
   expect(mocks.request).toHaveBeenLastCalledWith('/api/categories/mock/order/base', {
     method: 'PUT',
@@ -106,8 +106,8 @@ it('loads, toggles and saves the strict parallel boolean with existing step conf
     async () =>
       new Response(JSON.stringify({ impact: { base: [], modules: [] } }), { status: 200 }),
   )
-  button('編輯共用步驟').click()
-  await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledOnce())
+  button('編輯這個步驟').click()
+  await vi.waitFor(() => expect(host.textContent).toContain('這個步驟用在'))
   const checkbox = [...host.querySelectorAll('label')]
     .find((label) => label.textContent?.includes('此步驟可請其他人同步進行'))!
     .querySelector('input')!
@@ -115,8 +115,8 @@ it('loads, toggles and saves the strict parallel boolean with existing step conf
   checkbox.checked = true
   checkbox.dispatchEvent(new Event('change', { bubbles: true }))
   await nextTick()
-  button('儲存共用步驟').click()
-  await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledTimes(2))
+  button('儲存這個步驟').click()
+  await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledOnce())
   expect(mocks.request).toHaveBeenLastCalledWith('/api/categories/mock/steps/s', {
     method: 'PATCH',
     body: JSON.stringify({
@@ -130,8 +130,8 @@ it('loads, toggles and saves the strict parallel boolean with existing step conf
   })
   category.steps[0] = { ...category.steps[0]!, canRunInParallel: true }
   try {
-    button('編輯共用步驟').click()
-    await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledTimes(3))
+    button('編輯這個步驟').click()
+    await vi.waitFor(() => expect(host.textContent).toContain('這個步驟用在'))
     expect(
       [...host.querySelectorAll('label')]
         .find((label) => label.textContent?.includes('此步驟可請其他人同步進行'))!
@@ -140,4 +140,28 @@ it('loads, toggles and saves the strict parallel boolean with existing step conf
   } finally {
     category.steps[0] = { id: 's', body: 'Shared Mock', templateIds: [] }
   }
+})
+
+it('announces a successful step save and new scenario next to their controls', async () => {
+  await mount()
+  mocks.request.mockImplementation(async (path: string) =>
+    Response.json(path.endsWith('/impact') ? { impact: { base: [{}], modules: [] } } : {}),
+  )
+  const opener = button('編輯這個步驟')
+  opener.click()
+  await vi.waitFor(() => expect(host.textContent).toContain('基本步驟 1 處、情境 0 處'))
+  button('儲存這個步驟').click()
+  await vi.waitFor(() =>
+    expect(opener.closest('li')?.querySelector('[role="status"]')?.textContent).toBe('已儲存'),
+  )
+  expect(document.activeElement).toBe(opener)
+  const input = host.querySelector<HTMLInputElement>('[aria-label="情境名稱"]')!
+  input.value = 'Mock scenario'
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  button('新增情境').click()
+  await vi.waitFor(() =>
+    expect(host.querySelector('[aria-label="情境"] [role="status"]')?.textContent).toBe(
+      '已新增模組「Mock scenario」',
+    ),
+  )
 })

@@ -21,8 +21,6 @@ import { formatStoredDate } from '@/utils/rocDate'
 import { computed, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
-const fieldKeyHint = '{{欄位鍵}}'
-
 const route = useRoute()
 const router = useRouter()
 const categories = useCategoryStore()
@@ -148,7 +146,7 @@ async function replaceFile(event: Event) {
   try {
     const result = await templates.replace(replacing.value, file)
     feedbackTone.value = 'ok'
-    feedback.value = `已替換範本，${result.linkedCategoryCount} 個關聯流程同步使用新版。`
+    feedback.value = `已替換範本，${result.linkedCategoryCount} 個關聯案件範本同步使用新版。`
     await categories.reload()
     replacing.value = ''
   } catch (cause) {
@@ -185,7 +183,7 @@ async function onFiles(files: File[]) {
 
 <template>
   <div class="templates-page">
-    <PageIntro title="範本庫" description="共用 Word 範本，可指定使用的案件類別與步驟。" />
+    <PageIntro title="範本庫" description="共用 Word 範本，可指定使用的案件範本與步驟。" />
 
     <p
       v-if="feedback"
@@ -336,7 +334,7 @@ async function onFiles(files: File[]) {
               <span
                 class="mt-2 inline-flex rounded-pill bg-tone-neutral px-2 py-0.5 text-xs text-tone-neutral-ink"
               >
-                關聯 {{ new Set(item.usages.map((u) => u.categoryId)).size }} 個流程
+                關聯 {{ new Set(item.usages.map((u) => u.categoryId)).size }} 個案件範本
               </span>
             </td>
             <td class="template-date whitespace-nowrap px-4 py-4 text-xs text-ink-muted">
@@ -395,19 +393,16 @@ async function onFiles(files: File[]) {
     </section>
 
     <details class="template-guide mb-4">
-      <summary class="focus-control">範本欄位說明</summary>
+      <summary class="focus-control">怎麼寫欄位標記</summary>
       <div class="mt-3">
         <PlaceholderGuide />
-        <p class="mt-2 text-xs text-stone-600">
-          範本欄位寫法：{{ fieldKeyHint
-          }}<span v-if="requestedCategory"
-            >；可用欄位：{{
-              categories
-                .byId(requestedCategory)
-                ?.fields?.map((f) => f.key)
-                .join('、') || '未設定'
-            }}</span
-          >
+        <p v-if="requestedCategory" class="mt-2 text-xs text-stone-600">
+          可用欄位：{{
+            categories
+              .byId(requestedCategory)
+              ?.fields?.map((field) => field.key)
+              .join('、') || '未設定'
+          }}
         </p>
       </div>
     </details>
@@ -425,7 +420,7 @@ async function onFiles(files: File[]) {
         <template v-if="usageLinks(pendingDelete).length > 0">
           「{{
             displayFileName(pendingDelete.fileName)
-          }}」目前用在下列案件範本的步驟。確定後會解除這些連結，並從範本庫刪除檔案。流程與步驟會保留。
+          }}」目前用在下列案件範本的步驟。確定後會解除這些連結，並從範本庫刪除檔案。案件範本與步驟會保留。
         </template>
         <template v-else>
           「{{

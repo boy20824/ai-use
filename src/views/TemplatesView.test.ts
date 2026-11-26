@@ -166,7 +166,7 @@ it('uses the shared keyboard dialog for deletion, preserves existing loss copy, 
   await nextTick()
   const dialog = host.querySelector('[role="dialog"]')!
   expect(dialog.textContent).toContain(
-    '確定後會解除這些連結，並從範本庫刪除檔案。流程與步驟會保留。',
+    '確定後會解除這些連結，並從範本庫刪除檔案。案件範本與步驟會保留。',
   )
   expect(dialog.textContent).toContain('受理')
   expect(dialog.contains(document.activeElement)).toBe(true)

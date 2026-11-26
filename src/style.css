@@ -1510,7 +1510,7 @@ label:has(> input[type='file']:focus-visible) {
 .case-workbench.embedded {
   border-radius: 10px;
 }
-.case-workbench > [aria-label='情境模組選擇'] {
+.case-workbench > [aria-label='情境選擇'] {
   padding-inline: 22px;
 }
 .shared-fields-panel {
@@ -1589,7 +1589,7 @@ label:has(> input[type='file']:focus-visible) {
     margin-inline: 12px;
     padding: 14px;
   }
-  .case-workbench > [aria-label='情境模組選擇'] {
+  .case-workbench > [aria-label='情境選擇'] {
     padding-inline: 14px;
   }
   .step-content {

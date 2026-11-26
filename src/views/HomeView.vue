@@ -3,6 +3,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import CountUp from '@/components/CountUp.vue'
 import PageIntro from '@/components/PageIntro.vue'
 import { useSpotlight } from '@/composables/usePointerMotion'
+import { editPermissionHint } from '@/stores/categoryNotices'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
@@ -36,8 +37,11 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
   <PageIntro
     class="enter enter-1"
     title="總覽"
-    description="選擇案件類別，依範本步驟挑選範本並產出 .docx 文件。"
+    description="選擇案件範本，依範本步驟挑選範本並產出 .docx 文件。"
   >
+    <template v-if="!session.canEditCategory" #description>
+      <p class="mt-2 text-sm text-ink-muted">{{ editPermissionHint }}</p>
+    </template>
     <div class="flex gap-2">
       <RouterLink to="/categories" class="btn-primary">選擇案件、開始填寫</RouterLink>
       <RouterLink to="/templates" class="btn-secondary"
@@ -55,13 +59,13 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
   <div class="overview-columns">
     <section class="data-panel enter enter-2 lift-card spot" @pointermove="onMove">
       <div class="panel-heading">
-        <h2>案件類別</h2>
+        <h2>案件範本</h2>
         <RouterLink to="/categories" class="focus-control">全部案件範本 ›</RouterLink>
       </div>
       <EmptyState
         v-if="categories.ready && categories.total === 0"
         title="還沒有案件範本"
-        description="建立案件類別與固定步驟後，即可連結範本並產生文件。"
+        description="建立案件範本與固定步驟後，即可連結範本並產生文件。"
         ><RouterLink v-if="session.canEditCategory" to="/categories/new" class="btn-primary"
           >新增案件範本</RouterLink
         ></EmptyState
@@ -69,7 +73,7 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
       <p v-else-if="!categories.ready" class="p-5 text-sm text-ink-muted">正在讀取案件範本。</p>
       <template v-else
         ><div class="category-table-heading">
-          <span>案件類別</span><span>分類</span><span>範本步驟</span>
+          <span>案件範本</span><span>分類</span><span>範本步驟</span>
         </div>
         <RouterLink
           v-for="item in categories.items"

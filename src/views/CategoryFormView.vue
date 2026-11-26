@@ -7,16 +7,24 @@ import SopEditor from '@/components/SopEditor.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import FileDropzone from '@/components/FileDropzone.vue'
 import PageIntro from '@/components/PageIntro.vue'
+import { createdCategoryNotice, editPermissionHint } from '@/stores/categoryNotices'
+import { restoreMoveFocus } from '@/utils/stepFocus'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { displayFileName } from '@/utils/fileName'
 import { fieldMappingIssues } from '@/workbench/fieldMapping'
 import { inputFields } from '@/workbench/overview'
-import { computed, ref, watch } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import {
+  onBeforeRouteLeave,
+  onBeforeRouteUpdate,
+  RouterLink,
+  useRoute,
+  useRouter,
+} from 'vue-router'
 
-const fieldKeyHint = '{{欄位鍵}}'
+const fieldMarkerExample = '{{姓名}}'
 const copiedPlaceholder = ref('')
 const copyError = ref('')
 function fieldKey(field: FieldDef) {
@@ -143,12 +151,17 @@ function removeField(key: string, field?: FieldDef) {
 const summary = ref('')
 const steps = ref<DraftStep[]>([blankStep()])
 const populated = ref(false)
-let loadedCategoryId = ''
-let loadedFields = '[]'
-let loadedBuiltinName = false
 const saving = ref(false)
 const formError = ref('')
 const formNotice = ref('')
+const savedNotice = ref('')
+const editor = ref<InstanceType<typeof SopEditor> | null>(null)
+const form = ref<HTMLFormElement | null>(null)
+const confirmSave = ref(false)
+const confirmLeave = ref(false)
+let pendingLeave: Promise<boolean> | undefined
+let resolveLeave: ((allowed: boolean) => void) | undefined
+let leavingForLogout = false
 
 const editingId = computed(() => {
   if (route.name !== 'category-edit') return ''
@@ -159,7 +172,7 @@ const isEdit = computed(() => editingId.value.length > 0)
 const existing = computed(() => (editingId.value ? categories.byId(editingId.value) : undefined))
 const wizardSteps = computed(() => [
   { label: '命名與分類', value: 1 },
-  ...(isEdit.value ? [{ label: '情境模組', value: 2 }] : []),
+  ...(isEdit.value ? [{ label: '情境', value: 2 }] : []),
   { label: '步驟與範本', value: 3 },
 ])
 
@@ -177,20 +190,39 @@ function blankStep(): DraftStep {
   }
 }
 
-function fillFrom(category: CaseCategory) {
-  name.value = category.name
-  group.value = category.group ?? 'criminal'
-  variants.value = (category.variants ?? []).map((v) => ({ ...v }))
-  const incomingFields = (category.fields ?? []).map((f) => ({ ...f }))
-  // Step/module saves reload the same category while manual definitions are still unsaved.
-  if (loadedCategoryId !== category.id || JSON.stringify(fields.value) === loadedFields)
-    fields.value = incomingFields
-  if (loadedCategoryId !== category.id || builtinName.value === loadedBuiltinName)
+function formSnapshot() {
+  return JSON.stringify({
+    name: name.value,
+    group: group.value,
+    summary: summary.value,
+    fields: fields.value,
+    builtinName: builtinName.value,
+    steps: isEdit.value
+      ? []
+      : steps.value.map((step) => [
+          step.body,
+          step.items,
+          step.note,
+          step.canRunInParallel,
+          step.variantIds,
+          step.templateIds,
+        ]),
+  })
+}
+const baseline = ref(formSnapshot())
+const formDirty = computed(() => formSnapshot() !== baseline.value)
+const dirty = computed(() => formDirty.value || !!editor.value?.hasDraft)
+
+function fillFrom(category: CaseCategory, preserveDraft = false) {
+  if (!preserveDraft) {
+    name.value = category.name
+    group.value = category.group ?? 'criminal'
+    summary.value = category.summary
+    fields.value = (category.fields ?? []).map((field) => ({ ...field }))
     builtinName.value = category.builtinFields?.['姓名'] === true
-  loadedCategoryId = category.id
-  loadedFields = JSON.stringify(incomingFields)
-  loadedBuiltinName = category.builtinFields?.['姓名'] === true
-  summary.value = category.summary
+    baseline.value = formSnapshot()
+  }
+  variants.value = (category.variants ?? []).map((v) => ({ ...v }))
   steps.value = category.steps.map((step) => ({
     key: step.id,
     id: step.id,
@@ -208,38 +240,84 @@ function fillFrom(category: CaseCategory) {
 
 watch(
   existing,
-  (category) => {
-    if (!isEdit.value || !category) return
-    fillFrom(category)
+  (category, previous) => {
+    if (category) fillFrom(category, category.id === previous?.id && formDirty.value)
   },
   { immediate: true },
 )
 
-watch(
-  () => route.fullPath,
-  () => {
-    formError.value = ''
-    formNotice.value = ''
-    const category = existing.value
-    if (category) {
-      fillFrom(category)
-      return
-    }
-    populated.value = false
-    if (!isEdit.value) {
-      name.value = ''
-      group.value = 'criminal'
-      variants.value = []
-      fields.value = []
-      builtinName.value = false
-      wizard.value = 1
-      summary.value = ''
-      steps.value = [blankStep()]
-    }
-  },
-)
+watch([() => route.name, editingId], () => {
+  formError.value = ''
+  formNotice.value = ''
+  savedNotice.value = ''
+  wizard.value = 1
+  sopScope.value = 'base'
+  pendingRemoveStep.value = null
+  if (existing.value) return
+  populated.value = false
+  name.value = ''
+  group.value = 'criminal'
+  variants.value = []
+  fields.value = []
+  builtinName.value = false
+  summary.value = ''
+  steps.value = [blankStep()]
+  baseline.value = formSnapshot()
+})
 
-function moveStep(index: number, delta: number) {
+function requestLeave(): Promise<boolean> {
+  if (leavingForLogout) return Promise.resolve(true)
+  if (saving.value || editor.value?.isBusy) return Promise.resolve(false)
+  if (!dirty.value) return Promise.resolve(true)
+  if (pendingLeave) return pendingLeave
+  confirmSave.value = false
+  pendingRemoveStep.value = null
+  editor.value?.dismissConfirmation()
+  confirmLeave.value = true
+  pendingLeave = new Promise((resolve) => {
+    resolveLeave = resolve
+  })
+  return pendingLeave
+}
+function finishLeave(allowed: boolean) {
+  confirmLeave.value = false
+  resolveLeave?.(allowed)
+  resolveLeave = undefined
+  pendingLeave = undefined
+}
+async function requestLogout() {
+  leavingForLogout = await requestLeave()
+  return leavingForLogout
+}
+function beforeUnload(event: BeforeUnloadEvent) {
+  if (!dirty.value && !saving.value && !editor.value?.isBusy) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+onBeforeRouteLeave(requestLeave)
+onBeforeRouteUpdate((to, from) => to.params.id === from.params.id || requestLeave())
+onMounted(() => window.addEventListener('beforeunload', beforeUnload))
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', beforeUnload)
+  finishLeave(false)
+})
+defineExpose({ requestLeave: requestLogout })
+
+async function changeWizard(value: number) {
+  savedNotice.value = ''
+  wizard.value = value
+  await nextTick()
+  form.value?.querySelector<HTMLElement>('[data-wizard-current]')?.focus()
+}
+async function addStep() {
+  steps.value = [...steps.value, blankStep()]
+  await nextTick()
+  form.value
+    ?.querySelector<HTMLTextAreaElement>(`#category-step-${steps.value.length - 1}`)
+    ?.focus()
+}
+
+function moveStep(index: number, delta: number, button: HTMLButtonElement) {
   const nextIndex = index + delta
   if (nextIndex < 0 || nextIndex >= steps.value.length) return
   const next = [...steps.value]
@@ -247,6 +325,7 @@ function moveStep(index: number, delta: number) {
   if (!item) return
   next.splice(nextIndex, 0, item)
   steps.value = next
+  void restoreMoveFocus(button)
 }
 
 const pendingRemoveStep = ref<DraftStep | null>(null)
@@ -352,15 +431,41 @@ async function onUpload(index: number, files: File[]) {
 const newId = () => crypto.randomUUID()
 
 async function submit() {
+  if (saving.value || editor.value?.isBusy) return
   formError.value = ''
+  savedNotice.value = ''
+  if (wizard.value === 3 && editor.value?.dirtyStep) {
+    confirmSave.value = true
+    return
+  }
+  await saveForm()
+}
+async function resolveSave(saveStep: boolean) {
+  confirmSave.value = false
+  const stepEditor = editor.value
+  if (saveStep && !(await stepEditor?.saveStep(false))) return
+  if (!saveStep) await stepEditor?.discardStep(false)
+  await saveForm()
+}
+async function saveForm() {
   if (!name.value.trim()) {
-    wizard.value = 1
-    formError.value = '請填寫流程名稱。'
+    void changeWizard(1)
+    formError.value = '請填寫案件範本名稱。'
     return
   }
   if (wizard.value < 3) {
-    wizard.value = !isEdit.value && wizard.value === 1 ? 3 : wizard.value + 1
+    await changeWizard(!isEdit.value && wizard.value === 1 ? 3 : wizard.value + 1)
     return
+  }
+  if (isEdit.value && categories.error) {
+    saving.value = true
+    try {
+      await categories.reload()
+      await nextTick()
+    } finally {
+      saving.value = false
+    }
+    if (categories.error) return
   }
   const prepared = steps.value.map((step, order) => ({
     id: step.id,
@@ -393,20 +498,28 @@ async function submit() {
     steps: prepared,
     ...(isEdit.value ? { builtinFields: { 姓名: builtinName.value } } : {}),
   }
-  if (!input.name) {
-    formError.value = '請填寫流程名稱。'
-    return
-  }
   saving.value = true
   try {
     if (isEdit.value) {
+      const previous = existing.value
       await categories.update(editingId.value, input)
+      if (existing.value && existing.value !== previous) {
+        fillFrom(existing.value)
+      } else {
+        fields.value = mappedFields
+        baseline.value = formSnapshot()
+      }
+      savedNotice.value = '已儲存'
       await templates.reload()
-      await router.push(`/categories/${editingId.value}`)
       return
     }
     const created = await categories.create(input)
-    await router.push(`/categories/${created.id}`)
+    baseline.value = formSnapshot()
+    const notice = { id: created.id, name: created.name || input.name }
+    createdCategoryNotice.value = notice
+    saving.value = false
+    const failure = await router.push(`/categories/${created.id}`)
+    if (failure && createdCategoryNotice.value?.id === notice.id) createdCategoryNotice.value = null
   } catch (cause) {
     formError.value = cause instanceof Error ? cause.message : '無法儲存案件範本。'
   } finally {
@@ -416,6 +529,27 @@ async function submit() {
 </script>
 
 <template>
+  <ConfirmDialog
+    v-if="confirmLeave"
+    title="放棄未儲存的修改？"
+    confirm-label="放棄修改"
+    cancel-label="繼續編輯"
+    @confirm="finishLeave(true)"
+    @cancel="finishLeave(false)"
+  >
+    離開後，尚未儲存的內容會清除。
+  </ConfirmDialog>
+  <ConfirmDialog
+    v-else-if="confirmSave"
+    title="編輯區還有未儲存的步驟修改，要一起儲存嗎？"
+    confirm-label="儲存並繼續"
+    alternate-label="放棄"
+    @confirm="resolveSave(true)"
+    @alternate="resolveSave(false)"
+    @cancel="confirmSave = false"
+  >
+    放棄會清除步驟修改，並繼續儲存名稱與欄位。
+  </ConfirmDialog>
   <ConfirmDialog
     tone="danger"
     v-if="pendingRemoveStep"
@@ -428,9 +562,13 @@ async function submit() {
     }}」的內容、說明與範本連結；範本檔案仍保留在範本庫。
   </ConfirmDialog>
   <PageIntro
-    eyebrow="工作台"
+    :eyebrow="isEdit ? '編輯案件範本' : '新增案件範本'"
     :title="isEdit ? '編輯案件範本' : '新增案件範本'"
-    description="名稱必填且不可重複。日期與基本 SOP 手動新增的欄位顯示在基本資料；範本欄位在使用它的步驟填寫。這裡的步驟可以寫說明，並從範本庫選取要在該步驟產生的文件。"
+    :description="
+      isEdit
+        ? '步驟各自儲存，會立即生效。名稱與欄位請用頁底的按鈕儲存。'
+        : '設定名稱、步驟與範本，再建立案件範本。'
+    "
   >
     <RouterLink
       :to="isEdit ? `/categories/${editingId}` : '/categories'"
@@ -446,35 +584,42 @@ async function submit() {
   <p v-if="!categories.ready" class="text-sm text-ink-muted">正在讀取案件範本。</p>
   <EmptyState
     v-else-if="!session.canEditCategory"
-    title="此身分不能建立或編輯流程"
-    description="只有系統管理員，或被授權可維護流程的使用者，可以建立或編輯流程、步驟與範本連結。其他已登入的使用者仍可在工作台產生文件。"
+    title="你的帳號沒有編輯權限"
+    :description="editPermissionHint"
   >
     <RouterLink to="/categories" class="btn-primary"> 回到案件範本 </RouterLink>
   </EmptyState>
   <EmptyState
     v-else-if="isEdit && !existing"
-    title="找不到這個流程"
-    description="流程可能已刪除，或連結不完整。"
+    title="找不到這個案件範本"
+    description="案件範本可能已刪除，或連結不完整。"
   >
     <RouterLink to="/categories" class="btn-primary"> 回到案件範本 </RouterLink>
   </EmptyState>
 
   <form
     v-else-if="!isEdit || populated"
+    ref="form"
     class="max-w-3xl rounded-2xl border border-edge bg-surface p-5 shadow-card sm:p-6"
     :class="{ 'xl:max-w-none': isEdit && wizard === 3 }"
     @submit.prevent="submit"
   >
-    <ol class="mb-6 flex gap-3 text-sm" aria-label="編輯進度">
+    <ol class="mb-6 flex gap-3 text-sm" aria-label="表單區段">
       <li
         v-for="(step, i) in wizardSteps"
         :key="step.value"
         :class="wizard === step.value ? 'font-semibold text-accent-ink' : 'text-ink-muted'"
       >
-        {{ i + 1 }}. {{ step.label }}
+        <h2
+          class="inline scroll-mt-20 rounded-sm focus-visible:outline-2"
+          tabindex="-1"
+          :data-wizard-current="wizard === step.value ? '' : undefined"
+        >
+          {{ i + 1 }}. {{ step.label }}
+        </h2>
       </li>
     </ol>
-    <section v-show="wizard === 1">
+    <section v-show="wizard === 1" :inert="saving">
       <div>
         <label for="category-name" class="block text-sm font-medium text-stone-800">
           名稱 <span class="font-normal text-ink-muted">必填</span>
@@ -487,7 +632,7 @@ async function submit() {
           :required="wizard === 1"
           maxlength="80"
           autocomplete="off"
-          placeholder="請輸入流程名稱"
+          placeholder="請輸入案件範本名稱"
           class="field mt-2 w-full"
         />
       </div>
@@ -510,21 +655,21 @@ async function submit() {
         ></textarea>
       </div>
     </section>
-    <section v-if="isEdit" v-show="wizard === 2" aria-label="情境模組設定">
-      <h2 class="font-semibold">情境模組</h2>
-      <p class="mt-2 text-sm">
-        儲存案類後，可新增及維護模組步驟，並設定基本 SOP 與所選情境模組的組合專屬順序。
-      </p>
+    <section v-if="isEdit" v-show="wizard === 2" :inert="saving" aria-label="情境設定">
+      <h2 class="font-semibold">情境</h2>
+      <p class="mt-2 text-sm">下一頁可以新增情境，並調整情境的步驟順序。</p>
     </section>
-    <section v-show="wizard === 3">
+    <section v-show="wizard === 3" :inert="saving">
       <SopEditor
         v-if="isEdit && existing"
+        ref="editor"
         :key="existing.id"
         :category="existing"
+        :saving-form="saving"
         @scope-change="sopScope = $event"
       />
       <fieldset v-if="!isEdit" class="mt-6">
-        <legend class="text-sm font-medium text-stone-800">基本 SOP</legend>
+        <legend class="text-sm font-medium text-stone-800">基本步驟</legend>
         <p class="mt-1 text-sm leading-6 text-stone-600">
           每個步驟可以附上零份或多份範本。上傳會先存進範本庫，並連結到該步驟。
         </p>
@@ -546,7 +691,11 @@ async function submit() {
               @input="onStep(index, $event)"
             ></textarea>
             <label class="mt-3 block text-sm"
-              >細項（每行一項）<textarea v-model="step.items" rows="3" class="field mt-2 w-full" />
+              >步驟內容（每行一項）<textarea
+                v-model="step.items"
+                rows="3"
+                class="field mt-2 w-full"
+              />
             </label>
             <label class="mt-3 block text-sm"
               >特別註記<textarea
@@ -565,7 +714,9 @@ async function submit() {
                 type="button"
                 class="btn-ghost text-sm text-stone-600 hover:text-ink"
                 :disabled="index === 0"
-                @click="moveStep(index, -1)"
+                data-move="up"
+                :aria-label="`${step.body || '步驟 ' + (index + 1)}：上移`"
+                @click="moveStep(index, -1, $event.currentTarget as HTMLButtonElement)"
               >
                 上移
               </button>
@@ -573,7 +724,9 @@ async function submit() {
                 type="button"
                 class="btn-ghost text-sm text-stone-600 hover:text-ink"
                 :disabled="index === steps.length - 1"
-                @click="moveStep(index, 1)"
+                data-move="down"
+                :aria-label="`${step.body || '步驟 ' + (index + 1)}：下移`"
+                @click="moveStep(index, 1, $event.currentTarget as HTMLButtonElement)"
               >
                 下移
               </button>
@@ -676,12 +829,10 @@ async function submit() {
             </div>
           </li>
         </ol>
-        <button type="button" class="btn-secondary mt-4" @click="steps = [...steps, blankStep()]">
-          新增步驟
-        </button>
+        <button type="button" class="btn-secondary mt-4" @click="addStep">新增步驟</button>
       </fieldset>
-      <fieldset v-if="sopScope === 'base'" class="mt-6" aria-label="基本 SOP 細項欄位">
-        <legend class="font-semibold">基本 SOP 細項欄位</legend>
+      <fieldset v-if="sopScope === 'base'" class="mt-6" aria-label="基本資料欄位">
+        <legend class="font-semibold">基本資料欄位</legend>
         <div class="mt-3 flex flex-wrap items-center gap-3" aria-label="系統日期欄位">
           <span>日期</span>
           <button type="button" class="btn-ghost text-sm" disabled>移除欄位</button>
@@ -749,12 +900,14 @@ async function submit() {
         <p v-if="copyError" class="mt-2 text-sm text-tone-danger-ink" role="alert">
           {{ copyError }}
         </p>
-        <p class="mt-2 text-xs text-ink-muted">
-          範本欄位寫法：{{
-            fieldKeyHint
-          }}。已儲存的欄位鍵固定，修改名稱只改顯示文字。手動新增只用於基本 SOP；基本 SOP
-          手動欄位不需先關聯範本，相同欄位鍵共用基本值。日期為系統必要欄位；其他欄位若仍被範本使用，確認移除後改在使用它的步驟內填寫。只儲存欄位定義。
-        </p>
+        <details class="mt-2 text-sm text-ink-muted">
+          <summary class="focus-control cursor-pointer">怎麼寫欄位標記</summary>
+          <p class="mt-2">
+            Word 範本裡的欄位標記，寫法：<code>{{ fieldMarkerExample }}</code>
+          </p>
+          <p>已儲存的標記固定。修改欄位名稱只會更新顯示文字。</p>
+          <p>手動新增的欄位在基本資料填寫，其他欄位在使用範本的步驟填寫。</p>
+        </details>
       </fieldset>
       <p v-if="sopScope !== 'base'" class="mt-4 text-sm text-ink-muted">
         情境欄位由步驟所附 DOCX 的標記自動產生，在工作台對應步驟內填寫。
@@ -762,7 +915,7 @@ async function submit() {
       <section v-if="legacyFields.length" class="mt-6" aria-label="既有欄位定義（保留）">
         <h3 class="font-semibold">既有欄位定義（保留）</h3>
         <p class="mt-2 text-sm text-ink-muted">
-          以下定義未對應基本 SOP，保留原有名稱、型別及映射；情境欄位仍依 DOCX 自動顯示。
+          以下定義未對應基本步驟，保留原有名稱、型別及映射；情境欄位仍依 DOCX 自動顯示。
         </p>
         <ul class="mt-2 text-sm">
           <li v-for="field in legacyFields" :key="field.id">
@@ -799,9 +952,10 @@ async function submit() {
     <div class="mt-6 flex flex-wrap gap-3">
       <button
         v-if="wizard > 1"
+        :disabled="saving"
         type="button"
         class="btn-secondary py-2"
-        @click="wizard = !isEdit && wizard === 3 ? 1 : wizard - 1"
+        @click="changeWizard(!isEdit && wizard === 3 ? 1 : wizard - 1)"
       >
         上一步
       </button>
@@ -818,13 +972,20 @@ async function submit() {
             : wizard < 3
               ? '下一步'
               : isEdit
-                ? '儲存變更'
-                : '建立流程'
+                ? '儲存名稱與欄位'
+                : '建立案件範本'
         }}
       </button>
       <RouterLink :to="isEdit ? `/categories/${editingId}` : '/categories'" class="btn-secondary">
         取消
       </RouterLink>
+      <p
+        role="status"
+        class="scroll-mb-20 self-center text-sm"
+        :class="{ 'sr-only': !savedNotice }"
+      >
+        {{ savedNotice }}
+      </p>
     </div>
   </form>
 </template>

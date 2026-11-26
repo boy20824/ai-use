@@ -85,7 +85,7 @@ it('drags across sources, saves only IDs explicitly, reloads the same normalized
   await toggle('酒駕')
   await toggle('現行犯')
   expect(order()).toBe('ABCDJ')
-  expect(host.querySelector('[data-step-id="A"]')?.textContent).toContain('來源：基本 SOP')
+  expect(host.querySelector('[data-step-id="A"]')?.textContent).toContain('來源：基本步驟')
   expect(host.querySelector('[data-step-id="D"]')?.textContent).toContain('來源：酒駕')
   const dataTransfer = { setData: vi.fn(), effectAllowed: 'uninitialized' }
   host.querySelector('[data-step-id="D"]')!.dispatchEvent(dragEvent('dragstart', dataTransfer))

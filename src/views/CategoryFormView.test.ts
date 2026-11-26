@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
-import { createApp, h, nextTick, type App } from 'vue'
+import { createApp, h, nextTick, shallowRef, type App } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import CategoryFormView from './CategoryFormView.vue'
 import type { TemplateSummary } from '@/storage'
@@ -18,6 +18,7 @@ vi.mock('@/stores/categories', () => ({
     byId: mocks.byId,
     create: mocks.create,
     update: mocks.update,
+    reload: async () => {},
   }),
 }))
 vi.mock('@/stores/templates', () => ({
@@ -88,7 +89,7 @@ async function mountFields() {
   await mountForm()
   await type('#category-name', '公共危險')
   await submit()
-  expect(button('建立流程')).toBeDefined()
+  expect(button('建立案件範本')).toBeDefined()
   await type('#category-step-0', 'Mock step')
   button('新增欄位').click()
   await nextTick()
@@ -141,10 +142,10 @@ it('widens only the existing SOP step and preserves its reorder across internal 
   await submit()
   expect(form.classList.contains('max-w-3xl')).toBe(true)
   expect(form.classList.contains('xl:max-w-none')).toBe(true)
-  const editor = host.querySelector('[aria-label="組合專屬順序"]')!
+  const editor = host.querySelector('[aria-label="這個情境的步驟順序"]')!
   expect(editor.parentElement?.classList.contains('xl:grid-cols-2')).toBe(true)
   expect(editor.parentElement?.classList.contains('grid-cols-2')).toBe(false)
-  const move = host.querySelector('[aria-label="B：上移"]') as HTMLButtonElement
+  const move = editor.querySelector('[aria-label="B：上移"]') as HTMLButtonElement
   move.click()
   await nextTick()
   const order = () =>
@@ -153,16 +154,16 @@ it('widens only the existing SOP step and preserves its reorder across internal 
   button('上一步').click()
   await nextTick()
   expect(form.classList.contains('xl:max-w-none')).toBe(false)
-  expect(host.querySelector('[aria-label="組合專屬順序"]')).toBe(editor)
+  expect(host.querySelector('[aria-label="這個情境的步驟順序"]')).toBe(editor)
   button('上一步').click()
   await nextTick()
   expect(form.classList.contains('xl:max-w-none')).toBe(false)
   await submit()
-  const confirm = vi.fn(() => false)
-  vi.stubGlobal('confirm', confirm)
-  await router.push('/categories')
+  const navigation = router.push('/categories')
+  await vi.waitFor(() => expect(host.querySelector('[role=dialog]')).not.toBeNull())
+  button('繼續編輯').click()
+  await navigation
   expect(router.currentRoute.value.path).toBe('/categories/existing/edit')
-  expect(confirm).toHaveBeenCalledOnce()
   await submit()
   expect(form.classList.contains('xl:max-w-none')).toBe(true)
   expect(order()).toEqual(['B', 'A'])
@@ -340,8 +341,8 @@ it.each(['manual', 'builtin', 'both'])(
 
 it('starts with one blank step, skips the explanation-only page, and creates into the workbench', async () => {
   const router = await mountForm()
-  expect(host.querySelector('[aria-label="編輯進度"]')?.textContent).not.toContain('情境模組')
-  expect(host.querySelector('[aria-label="情境模組設定"]')).toBeNull()
+  expect(host.querySelector('[aria-label="表單區段"]')?.textContent).not.toContain('情境模組')
+  expect(host.querySelector('[aria-label="情境設定"]')).toBeNull()
   await type('#category-name', 'Mock new case')
   await submit()
   expect(host.querySelectorAll('[id^="category-step-"]')).toHaveLength(1)
@@ -375,4 +376,189 @@ it('confirms removing a wizard step and keeps its values on cancel', async () =>
   host.querySelector<HTMLButtonElement>('[role="dialog"] .btn-danger')!.click()
   await nextTick()
   expect(host.querySelector('#category-step-0')).toBeNull()
+})
+
+async function mountStepEditor() {
+  const current = shallowRef<CaseCategory>({
+    id: 'existing',
+    name: 'Mock existing',
+    summary: '',
+    updatedAt: '',
+    templateCount: 0,
+    steps: [{ id: 'step', body: 'Mock original step', templateIds: [] }],
+    baseSteps: [{ stepId: 'step', sortOrder: 0 }],
+    modules: [],
+  })
+  mocks.byId.mockImplementation(() => current.value)
+  const fetch = vi.fn(async (url: string, init: RequestInit) => {
+    if (url.endsWith('/impact')) {
+      return Response.json({ impact: { base: [{}], modules: [] } })
+    }
+    const category = mocks.byId()!
+    const step = { ...category.steps[0], ...JSON.parse(String(init.body)) }
+    current.value = { ...category, steps: [step] }
+    return Response.json({ step })
+  })
+  vi.stubGlobal('fetch', fetch)
+  const router = await mountForm('/categories/existing/edit')
+  await submit()
+  expect(document.activeElement?.textContent).toContain('情境')
+  await submit()
+  expect(document.activeElement?.textContent).toContain('步驟與範本')
+  return { router, fetch }
+}
+function stepInput() {
+  return host.querySelector<HTMLInputElement>('input[maxlength="500"]')
+}
+const dialog = () => host.querySelector('[role="dialog"]')
+async function decide(label: string) {
+  await vi.waitFor(() => expect(dialog()).not.toBeNull())
+  const target = [...dialog()!.querySelectorAll('button')].find(
+    (entry) => entry.textContent?.trim() === label,
+  )
+  expect(target).toBeDefined()
+  target!.click()
+  await nextTick()
+}
+
+it('opens the step editor at its name and restores focus when Escape closes a clean editor', async () => {
+  await mountStepEditor()
+  const opener = button('編輯這個步驟')
+  opener.click()
+  await vi.waitFor(() => expect(stepInput()).not.toBeNull())
+  expect(document.activeElement).toBe(stepInput())
+  stepInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  await vi.waitFor(() => expect(document.activeElement).toBe(opener))
+  expect(stepInput()).toBeNull()
+  expect(dialog()).toBeNull()
+})
+
+it.each(['儲存並繼續', '放棄'])(
+  'prompts before saving metadata with a step draft and handles %s',
+  async (decision) => {
+    const { router, fetch } = await mountStepEditor()
+    await type('#category-name', 'Mock renamed')
+    button('編輯這個步驟').click()
+    await nextTick()
+    await type('input[maxlength="500"]', 'Mock revised step')
+    await submit()
+    expect(dialog()?.textContent).toContain('編輯區還有未儲存的步驟修改，要一起儲存嗎？')
+    await decide('取消')
+    expect(stepInput()?.value).toBe('Mock revised step')
+    expect(mocks.update).not.toHaveBeenCalled()
+    await submit()
+    await decide(decision)
+    await vi.waitFor(() =>
+      expect([...host.querySelectorAll('[role="status"]')].at(-1)?.textContent).toBe('已儲存'),
+    )
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith(
+      'existing',
+      expect.objectContaining({
+        name: 'Mock renamed',
+        steps: [
+          expect.objectContaining({
+            body: decision === '放棄' ? 'Mock original step' : 'Mock revised step',
+          }),
+        ],
+      }),
+    )
+    const stepSave = fetch.mock.calls.filter(([, init]) => init.method === 'PATCH')
+    expect(stepSave).toHaveLength(decision === '放棄' ? 0 : 1)
+    if (stepSave.length) {
+      expect(fetch.mock.invocationCallOrder.at(-1)).toBeLessThan(
+        mocks.update.mock.invocationCallOrder[0]!,
+      )
+    }
+    await router.push('/categories')
+    expect(router.currentRoute.value.path).toBe('/categories')
+    expect(dialog()).toBeNull()
+  },
+)
+
+it('keeps a dirty step open on Escape until discard is confirmed', async () => {
+  await mountStepEditor()
+  const opener = button('編輯這個步驟')
+  opener.click()
+  await nextTick()
+  await type('input[maxlength="500"]', 'Mock unsaved step')
+  const escape = () =>
+    stepInput()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  escape()
+  await decide('繼續編輯')
+  expect(stepInput()?.value).toBe('Mock unsaved step')
+  escape()
+  await decide('放棄修改')
+  await vi.waitFor(() => expect(document.activeElement).toBe(opener))
+  expect(stepInput()).toBeNull()
+})
+
+it('guards the cancel link and refresh only while the new wizard has unsaved inputs', async () => {
+  const router = await mountForm()
+  const unload = () => {
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  }
+  expect(unload()).toBe(false)
+  await router.push('/categories')
+  expect(router.currentRoute.value.path).toBe('/categories')
+  expect(dialog()).toBeNull()
+  await router.push('/categories/new')
+  await type('#category-name', 'Mock draft')
+  expect(unload()).toBe(true)
+  const cancel = [...host.querySelectorAll('a')].find((a) => a.textContent?.trim() === '取消')!
+  cancel.click()
+  await decide('繼續編輯')
+  expect(router.currentRoute.value.path).toBe('/categories/new')
+  expect((host.querySelector('#category-name') as HTMLInputElement).value).toBe('Mock draft')
+  cancel.click()
+  await decide('放棄修改')
+  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories'))
+  expect(unload()).toBe(false)
+})
+
+it.each([true, false])('uses the copy table across wizard sections (edit: %s)', async (edit) => {
+  if (edit) {
+    await mountStepEditor()
+    button('編輯這個步驟').click()
+    await nextTick()
+    expect(host.textContent).toContain('編輯步驟（儲存後立即生效）')
+    expect(button('儲存這個步驟')).toBeDefined()
+    expect(button('儲存名稱與欄位')).toBeDefined()
+    expect(host.textContent).toContain('從這裡拿掉（步驟本身還在）')
+  } else {
+    await mountForm()
+    await type('#category-name', 'Mock new')
+    await submit()
+    button('新增步驟').click()
+    await nextTick()
+    expect(document.activeElement?.id).toBe('category-step-1')
+    expect(button('建立案件範本')).toBeDefined()
+  }
+  expect(host.querySelector('details summary')?.textContent).toBe('怎麼寫欄位標記')
+  expect(host.textContent).toContain('步驟內容（每行一項）')
+  expect(host.textContent).not.toMatch(/引用|實體|案類|類別名稱/)
+  expect(
+    host.querySelector(
+      '[aria-label*="引用"], [aria-label*="實體"], [aria-label*="案類"], [aria-label*="類別名稱"]',
+    ),
+  ).toBeNull()
+})
+
+it('keeps both drafts when the step save fails and renders the friendly API error', async () => {
+  const { fetch } = await mountStepEditor()
+  await type('#category-name', 'Mock renamed')
+  button('編輯這個步驟').click()
+  await vi.waitFor(() => expect(host.textContent).toContain('這個步驟用在'))
+  await type('input[maxlength="500"]', 'Mock revised step')
+  fetch.mockResolvedValueOnce(Response.json({ message: '這個類別名稱已經存在。' }, { status: 409 }))
+  await submit()
+  await decide('儲存並繼續')
+  await vi.waitFor(() =>
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe('這個案件範本名稱已經存在。'),
+  )
+  expect(mocks.update).not.toHaveBeenCalled()
+  expect(stepInput()?.value).toBe('Mock revised step')
+  expect((host.querySelector('#category-name') as HTMLInputElement).value).toBe('Mock renamed')
+  expect(host.textContent).not.toMatch(/引用|實體|案類|類別名稱/)
 })

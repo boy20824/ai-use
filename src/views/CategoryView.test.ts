@@ -172,7 +172,9 @@ it('guards switching and filtering the embedded workbench without clearing on ca
 })
 it('protects date overrides even without text input and preserves the edit entry', async () => {
   const router = await mount()
-  expect(host.querySelector('a[href="/categories/one/edit"]')?.textContent?.trim()).toBe('繼續編輯')
+  expect(host.querySelector('a[href="/categories/one/edit"]')?.textContent?.trim()).toBe(
+    '編輯這個案件範本',
+  )
   const toggle = host.querySelector<HTMLInputElement>('[role="switch"]')!
   toggle.checked = true
   toggle.dispatchEvent(new Event('change', { bubbles: true }))
@@ -226,7 +228,7 @@ it.each(['/categories/one', '/categories', '/away'])(
 it('uses the shared danger modal to delete a category, with Escape and focus restoration', async () => {
   await mount()
   const opener = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent?.trim() === '刪除流程',
+    (b) => b.textContent?.trim() === '刪除案件範本',
   )!
   opener.focus()
   opener.click()
