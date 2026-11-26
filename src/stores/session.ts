@@ -14,11 +14,8 @@ export interface SessionUser {
 }
 
 export interface RegisterInput {
-  name: string
   nickname: string
   username: string
-  password: string
-  confirmPassword: string
 }
 
 export type RegisterResult =
@@ -65,11 +62,11 @@ export const useSessionStore = defineStore('session', () => {
     return pending
   }
 
-  async function login(name: string, password: string): Promise<'ok' | 'invalid' | 'offline'> {
+  async function login(username: string): Promise<'ok' | 'invalid' | 'offline'> {
     try {
       const response = await apiRequest('/api/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ username: name.trim(), password }),
+        body: JSON.stringify({ username: username.trim() }),
       })
       if (response.status === 401) return 'invalid'
       if (!response.ok) return 'offline'
@@ -88,11 +85,8 @@ export const useSessionStore = defineStore('session', () => {
       const response = await apiRequest('/api/auth/register', {
         method: 'POST',
         body: JSON.stringify({
-          name: input.name.trim(),
           nickname: input.nickname.trim(),
           username: input.username.trim(),
-          password: input.password,
-          confirmPassword: input.confirmPassword,
         }),
       })
       if (response.status === 429) {

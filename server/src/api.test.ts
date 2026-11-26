@@ -121,7 +121,7 @@ async function createApp(overrides: Partial<AppConfig> = {}) {
 async function login(
   app: Awaited<ReturnType<typeof createApp>>['app'],
   username: string,
-  password: string,
+  password?: string,
 ) {
   const response = await loginWithCsrf(app, {
     method: 'POST',
@@ -157,15 +157,13 @@ describe('api', () => {
     rmSync(scratch, { recursive: true, force: true })
   })
 
-  it('requires login CSRF and Origin checks while accepting legacy cost-10 passwords', async () => {
+  it('requires login CSRF and Origin checks for username-only login', async () => {
     const { app, db } = await createApp()
     databases.push(db)
     try {
-      const stored = createQueries(db).findUserByUsername('admin')!
-      expect(bcrypt.getRounds(stored.passwordHash)).toBe(10)
       const page = await app.inject({ url: '/login' })
       const csrf = page.cookies.find((cookie) => cookie.name === 'csrf')!.value
-      const payload = { username: 'admin', password: passwords.admin }
+      const payload = { username: 'admin' }
       for (const options of [
         {},
         { cookies: { csrf } },
@@ -200,65 +198,86 @@ describe('api', () => {
     }
   })
 
+  it.each([
+    ['/api/auth/register', 'user'],
+    ['/api/members', 'member'],
+  ])('validates accounts and stores an unusable hash at %s', async (url, key) => {
+    const { app, db } = await createApp({ registerIpLimit: 20 })
+    databases.push(db)
+    try {
+      const queries = createQueries(db)
+      const admin = authFrom(await login(app, 'admin'))
+      const account = { nickname: '模擬綽號', username: 'mock-new' }
+      const createAccount = (payload: Record<string, unknown>) =>
+        app.inject({ method: 'POST', url, ...admin, payload })
+      for (const payload of [
+        { nickname: account.nickname },
+        { ...account, username: '  ' },
+        { ...account, username: 'ab' },
+        { ...account, username: 'a'.repeat(33) },
+        { ...account, username: '_mock' },
+        { ...account, username: 'mock user' },
+        { username: account.username },
+        { ...account, nickname: '  ' },
+        { ...account, nickname: '測'.repeat(41) },
+        { ...account, nickname: '測\u0000試' },
+        { ...account, name: '模擬名稱' },
+        { ...account, password: passwords.clerk },
+        { ...account, confirmPassword: passwords.clerk },
+      ]) {
+        const rejected = await createAccount(payload)
+        expect(rejected.statusCode).toBe(400)
+        expect(rejected.json().error).toBe('invalid-input')
+        expect(rejected.json().message).not.toContain('密碼')
+      }
+      expect(queries.findUserByUsername(account.username)).toBeNull()
+
+      const created = await createAccount({ ...account, nickname: ` ${account.nickname} ` })
+      expect(created.statusCode).toBe(201)
+      expect(created.json()[key]).toMatchObject({
+        ...account,
+        displayName: account.nickname,
+        role: 'user',
+        canManageCategories: false,
+      })
+      const user = queries.findUserByUsername(account.username)!
+      expect(user.active).toBe(true)
+      expect(user.passwordHash).toMatch(/^\$2[aby]\$12\$[./A-Za-z0-9]{53}$/)
+      expect(created.body).not.toContain(user.passwordHash)
+      for (const secret of ['', account.username, account.nickname, passwords.clerk]) {
+        if (secret) expect(user.passwordHash).not.toContain(secret)
+        expect(bcrypt.compareSync(secret, user.passwordHash)).toBe(false)
+      }
+      if (key === 'user') {
+        const session = sessionCookie(created)!.value
+        expect((await app.inject({ url: '/api/auth/me', cookies: { session } })).statusCode).toBe(
+          200,
+        )
+      }
+      expect((await login(app, account.username)).statusCode).toBe(200)
+    } finally {
+      await app.close()
+    }
+  })
+
   it.each(['a', '12345678', ' a '])(
-    'accepts short non-blank password %j and stores cost-12 hashes with immediate account access',
+    'allows change-password to set a short non-blank password %j',
     async (password) => {
       const { app, db } = await createApp()
       databases.push(db)
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('')))
       try {
-        const queries = createQueries(db)
-        const admin = authFrom(await login(app, 'admin', passwords.admin))
-        const account = { name: 'Mock User', nickname: 'Mock', username: 'mock-new' }
-        const register = (secret: string) =>
-          app.inject({
-            method: 'POST',
-            url: '/api/auth/register',
-            ...admin,
-            payload: { ...account, password: secret, confirmPassword: secret },
-          })
-        for (const secret of ['', '   ', '密'.repeat(25)]) {
-          const rejected = await register(secret)
-          expect(rejected.statusCode).toBe(400)
-          if (!secret) expect(rejected.json().message).toBe('請填寫密碼。')
-        }
-        const created = await register(password)
-        expect(created.statusCode).toBe(201)
-        const user = queries.findUserByUsername(account.username)!
-        expect(user.active).toBe(true)
-        expect(bcrypt.getRounds(user.passwordHash)).toBe(12)
-        const session = sessionCookie(created)!.value
-        expect((await app.inject({ url: '/api/auth/me', cookies: { session } })).statusCode).toBe(
-          200,
-        )
-        expect((await login(app, account.username, password)).statusCode).toBe(200)
-        const member = (secret: string) =>
-          app.inject({
-            method: 'POST',
-            url: '/api/members',
-            ...admin,
-            payload: { ...account, username: 'mock-member', password: secret },
-          })
-        for (const secret of ['', '   ', '密'.repeat(25)]) {
-          expect((await member(secret)).statusCode).toBe(400)
-        }
-        expect((await member(password)).statusCode).toBe(201)
-        const memberHash = queries.findUserByUsername('mock-member')!.passwordHash
-        expect(bcrypt.getRounds(memberHash)).toBe(12)
-        expect(bcrypt.compareSync(password, memberHash)).toBe(true)
-        const change = (newPassword: string) =>
-          app.inject({
-            method: 'POST',
-            url: '/api/auth/change-password',
-            ...admin,
-            payload: { currentPassword: passwords.admin, newPassword },
-          })
-        for (const secret of ['', '   ', '密'.repeat(25)]) {
-          expect((await change(secret)).statusCode).toBe(400)
-        }
-        expect((await change(password)).statusCode).toBe(204)
-        expect(bcrypt.getRounds(queries.findUserByUsername('admin')!.passwordHash)).toBe(12)
-        expect((await login(app, 'admin', password)).statusCode).toBe(200)
+        const admin = authFrom(await login(app, 'admin'))
+        const changed = await app.inject({
+          method: 'POST',
+          url: '/api/auth/change-password',
+          ...admin,
+          payload: { currentPassword: passwords.admin, newPassword: password },
+        })
+        expect(changed.statusCode).toBe(204)
+        const hash = createQueries(db).findUserByUsername('admin')!.passwordHash
+        expect(bcrypt.getRounds(hash)).toBe(12)
+        expect(bcrypt.compareSync(password, hash)).toBe(true)
       } finally {
         vi.unstubAllGlobals()
         await app.close()
@@ -649,7 +668,7 @@ describe('api', () => {
     }
   })
 
-  it('logs in with a bcrypt hash, restores the session, and logs out', async () => {
+  it('logs in an existing account by username, restores the session, and logs out', async () => {
     const { app, db } = await createApp()
     databases.push(db)
     const stored = createQueries(db).findUserByUsername('clerk')
@@ -658,9 +677,10 @@ describe('api', () => {
 
     const failed = await login(app, "' OR 1=1 --", passwords.clerk)
     expect(failed.statusCode).toBe(400)
+    expect(sessionCookie(failed)).toBeUndefined()
     expect(JSON.stringify(failed.json())).not.toContain('stack')
 
-    const loggedIn = await login(app, 'clerk', passwords.clerk)
+    const loggedIn = await login(app, ' CLERK ')
     expect(loggedIn.statusCode).toBe(200)
     expect(loggedIn.json().user).toEqual({
       id: 'user-clerk',

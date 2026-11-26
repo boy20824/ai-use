@@ -128,11 +128,8 @@ async function login(
 
 function account(username: string, extra: Record<string, unknown> = {}) {
   return {
-    name: '測試人員',
     nickname: '小測',
     username,
-    password: 'password1234',
-    confirmPassword: 'password1234',
     ...extra,
   }
 }
@@ -174,7 +171,7 @@ describe('v1.2 access, registration, and feedback', () => {
     expect(created.statusCode).toBe(201)
     expect(created.json().user).toMatchObject({
       username: 'newuser',
-      displayName: '測試人員',
+      displayName: '小測',
       nickname: '小測',
       role: 'user',
       canManageCategories: false,
@@ -182,8 +179,6 @@ describe('v1.2 access, registration, and feedback', () => {
     expect(JSON.stringify(created.json())).not.toContain('password')
     const stored = queries.findUserByUsername('NewUser')
     expect(stored).toMatchObject({ role: 'user', canManageCategories: false, active: true })
-    expect(stored?.passwordHash.startsWith('$2')).toBe(true)
-    expect(stored?.passwordHash).not.toContain('password1234')
 
     const duplicate = await app.inject({
       method: 'POST',
@@ -323,10 +318,8 @@ describe('v1.2 access, registration, and feedback', () => {
       url: '/api/members',
       ...admin,
       payload: {
-        name: '新會員',
         nickname: '新',
         username: 'member2',
-        password: 'memberpass12',
         role: 'sysadmin',
         canManageCategories: true,
       },
@@ -337,13 +330,20 @@ describe('v1.2 access, registration, and feedback', () => {
       method: 'POST',
       url: '/api/members',
       ...admin,
-      payload: { name: '新會員', nickname: '新', username: 'member2', password: 'memberpass12' },
+      payload: { nickname: '新', username: 'member2' },
     })
     expect(added.statusCode).toBe(201)
     expect(added.json()).toMatchObject({
       member: { username: 'member2', role: 'user', canManageCategories: false, active: true },
     })
-    expect(JSON.stringify(added.json())).not.toContain('memberpass12')
+    expect(added.body).not.toContain('password')
+    expect(
+      db
+        .prepare(
+          "SELECT result FROM audit_log WHERE action = 'member_create' AND target_username = ?",
+        )
+        .get('member2'),
+    ).toEqual({ result: 'allowed' })
 
     const adminId = queries.findUserByUsername('admin')?.id ?? ''
     const selfOff = await app.inject({
