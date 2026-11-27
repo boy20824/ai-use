@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { apiPagedList, apiRequest } from './api'
+import { apiErrorMessage, apiPagedList, apiRequest } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 it.each([
@@ -40,4 +40,13 @@ it('sends the CSRF cookie as a header when logging in', async () => {
   expect(url).toBe('/api/auth/login')
   expect(options.credentials).toBe('include')
   expect(options.headers.get('x-csrf-token')).toBe('mock-csrf-token')
+})
+
+it.each([
+  ['這個類別名稱已經存在。', '這個案件範本名稱已經存在。'],
+  ['不可跨案類引用。', '不可跨案件範本使用步驟。'],
+  ['步驟仍被引用，請先移除引用。', '這個步驟仍在使用中，請先從使用它的地方拿掉。'],
+  ['只有系統管理員可以刪除實體。', '只有系統管理員可以刪除步驟或情境。'],
+])('shows friendly frontend copy for a legacy API error', async (message, friendly) => {
+  expect(await apiErrorMessage(Response.json({ message }), 'Mock fallback')).toBe(friendly)
 })

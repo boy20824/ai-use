@@ -1,18 +1,25 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import type { CaseCategory } from '@/types/domain'
 import { combinationKey, resolveCombination } from '@/workbench/compose'
 import { apiErrorMessage, apiRequest } from '@/services/api'
+import ConfirmDialog from './ConfirmDialog.vue'
+import { focusAlert } from '@/utils/focusAlert'
+import { restoreMoveFocus } from '@/utils/stepFocus'
 import { useCategoryStore } from '@/stores/categories'
 
-const props = defineProps<{ category: CaseCategory }>()
+const props = defineProps<{ category: CaseCategory; managedByForm?: boolean }>()
 const categories = useCategoryStore()
 const selected = ref<string[]>([])
 const draft = ref<string[]>([])
 const baseline = ref<string[]>([])
 const busy = ref(false)
 const error = ref('')
+const errorAlert = ref<HTMLElement | null>(null)
+const confirming = ref(false)
+let pendingDiscard: Promise<boolean> | undefined
+let resolveDiscard: ((confirmed: boolean) => void) | undefined
 const dragging = ref<string | null>(null)
 const resolved = computed(() => resolveCombination(props.category, selected.value))
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(baseline.value))
@@ -37,35 +44,54 @@ watch(
   { immediate: true },
 )
 function canLeave() {
-  return !busy.value && (!dirty.value || window.confirm('此組合順序尚未儲存，確定放棄調整？'))
+  if (busy.value) return Promise.resolve(false)
+  if (!dirty.value) return Promise.resolve(true)
+  if (pendingDiscard) return pendingDiscard
+  confirming.value = true
+  pendingDiscard = new Promise((resolve) => {
+    resolveDiscard = resolve
+  })
+  return pendingDiscard
 }
-onBeforeRouteLeave(canLeave)
-onBeforeRouteUpdate(canLeave)
+function finishDiscard(confirmed: boolean) {
+  confirming.value = false
+  resolveDiscard?.(confirmed)
+  resolveDiscard = undefined
+  pendingDiscard = undefined
+}
+function dismissConfirmation() {
+  finishDiscard(false)
+}
+onBeforeUnmount(dismissConfirmation)
+if (!props.managedByForm) {
+  onBeforeRouteLeave(canLeave)
+  onBeforeRouteUpdate(canLeave)
+  onMounted(() => window.addEventListener('beforeunload', beforeUnload))
+  onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
+}
+defineExpose({ dirty, busy, dismissConfirmation })
 function beforeUnload(event: BeforeUnloadEvent) {
   if (dirty.value || busy.value) {
     event.preventDefault()
     event.returnValue = ''
   }
 }
-onMounted(() => window.addEventListener('beforeunload', beforeUnload))
-onBeforeUnmount(() => window.removeEventListener('beforeunload', beforeUnload))
-function toggle(id: string, event: Event) {
+async function toggle(id: string, event: Event) {
   const input = event.target as HTMLInputElement
-  if (!canLeave()) {
-    input.checked = selected.value.includes(id)
-    return
-  }
+  input.checked = selected.value.includes(id)
+  if (!(await canLeave())) return
   selected.value = selected.value.includes(id)
     ? selected.value.filter((value) => value !== id)
     : [...selected.value, id]
   error.value = ''
   reset()
 }
-function move(id: string, target: number) {
+function move(id: string, target: number, button?: HTMLButtonElement) {
   const index = draft.value.indexOf(id)
   if (busy.value || index < 0 || target < 0 || target >= draft.value.length) return
   draft.value.splice(index, 1)
   draft.value.splice(target, 0, id)
+  if (button) void restoreMoveFocus(button)
 }
 function startDrag(id: string, event: DragEvent) {
   dragging.value = null
@@ -85,7 +111,7 @@ function drop(target: number) {
 }
 function sources(id: string) {
   return [
-    ...(props.category.baseSteps?.some((r) => r.stepId === id) ? ['基本 SOP'] : []),
+    ...(props.category.baseSteps?.some((r) => r.stepId === id) ? ['基本步驟'] : []),
     ...(props.category.modules ?? [])
       .filter((m) => selected.value.includes(m.id) && m.steps.some((r) => r.stepId === id))
       .map((m) => m.name),
@@ -111,16 +137,20 @@ async function save() {
     error.value = cause instanceof Error ? cause.message : '無法儲存組合順序。'
   } finally {
     busy.value = false
+    if (error.value) {
+      await nextTick()
+      focusAlert(errorAlert.value)
+    }
   }
 }
 </script>
 
 <template>
-  <section aria-label="組合專屬順序" class="space-y-3 rounded-2xl border border-edge p-4">
-    <h2 class="font-semibold">基本 SOP ＋情境模組合成順序</h2>
-    <p>勾選情境模組後，可跨來源拖拉排序；未勾選時設定基本 SOP 的組合順序。</p>
+  <section aria-label="這個情境的步驟順序" class="space-y-3 rounded-2xl border border-edge p-4">
+    <h2 class="font-semibold">這個情境的步驟順序</h2>
+    <p>勾選情境後可拖曳調整順序。未勾選時只調整基本步驟。</p>
     <fieldset :disabled="busy" class="flex flex-wrap gap-3">
-      <legend>此組合的情境模組</legend>
+      <legend>選擇情境</legend>
       <label v-for="m in category.modules" :key="m.id">
         <input
           type="checkbox"
@@ -152,19 +182,21 @@ async function save() {
         <p class="text-xs">來源：{{ sources(id) }}</p>
         <button
           type="button"
-          class="btn-ghost"
+          class="btn-move"
           :aria-label="`${steps.get(id)?.title ?? steps.get(id)?.body}：上移`"
           :disabled="busy || index === 0"
-          @click="move(id, index - 1)"
+          data-move="up"
+          @click="move(id, index - 1, $event.currentTarget as HTMLButtonElement)"
         >
           上移
         </button>
         <button
           type="button"
-          class="btn-ghost"
+          class="btn-move"
           :aria-label="`${steps.get(id)?.title ?? steps.get(id)?.body}：下移`"
           :disabled="busy || index === draft.length - 1"
-          @click="move(id, index + 1)"
+          data-move="down"
+          @click="move(id, index + 1, $event.currentTarget as HTMLButtonElement)"
         >
           下移
         </button>
@@ -178,6 +210,23 @@ async function save() {
     >
       儲存為這組情境搭配的預設順序
     </button>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <p
+      v-if="error"
+      ref="errorAlert"
+      role="alert"
+      tabindex="-1"
+      class="scroll-my-20 text-tone-danger-ink"
+    >
+      {{ error }}
+    </p>
+    <ConfirmDialog
+      v-if="confirming"
+      title="放棄步驟順序的修改？"
+      confirm-label="放棄修改"
+      @confirm="finishDiscard(true)"
+      @cancel="dismissConfirmation"
+    >
+      步驟順序尚未儲存。
+    </ConfirmDialog>
   </section>
 </template>

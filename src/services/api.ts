@@ -13,7 +13,18 @@ function csrfToken(): string | undefined {
 export async function apiErrorMessage(response: Response, fallback: string): Promise<string> {
   try {
     const body = (await response.json()) as { message?: string }
-    if (body.message) return body.message
+    if (typeof body.message === 'string' && body.message) {
+      return body.message
+        .replace('不可跨案類引用。', '不可跨案件範本使用步驟。')
+        .replace('步驟仍被引用，請先移除引用。', '這個步驟仍在使用中，請先從使用它的地方拿掉。')
+        .replaceAll('勤務流程', '案件範本')
+        .replaceAll('類別名稱', '案件範本名稱')
+        .replaceAll('案類', '案件範本')
+        .replaceAll('模組', '情境')
+        .replaceAll('被引用', '在使用中')
+        .replaceAll('引用', '步驟連結')
+        .replaceAll('實體', '步驟或情境')
+    }
   } catch {
     // The response had no JSON body.
   }

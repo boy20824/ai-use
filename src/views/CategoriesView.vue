@@ -3,11 +3,12 @@ import { categoryGroups } from '@/config/app'
 import type { CategoryGroup } from '@/types/domain'
 import EmptyState from '@/components/EmptyState.vue'
 import PageIntro from '@/components/PageIntro.vue'
+import { editPermissionHint } from '@/stores/categoryNotices'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import CategoryView from './CategoryView.vue'
 import AppIcon from '@/components/AppIcon.vue'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 const categories = useCategoryStore()
@@ -47,19 +48,28 @@ async function changeBrowser(
   const choices = filtered(nextGroup, nextKeyword)
   const next = choices.find((item) => item.id === nextSelection) ?? choices[0]
   if (next?.id !== selected.value?.id && workbench.value && !(await workbench.value.requestLeave()))
-    return
+    return false
   selection.value = nextSelection
   group.value = nextGroup
   keyword.value = nextKeyword
+  return true
 }
 async function search(event: Event) {
   const input = event.target as HTMLInputElement
   await changeBrowser(selection.value, group.value, input.value)
   input.value = keyword.value
 }
+async function selectCategory(id: string) {
+  if (!(await changeBrowser(id))) return
+  if (!window.matchMedia?.('(max-width: 767px)').matches) return
+  await nextTick()
+  if (selected.value?.id !== id) return
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  workbench.value?.scrollToWorkbench(reducedMotion ? 'instant' : 'smooth')
+}
 async function choose(event: Event) {
   const select = event.target as HTMLSelectElement
-  await changeBrowser(select.value)
+  await selectCategory(select.value)
   select.value = selected.value?.id ?? ''
 }
 </script>
@@ -67,8 +77,11 @@ async function choose(event: Event) {
 <template>
   <PageIntro
     title="案件範本"
-    description="依分類選擇案件類別，查看固定範本步驟與各步驟使用的範本。"
+    description="依分類選擇案件範本，查看固定範本步驟與各步驟使用的範本。"
   >
+    <template v-if="!session.canEditCategory && categories.total > 0 && !selected" #description>
+      <p class="mt-2 text-sm text-ink-muted">{{ editPermissionHint }}</p>
+    </template>
     <RouterLink
       v-if="session.canEditCategory && categories.total > 0"
       to="/categories/new"
@@ -105,18 +118,22 @@ async function choose(event: Event) {
   <EmptyState
     v-else-if="categories.total === 0"
     title="還沒有案件範本"
-    description="建立第一個流程後，就可以寫下填寫步驟，並從範本庫選取 Word 範本。範本會集中保存，刪除流程不會刪除檔案。"
+    :description="
+      session.canEditCategory
+        ? '建立案件範本後，就可以設定步驟並從範本庫選取 Word 範本。'
+        : '你目前可以填寫並產出文件。'
+    "
   >
     <RouterLink v-if="session.canEditCategory" to="/categories/new" class="btn-primary">
       新增案件範本
     </RouterLink>
-    <p v-else class="text-sm text-stone-600">請由系統管理員或被授權的使用者新增。</p>
+    <p v-else class="text-sm text-stone-600">{{ editPermissionHint }}</p>
   </EmptyState>
 
   <template v-else>
     <div class="case-browser">
       <label v-if="visible.length" class="mobile-case-select"
-        ><span class="sr-only">選擇案件類別</span
+        ><span class="sr-only">選擇案件範本</span
         ><select class="field w-full" :value="selected?.id" @change="choose">
           <option v-for="item in visible" :key="item.id" :value="item.id">
             {{ item.name }} · {{ item.steps.length }} 個範本步驟
@@ -124,19 +141,19 @@ async function choose(event: Event) {
         </select></label
       >
       <aside class="data-panel case-selector">
-        <div class="panel-heading"><h2>案件類別</h2></div>
+        <div class="panel-heading"><h2>案件範本</h2></div>
         <div class="p-3">
-          <label for="category-search" class="sr-only">搜尋案件類別</label
+          <label for="category-search" class="sr-only">搜尋案件範本</label
           ><input
             id="category-search"
             :value="keyword"
             @input="search"
             type="search"
-            placeholder="搜尋案件類別"
+            placeholder="搜尋案件範本"
             class="field w-full"
           />
         </div>
-        <p v-if="!visible.length" class="p-4 text-sm text-ink-muted">沒有符合的案件類別。</p>
+        <p v-if="!visible.length" class="p-4 text-sm text-ink-muted">沒有符合的案件範本。</p>
         <button
           v-for="item in visible"
           :key="item.id"
@@ -144,7 +161,7 @@ async function choose(event: Event) {
           class="case-select-row focus-control"
           :class="{ selected: selected?.id === item.id }"
           :aria-pressed="selected?.id === item.id"
-          @click="changeBrowser(item.id)"
+          @click="selectCategory(item.id)"
         >
           <AppIcon name="folder" /><span
             ><strong>{{ item.name }}</strong

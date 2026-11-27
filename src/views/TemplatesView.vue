@@ -21,8 +21,6 @@ import { formatStoredDate } from '@/utils/rocDate'
 import { computed, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
-const fieldKeyHint = '{{欄位鍵}}'
-
 const route = useRoute()
 const router = useRouter()
 const categories = useCategoryStore()
@@ -31,6 +29,7 @@ const session = useSessionStore()
 const keyword = ref('')
 const group = ref<CategoryGroup | ''>('')
 const feedback = ref('')
+const uploadError = ref('')
 const feedbackTone = ref<'ok' | 'warn'>('ok')
 const pendingDelete = ref<TemplateSummary | null>(null)
 const deleting = ref(false)
@@ -148,7 +147,7 @@ async function replaceFile(event: Event) {
   try {
     const result = await templates.replace(replacing.value, file)
     feedbackTone.value = 'ok'
-    feedback.value = `已替換範本，${result.linkedCategoryCount} 個關聯流程同步使用新版。`
+    feedback.value = `已替換範本，${result.linkedCategoryCount} 個關聯案件範本同步使用新版。`
     await categories.reload()
     replacing.value = ''
   } catch (cause) {
@@ -162,30 +161,33 @@ async function replaceFile(event: Event) {
 
 async function onFiles(files: File[]) {
   if (!session.canUpload) return
-  const result = await templates.addFiles(files)
-  if (result.added === 0 && result.skipped > 0 && result.rejected.length === 0) {
-    feedbackTone.value = 'warn'
-    feedback.value = `範本庫最多 ${templates.limit} 份，沒有再加入。`
-    return
+  uploadError.value = ''
+  feedback.value = ''
+  try {
+    const result = await templates.addFiles(files)
+    if (result.added === 0 && result.skipped > 0 && result.rejected.length === 0) {
+      uploadError.value = `範本庫最多 ${templates.limit} 份，沒有再加入。`
+      return
+    }
+    uploadError.value = result.rejected.join('。')
+    if (result.added === 0) {
+      uploadError.value ||= '沒有可保存的 Word 或 PDF 範本。'
+      return
+    }
+    feedbackTone.value = result.skipped > 0 || result.formatNotice ? 'warn' : 'ok'
+    const notes = [`已上傳 ${result.added} 份到範本庫。可在案件範本工作台選取。`]
+    if (result.skipped > 0) notes.push(`另有 ${result.skipped} 份因筆數上限未加入。`)
+    if (result.formatNotice) notes.push(result.formatNotice)
+    feedback.value = notes.join('')
+  } catch (cause) {
+    uploadError.value = cause instanceof Error ? cause.message : '無法上傳範本。'
   }
-  if (result.added === 0) {
-    feedbackTone.value = 'warn'
-    feedback.value = result.rejected[0] ?? '沒有可保存的 Word 或 PDF 範本。'
-    return
-  }
-  feedbackTone.value =
-    result.rejected.length > 0 || result.skipped > 0 || result.formatNotice ? 'warn' : 'ok'
-  const notes = [`已上傳 ${result.added} 份到範本庫。可在案件範本工作台選取。`]
-  if (result.skipped > 0) notes.push(`另有 ${result.skipped} 份因筆數上限未加入。`)
-  if (result.rejected.length > 0) notes.push(`${result.rejected.join('。')}。`)
-  if (result.formatNotice) notes.push(result.formatNotice)
-  feedback.value = notes.join('')
 }
 </script>
 
 <template>
   <div class="templates-page">
-    <PageIntro title="範本庫" description="共用 Word 範本，可指定使用的案件類別與步驟。" />
+    <PageIntro title="範本庫" description="共用 Word 範本，可指定使用的案件範本與步驟。" />
 
     <p
       v-if="feedback"
@@ -255,6 +257,7 @@ async function onFiles(files: File[]) {
         title="上傳 Word 或 PDF 到範本庫"
         hint="檔案會存在服務上的範本庫。產生文件時填入的欄位不會被保存。"
         :accept="`.pdf,application/pdf,.docx,${docxMimeType}`"
+        :error="uploadError"
         @select="onFiles"
       />
     </div>
@@ -336,7 +339,7 @@ async function onFiles(files: File[]) {
               <span
                 class="mt-2 inline-flex rounded-pill bg-tone-neutral px-2 py-0.5 text-xs text-tone-neutral-ink"
               >
-                關聯 {{ new Set(item.usages.map((u) => u.categoryId)).size }} 個流程
+                關聯 {{ new Set(item.usages.map((u) => u.categoryId)).size }} 個案件範本
               </span>
             </td>
             <td class="template-date whitespace-nowrap px-4 py-4 text-xs text-ink-muted">
@@ -395,19 +398,16 @@ async function onFiles(files: File[]) {
     </section>
 
     <details class="template-guide mb-4">
-      <summary class="focus-control">範本欄位說明</summary>
+      <summary class="focus-control">怎麼寫欄位標記</summary>
       <div class="mt-3">
         <PlaceholderGuide />
-        <p class="mt-2 text-xs text-stone-600">
-          範本欄位寫法：{{ fieldKeyHint
-          }}<span v-if="requestedCategory"
-            >；可用欄位：{{
-              categories
-                .byId(requestedCategory)
-                ?.fields?.map((f) => f.key)
-                .join('、') || '未設定'
-            }}</span
-          >
+        <p v-if="requestedCategory" class="mt-2 text-xs text-stone-600">
+          可用欄位：{{
+            categories
+              .byId(requestedCategory)
+              ?.fields?.map((field) => field.key)
+              .join('、') || '未設定'
+          }}
         </p>
       </div>
     </details>
@@ -425,7 +425,7 @@ async function onFiles(files: File[]) {
         <template v-if="usageLinks(pendingDelete).length > 0">
           「{{
             displayFileName(pendingDelete.fileName)
-          }}」目前用在下列案件範本的步驟。確定後會解除這些連結，並從範本庫刪除檔案。流程與步驟會保留。
+          }}」目前用在下列案件範本的步驟。確定後會解除這些連結，並從範本庫刪除檔案。案件範本與步驟會保留。
         </template>
         <template v-else>
           「{{

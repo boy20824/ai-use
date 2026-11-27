@@ -74,9 +74,9 @@ function assertScenarioAlignment() {
   style.textContent = rules.join('\n')
   document.head.append(style)
   try {
-    const labels = host.querySelectorAll('[aria-label="情境模組選擇"] > label')
+    const labels = host.querySelectorAll('[aria-label="情境選擇"] > label')
     expect(labels).toHaveLength(2)
-    expect(host.querySelector('[aria-label="情境模組選擇"]')?.classList.contains('flex-wrap')).toBe(
+    expect(host.querySelector('[aria-label="情境選擇"]')?.classList.contains('flex-wrap')).toBe(
       true,
     )
     const checks = [...labels].map((label) => {
@@ -254,34 +254,39 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
       (button) => button.textContent?.trim() === '新增欄位',
     ),
   ).toBe(false)
-  expect(host.querySelector('[aria-label="基本 SOP 細項欄位"]')).toBeNull()
+  expect(host.querySelector('[aria-label="基本資料欄位"]')).toBeNull()
   expect(host.querySelector('[aria-label="既有欄位定義（保留）"]')?.textContent).toContain('{{Y}}')
   snapshot('maintainer-scenario-auto-only')
   const panel = [...host.querySelectorAll('section')].find(
     (s) => s.querySelector('h3')?.textContent === 'M',
   )!
-  await click('編輯共用步驟', panel)
+  await click('編輯這個步驟', panel)
   await check(host.querySelector('input[value="same"]')!, true)
   const parallel = [...host.querySelectorAll('label')]
     .find((l) => l.textContent?.includes('此步驟可請其他人同步進行'))!
     .querySelector('input')!
   await check(parallel, true)
-  await click('儲存共用步驟')
+  await click('儲存這個步驟')
   expect(saved.steps.find((s) => s.id === 'd')).toMatchObject({
     templateIds: ['same'],
     canRunInParallel: true,
   })
   // Saving a step reloads the category; unsaved base definitions survive.
   expect(host.querySelectorAll('[aria-label="欄位名稱"]')).toHaveLength(0)
-  await click('維護基本 SOP')
+  await click('維護基本步驟')
   expect(host.querySelectorAll('[aria-label="欄位名稱"]')).toHaveLength(1)
   await submit()
-  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/mock'))
+  await vi.waitFor(() => expect(host.textContent).toContain('已儲存'))
+  await confirmedNavigation(router, '/categories/mock')
   await confirmedNavigation(router, '/categories/mock/edit')
   await settle()
   await submit()
   await submit()
-  expect([...host.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['{{X}}', '{{Y}}'])
+  expect(
+    [...host.querySelectorAll('code')]
+      .filter((code) => !code.closest('details'))
+      .map((code) => code.textContent),
+  ).toEqual(['{{X}}', '{{Y}}'])
   expect(host.querySelectorAll('[aria-label="欄位名稱"]')).toHaveLength(1)
   await input(host.querySelector('[aria-label="欄位名稱"]')!, 'Mock X label')
   expect(host.querySelector('code')?.textContent).toBe('{{X}}')
@@ -300,6 +305,8 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   expect(host.querySelector('[aria-label="欄位名稱"]')).toBeNull()
   snapshot('maintainer-reopened')
   await submit()
+  await vi.waitFor(() => expect(host.textContent).toContain('已儲存'))
+  await confirmedNavigation(router, '/categories/mock')
   expect(saved.fields?.find((field) => field.id === 'legacy-y')).toEqual({
     id: 'legacy-y',
     key: 'Y',
@@ -311,7 +318,7 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   expect(host.querySelector('.basic-data-row')?.textContent).not.toContain('Mock X label')
   expect(host.querySelector('.basic-data-row')?.textContent).not.toContain('Mock Y label')
   expect(host.querySelector('#step-d-0')).toBeNull()
-  await check(host.querySelector('[aria-label="情境模組選擇"] input[value="m"]')!, true)
+  await check(host.querySelector('[aria-label="情境選擇"] input[value="m"]')!, true)
   expect(row('D Mock').textContent).toContain('可請其他人同步處理')
   expect(row('D Mock').querySelector('input[type="number"]')).not.toBeNull()
   expect(host.querySelector('#step-f-0')).toBeNull()
@@ -344,7 +351,7 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   writeFileSync(`${evidence}/d.docx`, data)
   writeFileSync(`${evidence}/d-document.xml`, xml)
   writeFileSync(`${evidence}/d-text.txt`, xml.replace(/<[^>]+>/g, ''))
-  await check(host.querySelector('[aria-label="情境模組選擇"] input[value="n"]')!, true)
+  await check(host.querySelector('[aria-label="情境選擇"] input[value="n"]')!, true)
   await field(row('F Mock'), 'Mock Y label', '99.25')
   expect(saved.fields?.some((field) => field.key === 'Z')).toBe(false)
   await field(row('F Mock'), 'Z', 'Mock Only N')
@@ -374,8 +381,8 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   expect(Object.keys(zip.files)).toHaveLength(4)
   expect(xmls.every((xml) => !xml.includes('{{') && !xml.includes('}}'))).toBe(true)
   await click('範本步驟')
-  await check(host.querySelector('[aria-label="情境模組選擇"] input[value="n"]')!, false)
-  await check(host.querySelector('[aria-label="情境模組選擇"] input[value="m"]')!, false)
+  await check(host.querySelector('[aria-label="情境選擇"] input[value="n"]')!, false)
+  await check(host.querySelector('[aria-label="情境選擇"] input[value="m"]')!, false)
   expect(host.textContent).not.toContain('Mock Y label')
   expect(host.querySelector('#step-d-0')).toBeNull()
   snapshot('workbench-deselected')
@@ -393,7 +400,7 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   await settle()
   await confirmedNavigation(router, '/categories/mock')
   await settle()
-  await check(host.querySelector('[aria-label="情境模組選擇"] input[value="m"]')!, true)
+  await check(host.querySelector('[aria-label="情境選擇"] input[value="m"]')!, true)
   expect((row('D Mock').querySelector('input[type="number"]') as HTMLInputElement).value).toBe('')
   expect(storageWrite).not.toHaveBeenCalled()
   expect(indexedDbOpen).not.toHaveBeenCalled()
@@ -469,6 +476,8 @@ it('reports manual keys with no output instead of silently ignoring their defini
   await submit()
   await submit()
   await submit()
+  await vi.waitFor(() => expect(host.textContent).toContain('已儲存'))
+  await confirmedNavigation(router, '/categories/empty')
   expect(host.querySelector('[role="alert"]')?.textContent).toContain('{{Orphan}}')
   expect(retained?.fields).toEqual([field])
   snapshot('workbench-retained-no-output')
@@ -570,7 +579,8 @@ it('saves a base field without templates, reopens it, and later consumes the exa
   await input(host.querySelector('[aria-label="欄位名稱"]')!, '身分證')
   snapshot('base-no-template-before-save')
   await submit()
-  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/standalone'))
+  await vi.waitFor(() => expect(host.textContent).toContain('已儲存'))
+  await confirmedNavigation(router, '/categories/standalone')
   expect(saved.fields).toEqual([
     { id: 'legacy', key: 'LegacyScenario', name: 'Legacy label', type: 'number' },
     expect.objectContaining({ key: '身分證', name: '身分證', scope: 'base' }),
@@ -596,11 +606,12 @@ it('saves a base field without templates, reopens it, and later consumes the exa
   await settle()
   await submit()
   await submit()
-  await click('編輯共用步驟')
+  await click('編輯這個步驟')
   await check(host.querySelector('input[value="late"]')!, true)
-  await click('儲存共用步驟')
+  await click('儲存這個步驟')
   await submit()
-  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/standalone'))
+  await vi.waitFor(() => expect(host.textContent).toContain('已儲存'))
+  await confirmedNavigation(router, '/categories/standalone')
   expect(saved.fields![1]).toEqual(savedField)
   snapshot('base-unmatched-template-save-success')
   // Later attach a second mock DOCX containing the exact tag through the normal step editor.
@@ -615,12 +626,13 @@ it('saves a base field without templates, reopens it, and later consumes the exa
   await settle()
   await submit()
   await submit()
-  await click('編輯共用步驟')
+  await click('編輯這個步驟')
   await check(host.querySelector('input[value="late"]')!, false)
   await check(host.querySelector('input[value="exact"]')!, true)
-  await click('儲存共用步驟')
+  await click('儲存這個步驟')
   await submit()
-  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories/standalone'))
+  await vi.waitFor(() => expect(host.textContent).toContain('已儲存'))
+  await confirmedNavigation(router, '/categories/standalone')
   await settle()
   await field(host.querySelector('.basic-data-row')!, '身分證', 'MOCK_SHARED_ID_26')
   expect(row('Mock base').querySelector('#step-base-0')).toBeNull()

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AppIcon from '@/components/AppIcon.vue'
 import SideNav from '@/components/SideNav.vue'
+import { categoryEditDenied } from '@/stores/categoryNotices'
 import { mainNav } from '@/navigation'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
@@ -98,6 +99,9 @@ onUnmounted(() => {
 
       <main class="app-main flex-1 px-4 py-6 md:px-page-x md:py-page-y">
         <div class="mx-auto max-w-[1280px]">
+          <p v-if="categoryEditDenied" class="mb-4 text-sm text-ink-muted" role="status">
+            你的帳號沒有編輯權限
+          </p>
           <RouterView v-slot="{ Component }">
             <component :is="Component" ref="currentPage" />
           </RouterView>

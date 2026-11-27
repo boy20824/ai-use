@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const nameField = '{{被害人姓名}}'
+const nameField = '{{姓名}}'
 const dateField = '{{日期}}'
 const dateSlashField = '{{日期_民國}}'
 const yearField = '{{年}}'
@@ -16,9 +16,9 @@ const photoTags = '{{照片}}、{{照片編號}}、{{攝影時間}}、{{攝影�
   <div
     class="rounded-2xl border border-edge bg-surface-muted px-4 py-4 text-sm leading-6 text-stone-700"
   >
-    <p class="font-medium text-ink">欄位寫法</p>
+    <p class="font-medium text-ink">Word 範本裡的欄位標記</p>
     <p class="mt-2">
-      在 Word 範本中用雙大括號標示要帶入的欄位，例如
+      寫法：
       <code class="rounded bg-surface px-1.5 py-0.5 text-ink ring-1 ring-stone-200">{{
         nameField
       }}</code>

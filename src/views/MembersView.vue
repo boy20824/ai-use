@@ -135,7 +135,7 @@ onMounted(() => {
   <PageIntro
     eyebrow="管理"
     title="會員管理"
-    description="系統管理員可以新增會員、啟用或停用帳號，並決定誰可以維護案件範本。停用後，該帳號的登入階段會立即失效。"
+    description="系統管理員可以新增會員、啟用或停用帳號，並開通或取消「可維護流程」權限。停用後，該帳號的登入階段會立即失效。"
   >
     <button type="button" class="btn-primary" @click="showForm = !showForm">新增會員</button>
   </PageIntro>
@@ -258,11 +258,13 @@ onMounted(() => {
                     patch(
                       member,
                       { canManageCategories: !member.canManageCategories },
-                      member.canManageCategories ? '已取消維護流程。' : '已開放維護流程。',
+                      member.canManageCategories
+                        ? '已取消「可維護流程」權限。'
+                        : '已開通「可維護流程」權限。',
                     )
                   "
                 >
-                  {{ member.canManageCategories ? '取消維護流程' : '可維護流程' }}
+                  {{ member.canManageCategories ? '取消「可維護流程」' : '開通「可維護流程」' }}
                 </button>
                 <button
                   v-if="member.role === 'sysadmin'"
