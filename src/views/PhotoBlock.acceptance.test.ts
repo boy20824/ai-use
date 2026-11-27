@@ -139,9 +139,7 @@ it('送達證書從步驟加入 PNG/JPEG，以每頁兩格產生文件並隱藏�
     uploadPhoto(panel, photos[index]!)
     await vi.waitFor(() => expect(panel.textContent).toContain(`${count} 張 → ${pages} 頁`))
     expect(panel.textContent).not.toMatch(/攝影時間|攝影地點|攝影人|覆寫共用值/)
-    expect(panel.querySelector('select, input:not([type="file"])')).toBeNull()
-    const note = `Mock 照片說明 ${count}`
-    await input(labeled(panel, `照片${count}說明`), note)
+    expect(panel.querySelector('select, input:not([type="file"]), textarea')).toBeNull()
     await vi.waitFor(() => expect(generate.disabled).toBe(false))
     generate.click()
     await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledTimes(count))
@@ -153,8 +151,8 @@ it('送達證書從步驟加入 PNG/JPEG，以每頁兩格產生文件並隱藏�
     expect(xml.match(/<w:drawing\b/g) ?? []).toHaveLength(count)
     expect(xml.match(/<w:pageBreakBefore\b/g) ?? []).toHaveLength(pages - 1)
     const plain = textOf(bytes)
-    expect(plain.split(`應受送達人：${recipient}`)).toHaveLength(pages + 1)
-    expect(plain).toContain(note)
+    expect(plain.split(`說明：檢附應受送達人(${recipient})之送達證書。`)).toHaveLength(pages + 1)
+    expect(plain.match(/備註：/g)).toHaveLength(1)
     expect(plain).not.toContain('{{')
     expect(xml).not.toContain('{{')
   }

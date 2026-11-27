@@ -14,6 +14,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -25,7 +26,7 @@ import { loadConfig, resolveServerPath } from './config.ts'
 import { createQueries, migrate, openDatabase } from './db.ts'
 import { readPhotoBlock } from './docxXml.ts'
 import { removeTemplateFile, templateFilePath, writeTemplateFile } from './files.ts'
-import { seedBuiltinTemplates, seedReferenceData } from './seed.ts'
+import { builtinDeliveryTemplateV1Sha256, seedBuiltinTemplates, seedReferenceData } from './seed.ts'
 import { createShutdown } from './shutdown.ts'
 
 // Configuration tests use only explicit mock env values, never local .env files.
@@ -38,6 +39,11 @@ const deliveryId = 'builtin-delivery-certificate-photos'
 const deliveryFileName = 'delivery-certificate-photos-template.docx'
 const sceneId = 'builtin-scene-photos'
 const sceneFileName = 'scene-photos-template.docx'
+const builtinV1Marker = 'builtin-photo-templates-v1'
+const deliveryV2Marker = 'builtin-delivery-template-text-v2'
+const deliveryV1 = readFileSync(
+  new URL('./testdata/builtin-delivery-certificate-photos-v1.docx', import.meta.url),
+)
 const deploymentDefaults = {
   corsOrigins: [],
   maxZipEntries: 8,
@@ -164,6 +170,12 @@ describe('deployment config', () => {
       migrate(db)
       const queries = createQueries(db)
       seedBuiltinTemplates(db, config.builtinTemplateDir, config.uploadDir)
+      expect(
+        db
+          .prepare('SELECT id FROM config_migrations WHERE id IN (?, ?) ORDER BY id')
+          .pluck()
+          .all(deliveryV2Marker, builtinV1Marker),
+      ).toEqual([deliveryV2Marker, builtinV1Marker])
       expect(queries.countUsers()).toBe(0)
       expect(queries.listCategories()).toEqual([])
       queries.insertUser({
@@ -316,6 +328,133 @@ describe('deployment config', () => {
     } finally {
       db.close()
     }
+  })
+
+  describe('delivery template text migration', () => {
+    const addedAt = '2026-01-01 00:00'
+
+    function setup() {
+      const db = openDatabase(':memory:')
+      migrate(db)
+      db.exec('CREATE TABLE IF NOT EXISTS config_migrations (id TEXT PRIMARY KEY)')
+      db.prepare('INSERT INTO config_migrations (id) VALUES (?)').run(builtinV1Marker)
+      const uploadDir = mkdtempSync(path.join(scratch, 'delivery-v2-'))
+      const queries = createQueries(db)
+      const markerExists = () =>
+        Boolean(db.prepare('SELECT 1 FROM config_migrations WHERE id = ?').get(deliveryV2Marker))
+      function insertTemplate(id: string, data: Buffer, origin: 'sample' | 'upload' = 'sample') {
+        queries.insertTemplate({
+          id,
+          fileName: deliveryFileName,
+          kind: 'docx',
+          mimeType: docxMimeType,
+          sizeBytes: data.byteLength,
+          addedAt,
+          placeholders: ['Mock legacy metadata'],
+          origin,
+          usages: [],
+          data,
+        })
+        writeTemplateFile(uploadDir, id, data)
+      }
+      return { db, uploadDir, queries, markerExists, insertTemplate }
+    }
+
+    it('replaces the old built-in in SQLite and on disk, preserving its identity and metadata', () => {
+      expect(createHash('sha256').update(deliveryV1).digest('hex')).toBe(
+        builtinDeliveryTemplateV1Sha256,
+      )
+      const { db, uploadDir, queries, markerExists, insertTemplate } = setup()
+      try {
+        insertTemplate(deliveryId, deliveryV1)
+        const before = queries.getTemplateFile(deliveryId)
+        const current = readFileSync(path.join(builtinDir, deliveryFileName))
+        expect(current).not.toEqual(deliveryV1)
+
+        seedBuiltinTemplates(db, builtinDir, uploadDir)
+
+        expect(queries.getTemplateFile(deliveryId)).toEqual({
+          ...before,
+          data: current,
+          sizeBytes: current.byteLength,
+          placeholders: ['應受送達人'],
+        })
+        expect(readFileSync(templateFilePath(uploadDir, deliveryId))).toEqual(current)
+        expect(markerExists()).toBe(true)
+
+        // Even eligible bytes must be skipped after the migration has run once.
+        db.prepare('UPDATE templates SET data = ? WHERE id = ?').run(deliveryV1, deliveryId)
+        const restored = queries.getTemplateFile(deliveryId)
+        seedBuiltinTemplates(db, builtinDir, uploadDir)
+        expect(queries.getTemplateFile(deliveryId)).toEqual(restored)
+        expect(readFileSync(templateFilePath(uploadDir, deliveryId))).toEqual(current)
+      } finally {
+        db.close()
+      }
+    })
+
+    it.each([
+      [deliveryId, Buffer.from(buildMinimalDocx('{{Mock}}'))],
+      ['mock-upload', deliveryV1],
+    ])('preserves the upload with id %s and records v2', (id, data) => {
+      const { db, uploadDir, queries, markerExists, insertTemplate } = setup()
+      try {
+        insertTemplate(id, data, 'upload')
+        const before = queries.getTemplateFile(id)
+
+        seedBuiltinTemplates(db, builtinDir, uploadDir)
+
+        expect(queries.listTemplates().map((record) => record.id)).toEqual([id])
+        expect(queries.getTemplateFile(id)).toEqual(before)
+        expect(readFileSync(templateFilePath(uploadDir, id))).toEqual(data)
+        expect(readdirSync(uploadDir)).toEqual([`${id}.docx`])
+        expect(markerExists()).toBe(true)
+      } finally {
+        db.close()
+      }
+    })
+
+    it('records v2 without recreating a delivery template deleted after v1', () => {
+      const { db, uploadDir, queries, markerExists, insertTemplate } = setup()
+      try {
+        insertTemplate(deliveryId, deliveryV1)
+        queries.deleteTemplate(deliveryId)
+        removeTemplateFile(uploadDir, deliveryId)
+
+        seedBuiltinTemplates(db, builtinDir, uploadDir)
+
+        expect(queries.listTemplates()).toEqual([])
+        expect(readdirSync(uploadDir)).toEqual([])
+        expect(markerExists()).toBe(true)
+      } finally {
+        db.close()
+      }
+    })
+
+    it('restores the original file and row if recording v2 fails, then retries', () => {
+      const { db, uploadDir, queries, markerExists, insertTemplate } = setup()
+      try {
+        insertTemplate(deliveryId, deliveryV1)
+        const before = queries.getTemplateFile(deliveryId)
+        const target = templateFilePath(uploadDir, deliveryId)
+        db.exec(`CREATE TRIGGER fail_delivery_migration BEFORE INSERT ON config_migrations
+          WHEN NEW.id = '${deliveryV2Marker}'
+          BEGIN SELECT RAISE(ABORT, 'Mock v2 failure'); END`)
+
+        expect(() => seedBuiltinTemplates(db, builtinDir, uploadDir)).toThrow('Mock v2 failure')
+        expect(markerExists()).toBe(false)
+        expect(queries.getTemplateFile(deliveryId)).toEqual(before)
+        expect(readFileSync(target)).toEqual(deliveryV1)
+        expect(readdirSync(uploadDir)).toEqual([`${deliveryId}.docx`])
+
+        db.exec('DROP TRIGGER fail_delivery_migration')
+        seedBuiltinTemplates(db, builtinDir, uploadDir)
+        expect(readFileSync(target)).toEqual(readFileSync(path.join(builtinDir, deliveryFileName)))
+        expect(markerExists()).toBe(true)
+      } finally {
+        db.close()
+      }
+    })
   })
 
   it('refuses a missing, short, or demo session secret in production', () => {
