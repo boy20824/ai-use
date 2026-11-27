@@ -62,11 +62,21 @@ const photoTags = '{{照片}}、{{照片編號}}、{{攝影時間}}、{{攝影�
       照片編號自帶全形括號，請寫「編號」接照片編號標記。一般標記可照常放在表頭。
       最後一頁不足的格保留標題與框線；未選照片時整段照片頁移除。照片只在產文件的畫面暫存，不送出也不保存。
     </p>
-    <a
-      class="mt-2 inline-block text-accent-ink underline"
-      href="/templates/scene-photos-template.docx"
-      download
-      >下載 Mock 照片區塊範本（每頁 2 格）</a
-    >
+    <ul class="mt-2 space-y-1">
+      <li>
+        <a class="text-accent-ink underline" href="/templates/scene-photos-template.docx" download>
+          下載 Mock 照片區塊範本（每頁 2 格）
+        </a>
+      </li>
+      <li>
+        <a
+          class="text-accent-ink underline"
+          href="/templates/delivery-certificate-photos-template.docx"
+          download
+        >
+          下載 Mock 送達證書黏貼單（每頁 2 格）
+        </a>
+      </li>
+    </ul>
   </div>
 </template>

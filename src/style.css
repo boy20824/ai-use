@@ -1160,9 +1160,6 @@
   font-size: 14px;
   font-weight: 500;
 }
-.template-usages > span:last-child {
-  display: none;
-}
 .download-template {
   padding: 6px;
   color: var(--color-accent);
@@ -1643,6 +1640,11 @@ label:has(> input[type='file']:focus-visible) {
   min-height: 44px;
   display: flex;
   align-items: center;
+}
+.template-usages summary {
+  min-height: 44px;
+  padding-block: 12px;
+  cursor: pointer;
 }
 
 .step-content:not(:has(> .grid)) > .step-documents {

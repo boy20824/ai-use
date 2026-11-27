@@ -21,6 +21,7 @@ vi.mock('vue', async (importOriginal) => {
 
 const mocks = vi.hoisted(() => ({
   pdf: false,
+  additionalCategoryCount: 0,
   previewPdf: vi.fn(async () => {}),
   canUpload: false,
   canDelete: false,
@@ -31,16 +32,19 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/services/pdfPreview', () => ({ previewPdf: mocks.previewPdf }))
 vi.mock('@/utils/download', () => ({ downloadBytes: mocks.downloadBytes }))
 vi.mock('@/stores/session', () => ({ useSessionStore: () => mocks }))
-vi.mock('@/stores/categories', () => ({
-  useCategoryStore: () => ({
-    reload: vi.fn(async () => {}),
-    items: [
-      { id: 'criminal', name: '刑事類別', group: 'criminal' },
-      { id: 'admin', name: '行政類別', group: 'admin' },
-    ],
-    byId: (id: string) => ({ id, name: id, group: id }),
-  }),
-}))
+vi.mock('@/stores/categories', () => {
+  const items = [
+    { id: 'criminal', name: '刑事類別', group: 'criminal' },
+    { id: 'admin', name: '行政類別', group: 'admin' },
+  ]
+  return {
+    useCategoryStore: () => ({
+      reload: vi.fn(async () => {}),
+      items,
+      byId: (id: string) => items.find((item) => item.id === id),
+    }),
+  }
+})
 vi.mock('@/stores/templates', () => ({
   useTemplateStore: () => ({
     ready: true,
@@ -53,7 +57,17 @@ vi.mock('@/stores/templates', () => ({
         fileName: '刑事文件.docx',
         placeholders: ['姓名'],
         usages: [
-          { categoryId: 'criminal', categoryName: '刑事類別', stepId: 's1', stepBody: '受理' },
+          { categoryId: 'criminal', categoryName: '舊刑事類別', stepId: 's1', stepBody: '受理' },
+          ...[
+            { categoryId: 'admin', categoryName: '行政類別', stepId: 's2', stepBody: '登錄' },
+            { categoryId: 'civil', categoryName: '民事類別', stepId: 's3', stepBody: '送達' },
+          ].slice(0, mocks.additionalCategoryCount),
+          {
+            categoryId: 'criminal',
+            categoryName: '舊刑事類別',
+            stepId: 's4',
+            stepBody: '  複核\n  12345678901234567890123456  ',
+          },
         ],
       },
       {
@@ -80,7 +94,10 @@ async function mount() {
   document.body.append(host)
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/templates', component: TemplatesView }],
+    routes: [
+      { path: '/templates', component: TemplatesView },
+      { path: '/categories/:id', component: { render: () => null } },
+    ],
   })
   await router.push('/templates')
   await router.isReady()
@@ -93,11 +110,64 @@ afterEach(() => {
   app?.unmount()
   host?.remove()
   mocks.pdf = false
+  mocks.additionalCategoryCount = 0
   mocks.canUpload = false
   mocks.canDelete = false
   vi.clearAllMocks()
 })
 const rows = () => host.querySelectorAll('tbody tr')
+const usageCell = (row: number) => rows()[row]!.querySelector('.template-usages')!
+
+it('shows 尚未使用 for an unused template and lists a single category directly', async () => {
+  await mount()
+  expect(usageCell(2).textContent?.trim()).toBe('尚未使用')
+  const cell = usageCell(0)
+  expect(cell.querySelector('details')).toBeNull()
+  expect(cell.querySelectorAll('a')).toHaveLength(1)
+  expect(cell.querySelector('a')?.getAttribute('href')).toBe('/categories/criminal')
+  expect(cell.querySelector('a')?.textContent?.trim()).toBe('刑事類別')
+})
+
+it('lists two categories directly and groups shortened steps under their own category', async () => {
+  mocks.additionalCategoryCount = 1
+  await mount()
+  const cell = usageCell(0)
+  expect(cell.querySelector('details')).toBeNull()
+  const groups = [...cell.querySelectorAll('li')]
+  expect(
+    groups.map((group) => [
+      group.querySelector('a')?.getAttribute('href'),
+      group.querySelector('a')?.textContent?.trim(),
+      group.querySelector('p')?.textContent?.trim(),
+    ]),
+  ).toEqual([
+    ['/categories/criminal', '刑事類別', '受理、複核 123456789012345678901…'],
+    ['/categories/admin', '行政類別', '登錄'],
+  ])
+})
+
+it('starts with a collapsed summary that counts distinct categories and contains every group', async () => {
+  mocks.additionalCategoryCount = 2
+  await mount()
+  const cell = usageCell(0)
+  const details = cell.querySelector('details')!
+  const summary = details.querySelector('summary')!
+  expect(details.open).toBe(false)
+  expect(details.firstElementChild).toBe(summary)
+  expect(summary.textContent?.trim()).toBe('3 個案件')
+  expect(
+    [...details.querySelectorAll('a')].map((link) => [
+      link.getAttribute('href'),
+      link.textContent?.trim(),
+    ]),
+  ).toEqual([
+    ['/categories/criminal', '刑事類別'],
+    ['/categories/admin', '行政類別'],
+    ['/categories/civil', '民事類別'],
+  ])
+  expect(details.querySelector('li:last-child p')?.textContent?.trim()).toBe('送達')
+  expect(cell.querySelectorAll('[id]')).toHaveLength(0)
+})
 
 it('hides the tab slider from accessibility and announces the current result count', async () => {
   await mount()
@@ -138,9 +208,11 @@ it('combines real filename/field search, group tabs, and the existing route filt
   await nextTick()
   expect(rows()).toHaveLength(1)
   expect(rows()[0]?.textContent).toContain('刑事文件.docx')
-  await router.replace('/templates?category=admin')
-  await nextTick()
-  expect(rows()).toHaveLength(0)
+  const category = host.querySelector<HTMLSelectElement>('#template-category')!
+  category.value = 'admin'
+  category.dispatchEvent(new Event('change', { bubbles: true }))
+  await vi.waitFor(() => expect(rows()).toHaveLength(0))
+  expect(router.currentRoute.value.query.category).toBe('admin')
   expect(host.textContent).toContain('沒有符合的範本')
   const clear = [...host.querySelectorAll('button')].find(
     (el) => el.textContent?.trim() === '看全部範本',

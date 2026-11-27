@@ -331,7 +331,7 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
     await nextTick()
   }
   const parallelD = host.querySelector('.parallel-work-item')!
-  const details = parallelD.querySelector('details')!
+  const details = parallelD.querySelector<HTMLDetailsElement>(':scope > details')!
   details.open = true
   await field(parallelD, 'Mock Y label', '24.5')
   expect((row('D Mock').querySelector('input[type="number"]') as HTMLInputElement).value).toBe(

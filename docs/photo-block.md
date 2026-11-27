@@ -63,3 +63,13 @@ node --experimental-strip-types scripts/photo-block-evidence.ts /workspace/ai-us
 ```
 
 腳本預設目錄是 `/workspace/evidence/photo-block`，每份 DOCX 都會執行既有 ZIP／XML 安全驗證。本次受環境唯讀掛載限制，實際證據位於 repo 未追蹤的 `evidence/photo-block/`，不提交。瀏覽器啟動／監聽連接埠遭環境 EPERM 拒絕，LibreOffice 轉檔也未完成；因此只有 OOXML 結構、Vue DOM 整合與真實 server 上傳驗證，沒有實際 Word／PDF 頁數或瀏覽器截圖宣稱。
+
+## Mock 送達證書黏貼單
+
+[下載 Mock 範本](../public/templates/delivery-certificate-photos-template.docx)。範本使用 A4 直式，每頁先放標題段落，再放單欄表格。表頭與一般欄位 `{{應受送達人}}` 隨頁重複。兩個照片格各占一列，依序放編號、置中照片與說明。範本內容與驗證照片均為 Mock 資料。
+
+在專案根目錄執行以下指令重建範本。
+
+```sh
+node --experimental-strip-types scripts/build-delivery-photo-template.ts
+```
