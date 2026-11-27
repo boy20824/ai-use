@@ -5,7 +5,13 @@ import bcrypt from 'bcryptjs'
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { assertSafeZip, listPlaceholders, normalizeDocx, normalizeWordXml } from './docxXml.ts'
+import {
+  assertSafeZip,
+  listPlaceholders,
+  normalizeDocx,
+  normalizeWordXml,
+  splitFormatNotice,
+} from './docxXml.ts'
 import { createQueries, migrate, openDatabase } from './db.ts'
 import { buildApp } from './app.ts'
 import type { AppConfig } from './config.ts'
@@ -15,6 +21,21 @@ const limits = { maxEntries: 64, maxUncompressedBytes: 1024 * 1024 }
 const mainType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'
 const contentNS = 'http://schemas.openxmlformats.org/package/2006/content-types'
 const relNS = 'http://schemas.openxmlformats.org/package/2006/relationships'
+const officeRelNS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+const wordNS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+const settingsPath = 'word/settings.xml'
+const settingsRelsPath = 'word/_rels/settings.xml.rels'
+const mockTemplateTarget = 'file:///mock/attached.dotx'
+const attachedTemplate = `<Relationship Id="rId1" Type="${officeRelNS}/attachedTemplate" Target="${mockTemplateTarget}" TargetMode="External"/>`
+
+function relationships(inner: string) {
+  return `<Relationships xmlns="${relNS}">${inner}</Relationships>`
+}
+
+function settings(inner: string) {
+  return `<w:settings xmlns:w="${wordNS}" xmlns:r="${officeRelNS}">${inner}</w:settings>`
+}
+
 function zip(extra: Record<string, string> = {}, type = mainType) {
   const z = new PizZip()
   z.file(
@@ -87,6 +108,70 @@ function reorderLocals(data: Buffer, gap: number, descriptor: 'none' | 'signed' 
 }
 
 describe('bounded ZIP and passive DOCX', () => {
+  it('keeps relationship IDs scoped to their source parts and preserves internal templates', () => {
+    const internal = attachedTemplate
+      .replace(mockTemplateTarget, 'mock.dotx')
+      .replace('TargetMode="External"', 'TargetMode="Internal"')
+    const settingsXml = settings('<w:attachedTemplate r:id="rId1"/>')
+    const data = zip({
+      [settingsPath]: settingsXml,
+      [settingsRelsPath]: relationships(internal),
+      'word/_rels/document.xml.rels': relationships(attachedTemplate),
+    })
+    expect(() => normalizeDocx(data, limits)).toThrow('external-relationship')
+    expect(() => listPlaceholders(data, limits)).toThrow('external-relationship')
+    const normalized = normalizeDocx(data, limits, { stripAttachedTemplate: true })
+    const output = new PizZip(normalized.data)
+    expect(output.file(settingsPath)!.asText()).toBe(settingsXml)
+    expect(output.file(settingsRelsPath)!.asText()).toBe(relationships(internal))
+    expect(output.file('word/_rels/document.xml.rels')!.asText()).toBe(
+      `<Relationships xmlns="${relNS}"/>`,
+    )
+    expect(listPlaceholders(normalized.data, limits)).toEqual(['name'])
+  })
+
+  it.each([
+    {
+      name: 'an internal relationship with a file URI',
+      rels: attachedTemplate.replace('TargetMode="External"', 'TargetMode="Internal"'),
+      error: 'external-relationship',
+    },
+    {
+      name: 'an unknown target mode',
+      rels: attachedTemplate.replace('TargetMode="External"', 'TargetMode="Other"'),
+      error: 'external-relationship',
+    },
+    {
+      name: 'another relationship sharing the ID',
+      rels: attachedTemplate + '<Relationship Id="rId1" Target="local.xml"/>',
+      error: 'external-relationship',
+    },
+    {
+      name: 'another settings element using the same ID',
+      refs: '<w:attachedTemplate r:id="rId1"/><w:saveThroughXslt r:id="rId1"/>',
+      error: 'external-relationship',
+    },
+    {
+      name: 'active content inside the matching settings element',
+      refs: '<w:attachedTemplate r:id="rId1"><w:object/></w:attachedTemplate>',
+      error: 'active-content',
+    },
+    {
+      name: 'a shadowed TargetMode attribute',
+      rels: attachedTemplate.replace(
+        'TargetMode="External"',
+        'xmlns:x="urn:shadow" TargetMode="External" x:TargetMode="Internal"',
+      ),
+      error: 'ambiguous-xml-attribute',
+    },
+  ])('rejects $name during upload normalization', ({ rels, refs, error }) => {
+    const data = zip({
+      [settingsPath]: settings(refs ?? '<w:attachedTemplate r:id="rId1"/>'),
+      [settingsRelsPath]: relationships(rels ?? attachedTemplate),
+    })
+    expect(() => normalizeDocx(data, limits, { stripAttachedTemplate: true })).toThrow(error)
+  })
+
   it.each(['none', 'signed', 'unsigned'] as const)(
     'reads reordered local records with gaps and %s data descriptors',
     (descriptor) => {
@@ -383,6 +468,62 @@ async function boot(overrides: Partial<AppConfig> = {}) {
   }
   return { db, app, queries, auth, dir, config }
 }
+
+it('stores the cleaned Word upload and rejects other external relationships', async () => {
+  const { app, auth, dir } = await boot()
+  const admin = await auth()
+  const upload = (data: Buffer) =>
+    app.inject({
+      url: '/api/templates',
+      method: 'POST',
+      cookies: admin.cookies,
+      headers: { ...admin.headers, 'content-type': 'multipart/form-data; boundary=docx-test' },
+      payload: Buffer.concat([
+        Buffer.from(
+          '--docx-test\r\nContent-Disposition: form-data; name="file"; filename="mock.docx"\r\nContent-Type: application/zip\r\n\r\n',
+        ),
+        data,
+        Buffer.from('\r\n--docx-test--\r\n'),
+      ]),
+    })
+  const uploaded = await upload(
+    zip({
+      [settingsPath]: settings('<w:attachedTemplate r:id="rId1"/><w:zoom w:percent="100"/>'),
+      [settingsRelsPath]: relationships(attachedTemplate),
+    }),
+  )
+  expect(uploaded.statusCode, uploaded.body).toBe(201)
+  const { template, formatNotices } = uploaded.json()
+  expect(template.placeholders).toEqual(['name'])
+  expect(formatNotices).toEqual(['已移除附加範本連結'])
+  expect(splitFormatNotice(formatNotices)).toBe('已移除附加範本連結。')
+  const stored = await app.inject({
+    url: `/api/templates/${template.id}/file`,
+    cookies: admin.cookies,
+  })
+  expect(stored.statusCode).toBe(200)
+  assertSafeZip(stored.rawPayload, limits)
+  expect(listPlaceholders(stored.rawPayload, limits)).toEqual(['name'])
+  const saved = new PizZip(stored.rawPayload)
+  expect(saved.file(settingsRelsPath)!.asText()).toBe(`<Relationships xmlns="${relNS}"/>`)
+  expect(saved.file(settingsPath)!.asText()).toBe(settings('<w:zoom w:percent="100"/>'))
+
+  for (const type of ['hyperlink', 'image', 'oleObject', 'frame']) {
+    const external = `<Relationship Id="rId2" Type="${officeRelNS}/${type}" Target="https://invalid.example/mock" TargetMode="External"/>`
+    const rejected = await upload(
+      zip({ [settingsRelsPath]: relationships(attachedTemplate + external) }),
+    )
+    expect(rejected.statusCode, type).toBe(400)
+    expect(rejected.json()).toEqual({
+      error: 'bad-upload',
+      message:
+        type === 'oleObject'
+          ? '無法讀取這份 Word 範本。'
+          : '文件含外部連結，請在 Word 另存新檔後再傳（或移除超連結、外部圖片、連結的物件）。',
+    })
+  }
+  expect(readdirSync(dir)).toHaveLength(1)
+})
 
 it('locks inactive accounts across ASCII casing, revokes sessions, and clears failures on active login', async () => {
   const { db, queries, app } = await boot()

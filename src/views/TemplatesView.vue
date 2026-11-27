@@ -117,12 +117,38 @@ async function previewTemplate(item: TemplateSummary) {
   }
 }
 
+function shortenStepBody(body: string) {
+  const step = body.replace(/\s+/g, ' ').trim()
+  return step.length > 24 ? `${step.slice(0, 24)}…` : step
+}
+
+function groupedUsages(item: TemplateSummary) {
+  const groups = new Map<string, { categoryId: string; name: string; steps: string[] }>()
+  for (const usage of item.usages) {
+    let category = groups.get(usage.categoryId)
+    if (!category) {
+      category = {
+        categoryId: usage.categoryId,
+        name: categories.byId(usage.categoryId)?.name ?? usage.categoryName,
+        steps: [],
+      }
+      groups.set(usage.categoryId, category)
+    }
+    const step = shortenStepBody(usage.stepBody)
+    if (step) category.steps.push(step)
+  }
+  return [...groups.values()]
+}
+
+const usageGroupsByTemplate = computed(() =>
+  Object.fromEntries(visible.value.map((item) => [item.id, groupedUsages(item)])),
+)
+
 function usageLinks(item: TemplateSummary) {
   return item.usages
     .map((usage) => {
       const categoryName = categories.byId(usage.categoryId)?.name ?? usage.categoryName
-      const step = usage.stepBody.replace(/\s+/g, ' ').trim()
-      const short = step.length > 24 ? `${step.slice(0, 24)}…` : step
+      const short = shortenStepBody(usage.stepBody)
       return {
         id: `${usage.categoryId}-${usage.stepId}`,
         categoryId: usage.categoryId,
@@ -362,25 +388,36 @@ async function onFiles(files: File[]) {
               </template>
               <span v-else>沒有偵測到欄位</span>
             </td>
-            <td class="template-usages max-w-64 px-4 py-4 text-xs leading-5">
-              <span v-if="usageLinks(item).length === 0" class="text-ink-muted"
-                >尚未被任何步驟使用</span
-              >
-              <template v-else>
-                <RouterLink
-                  v-for="link in usageLinks(item)"
-                  :key="link.id"
-                  :to="`/categories/${link.categoryId}`"
-                  class="focus-control mb-1 block text-accent-ink hover:underline"
-                >
-                  {{ link.label }}
-                </RouterLink>
-              </template>
-              <span
-                class="mt-2 inline-flex rounded-pill bg-tone-neutral px-2 py-0.5 text-xs text-tone-neutral-ink"
-              >
-                關聯 {{ new Set(item.usages.map((u) => u.categoryId)).size }} 個案件範本
+            <td
+              class="template-usages max-w-64 px-4 py-4 text-xs leading-5 [overflow-wrap:anywhere]"
+            >
+              <span v-if="usageGroupsByTemplate[item.id].length === 0" class="text-ink-muted">
+                尚未使用
               </span>
+              <component
+                v-else
+                :is="usageGroupsByTemplate[item.id].length >= 3 ? 'details' : 'div'"
+              >
+                <summary
+                  v-if="usageGroupsByTemplate[item.id].length >= 3"
+                  class="focus-control text-accent-ink hover:underline"
+                >
+                  {{ usageGroupsByTemplate[item.id].length }} 個案件
+                </summary>
+                <ul class="space-y-1" role="list">
+                  <li v-for="category in usageGroupsByTemplate[item.id]" :key="category.categoryId">
+                    <RouterLink
+                      :to="`/categories/${category.categoryId}`"
+                      class="focus-control font-semibold text-accent-ink hover:underline"
+                    >
+                      {{ category.name }}
+                    </RouterLink>
+                    <p v-if="category.steps.length" class="text-ink-muted">
+                      {{ category.steps.join('、') }}
+                    </p>
+                  </li>
+                </ul>
+              </component>
             </td>
             <td
               class="template-date whitespace-nowrap px-4 py-4 text-xs text-ink-muted tabular-nums"

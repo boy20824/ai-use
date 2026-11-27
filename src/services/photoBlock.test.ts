@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import PizZip from 'pizzip'
 import { describe, expect, it } from 'vitest'
+import { buildDeliveryPhotoTemplate } from '../../shared/deliveryPhotoTemplateFixture'
 import { buildPhotoTemplate } from '../../shared/photoTemplateFixture'
 import { buildDocx, paragraph, run, wordDocument, wordHeader } from '../../shared/docxFixture'
 import { mockPhotoDraft, mockPhotoFields } from '../../shared/photoMock'
@@ -273,5 +274,109 @@ describe('動態照片區塊', () => {
     })
     expect(() => listPlaceholders(header)).toThrow('頁首或頁尾')
     expect(parsePhotoBlock(wordDocument('<w:p/>'))).toBeNull()
+  })
+})
+
+describe('Mock 送達證書黏貼單', () => {
+  const delivery = new Uint8Array(
+    readFileSync(
+      new URL('../../public/templates/delivery-certificate-photos-template.docx', import.meta.url),
+    ),
+  )
+  const title = 'Mock 送達證書黏貼單'
+
+  it('可逐位元組重建、只含內部關聯，且只列出應受送達人', () => {
+    const rebuilt = buildDeliveryPhotoTemplate()
+    expect(Buffer.compare(delivery, rebuilt)).toBe(0)
+    const parts = readSafeZip(delivery, docxZipLimits)
+    for (const [name, content] of parts) {
+      if (name.endsWith('.rels')) {
+        expect(new TextDecoder().decode(content)).not.toMatch(/TargetMode\s*=\s*["']External/i)
+      }
+    }
+    expect(listPlaceholders(delivery)).toEqual(['應受送達人'])
+  })
+
+  it('A4 直式單欄表格以標題段落起始，兩個照片格各占一列', () => {
+    const xml = xmlOf(delivery)
+    const block = parsePhotoBlock(xml)!
+    expect(readPhotoBlock(delivery)?.photoCellsPerPage).toBe(2)
+    expect(xml).toContain('<w:pgSz w:w="11906" w:h="16838" w:orient="portrait"/>')
+    expect(xml).toContain('<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1418"')
+    expect(xml).toContain('<w:tblW w:w="9490" w:type="dxa"/>')
+    expect(xml.match(/<w:gridCol w:w="9490"\/>/g)).toHaveLength(1)
+    expect(xml).toContain('<w:tblLayout w:type="fixed"/>')
+    expect(xml.match(/<w:tbl>/g)).toHaveLength(1)
+    expect(xml).toContain('<w:trHeight w:val="770" w:hRule="exact"/>')
+    expect(xml).toContain('<w:trHeight w:val="513"')
+    const heading = xml.slice(block.contentStart, xml.indexOf('<w:tbl>'))
+    expect(text(heading)).toBe(title)
+    expect(heading).toContain('<w:outlineLvl w:val="0"/>')
+    expect(block.cells.map(({ width, height }) => [width, height])).toEqual(
+      [6627, 6175].map((rowHeight) => [(9490 - 56) * 635, (rowHeight - 800) * 635]),
+    )
+    for (const cell of block.cells) {
+      const row = xml.slice(cell.start, cell.end)
+      expect(row.match(/<w:tr>/g)).toHaveLength(1)
+      expect(row).toContain('<w:tcW w:w="9490" w:type="dxa"/>')
+      expect(row).toContain('<w:vAlign w:val="center"/>')
+      expect([...row.matchAll(/<w:p>[\s\S]*?<\/w:p>/g)].map((match) => text(match[0]))).toEqual([
+        '{{#照片格}}編號{{照片編號}}',
+        '{{照片}}',
+        '{{照片說明}}{{/照片格}}',
+      ])
+      expect(xml.slice(cell.imageStart, cell.imageEnd)).toContain('<w:jc w:val="center"/>')
+    }
+  })
+
+  it.each([
+    [0, 0],
+    [1, 1],
+    [2, 1],
+    [3, 2],
+    [5, 3],
+  ])('%i 張 → %i 頁，保留表頭、跳脫值並通過 ZIP 檢查', (count, pages) => {
+    const draft = mockPhotoDraft(count)
+    if (count >= 2) {
+      // 12 × 24 JPEG with two solid color bands.
+      draft.photos[1] = {
+        ...draft.photos[1]!,
+        mime: 'image/jpeg',
+        width: 12,
+        height: 24,
+        bytes: Buffer.from(
+          '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAYAAwDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAQG/8QAGBABAAMBAAAAAAAAAAAAAAAAABVjouH/xAAWAQEBAQAAAAAAAAAAAAAAAAAFAgP/xAAXEQEAAwAAAAAAAAAAAAAAAAAAAhES/9oADAMBAAIRAxEAPwDGC2Ptz0j7c9NWExJaAlu//9k=',
+          'base64',
+        ),
+      }
+    }
+    const recipient = 'Mock <收件人> & 測試'
+    const output = renderPhotoDocx(delivery, { 應受送達人: recipient }, draft)
+    const parts = readSafeZip(output, docxZipLimits)
+    const xml = xmlOf(output)
+    const tables = [...xml.matchAll(/<w:tbl>[\s\S]*?<\/w:tbl>/g)].map((match) => match[0])
+    expect(tables).toHaveLength(pages)
+    expect(xml.match(/<w:pageBreakBefore\/>/g) ?? []).toHaveLength(Math.max(0, pages - 1))
+    expect(xml.match(/<wp:inline\b/g) ?? []).toHaveLength(count)
+    expect(xml).not.toMatch(/\{\{[#/]照片[頁格]\}\}|\{\{應受送達人\}\}/)
+    expect([...parts.keys()].filter((name) => name.startsWith('word/media/'))).toHaveLength(count)
+    for (const table of tables) {
+      expect(text(table)).toContain(title + '應受送達人：' + recipient)
+      expect(table).toContain('Mock &lt;收件人&gt; &amp; 測試')
+      expect(table.match(/<w:tr>/g)).toHaveLength(4)
+    }
+    for (const photo of draft.photos) expect(text(xml)).toContain(photo.description)
+    if (count >= 1) {
+      expect(parts.has('word/media/photo-1.png')).toBe(true)
+      expect(xml).toContain('&lt;script&gt;alert(1)&lt;/script&gt; &amp; &lt;b&gt;')
+    }
+    if (count >= 2) expect(parts.has('word/media/photo-2.jpeg')).toBe(true)
+    if (count % 2) {
+      const lastRow = [...tables.at(-1)!.matchAll(/<w:tr>[\s\S]*?<\/w:tr>/g)].at(-1)![0]
+      expect(text(lastRow)).toBe('編號')
+      expect(lastRow).toContain('<w:trHeight w:val="6175"')
+      expect(lastRow).not.toMatch(/<wp:inline|\{\{/)
+    }
+    if (count === 0) expect(text(xml)).toBe('')
   })
 })

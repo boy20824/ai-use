@@ -60,3 +60,35 @@ it('explains missing fields beside each disabled generate action and lets users 
     app.unmount()
   }
 })
+
+it('shows placeholder counts and keeps field names collapsed by default', () => {
+  const host = document.createElement('div')
+  const app = createApp({
+    render: () =>
+      h(WorkbenchStepFields, {
+        fields: [],
+        values: {},
+        prefix: 'mock',
+        missing: [],
+        templates: [
+          { id: 'with-fields', fileName: 'With fields.docx', placeholders: ['姓名', '案號'] },
+          { id: 'no-fields', fileName: 'No fields.docx', placeholders: [] },
+        ],
+        busy: false,
+        message: '',
+        messageTone: 'ok',
+      }),
+  })
+  app.mount(host)
+  try {
+    const details = [...host.querySelectorAll('details')]
+    expect(details.map((item) => item.querySelector('summary')?.textContent?.trim())).toEqual([
+      '2 個欄位',
+      '沒有偵測到欄位',
+    ])
+    expect(details.map((item) => item.open)).toEqual([false, false])
+    expect(details[0]?.textContent).toContain('姓名、案號')
+  } finally {
+    app.unmount()
+  }
+})

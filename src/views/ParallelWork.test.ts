@@ -98,6 +98,9 @@ async function mount() {
 function region() {
   return host.querySelector<HTMLElement>('#parallel-work')!
 }
+function entrySummaries() {
+  return [...region().querySelectorAll('.parallel-work-item > details > summary')]
+}
 function main(id: string) {
   return [...host.querySelectorAll<HTMLElement>('.fixed-step')].find(
     (row) => row.querySelector('h3')?.textContent?.trim() === id,
@@ -105,7 +108,7 @@ function main(id: string) {
 }
 function item(id: string) {
   return [...region().querySelectorAll<HTMLElement>('.parallel-work-item')].find(
-    (row) => row.querySelector('summary')?.textContent?.trim() === id,
+    (row) => row.querySelector(':scope > details > summary')?.textContent?.trim() === id,
   )!
 }
 async function check(element: HTMLInputElement, checked: boolean) {
@@ -130,16 +133,13 @@ it('shows empty state, selected-only stable deduped list and visible main hints 
   expect(region().textContent).toContain('此情境組合沒有可同步作業')
   expect(host.querySelector('.parallel-entry')?.textContent).toContain('可同步作業，共 0 項')
   await select('alcohol')
-  expect(region().querySelectorAll('summary')).toHaveLength(1)
+  expect(entrySummaries()).toHaveLength(1)
   expect(item('D')).toBeDefined()
   await select('arrest')
   expect([...host.querySelectorAll('.fixed-step h3')].map((el) => el.textContent?.trim())).toEqual([
     ...'ADBCJ',
   ])
-  expect([...region().querySelectorAll('summary')].map((el) => el.textContent?.trim())).toEqual([
-    'D',
-    'J',
-  ])
+  expect(entrySummaries().map((el) => el.textContent?.trim())).toEqual(['D', 'J'])
   for (const id of ['D', 'J']) {
     expect(main(id).classList.contains('parallel-step')).toBe(true)
     expect(main(id).querySelector('.parallel-hint')?.textContent).toContain('可請其他人同步處理')
@@ -160,7 +160,7 @@ it('shares values bidirectionally across collapse and tabs, shares identical tag
   expect(main('D').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('D only')
   expect(item('J').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('D only')
   await fill(main('D').querySelector('input[type="text"]')!, 'D updated')
-  const details = item('D').querySelector('details')!
+  const details = item('D').querySelector<HTMLDetailsElement>(':scope > details')!
   details.open = true
   details.open = false
   details.open = true
@@ -204,7 +204,9 @@ it('synchronizes reversible manual notes and a separate live count without advan
   expect(document.activeElement).toBe(region())
   expect(region().getAttribute('role')).toBe('region')
   expect(region().getAttribute('aria-labelledby')).toBe('parallel-work-title')
-  expect(item('D').querySelector('summary')?.classList.contains('focus-control')).toBe(true)
+  expect(
+    item('D').querySelector(':scope > details > summary')?.classList.contains('focus-control'),
+  ).toBe(true)
   expect(handled(item('D')).getAttribute('aria-label')).toBe('D：本次已處理')
 })
 it('clears exited notes, retains shared field values, and clears on case change and remount (8–9)', async () => {
@@ -246,7 +248,7 @@ it('clears in-memory notes and values on sign-out (12)', async () => {
   await check(handled(item('D')), true)
   mocks.session.authenticated = false
   await nextTick()
-  expect(region().querySelectorAll('summary')).toHaveLength(0)
+  expect(entrySummaries()).toHaveLength(0)
   mocks.session.authenticated = true
   await nextTick()
   await select('alcohol')

@@ -1,6 +1,6 @@
 import PizZip from 'pizzip'
 import { Inflate } from 'pako'
-import { DOMParser } from '@xmldom/xmldom'
+import { DOMParser, XMLSerializer, type Document, type Element } from '@xmldom/xmldom'
 import { parsePhotoBlock, photoFields, type PhotoBlock } from './photoBlocks.ts'
 
 const placeholderPattern = /\{\{\s*([^{}]+?)\s*\}\}/g
@@ -9,6 +9,26 @@ const paragraphTagPattern = /<w:p(?=[\s>])[^>]*\/?>|<\/w:p>/g
 const runPattern = /<w:r(?=[\s>])[^>]*\/>|<w:r(?=[\s>])[^>]*>[\s\S]*?<\/w:r>/g
 const textNodePattern = /<w:t\b[^>]*>([^<]*)<\/w:t>|<w:t\b[^>]*\/>/g
 const rPrPattern = /<w:rPr\b[^>]*\/>|<w:rPr\b[^>]*>[\s\S]*?<\/w:rPr>/
+const packageRelationshipsNs = 'http://schemas.openxmlformats.org/package/2006/relationships'
+const settingsPart = 'word/settings.xml'
+const settingsRelationshipNamespaces = new Map([
+  [
+    'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
+    'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+  ],
+  [
+    'http://purl.oclc.org/ooxml/wordprocessingml/main',
+    'http://purl.oclc.org/ooxml/officeDocument/relationships',
+  ],
+])
+const officeRelationshipNamespaces = new Set(settingsRelationshipNamespaces.values())
+const attachedTemplateNotice = '已移除附加範本連結'
+
+export class ExternalRelationshipError extends Error {
+  constructor() {
+    super('external-relationship')
+  }
+}
 
 export interface ZipLimits {
   maxEntries: number
@@ -339,17 +359,53 @@ function safeXml(xml: string) {
   }).parseFromString(xml, 'application/xml')
 }
 
-function safeDocx(bytes: Uint8Array, limits: ZipLimits): PizZip {
+function stripAttachedTemplateReferences(doc: Document, ids: Set<string>): boolean {
+  const root = doc.documentElement
+  const relationshipsNs = settingsRelationshipNamespaces.get(root?.namespaceURI ?? '')
+  const elements = doc.getElementsByTagName('*')
+  const references: Element[] = []
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements.item(i)!
+    for (let j = 0; j < el.attributes.length; j++) {
+      const attr = el.attributes.item(j)!
+      if (!ids.has(attr.value) || !officeRelationshipNamespaces.has(attr.namespaceURI ?? ''))
+        continue
+      if (
+        root?.localName !== 'settings' ||
+        el.parentNode !== root ||
+        el.namespaceURI !== root.namespaceURI ||
+        el.localName !== 'attachedTemplate' ||
+        attr.namespaceURI !== relationshipsNs ||
+        attr.localName !== 'id' ||
+        el.getElementsByTagName('*').length ||
+        el.textContent?.trim()
+      )
+        throw new ExternalRelationshipError()
+      references.push(el)
+    }
+  }
+  for (const el of references) root!.removeChild(el)
+  return references.length > 0
+}
+
+function safeDocx(bytes: Uint8Array, limits: ZipLimits, cleanupNotices?: string[]): PizZip {
   const entries = readSafeZip(bytes, limits)
   const zip = new PizZip()
+  const removedSettingsIds = new Set<string>()
+  let settings: { name: string; doc: Document } | undefined
   let main = false
   for (const [name, data] of entries) {
     const lower = name.toLowerCase()
+    const isRels = lower.endsWith('.rels')
     if (/vbaproject|activex|embeddings|oleobject/.test(lower)) throw new Error('active-content')
     if (/\.(xml|rels)$/i.test(name)) {
       const xml = new TextDecoder('utf-8', { fatal: true }).decode(data)
       const doc = safeXml(xml)
+      if (cleanupNotices && lower === settingsPart) settings = { name, doc }
+      const root = doc.documentElement
       const elements = doc.getElementsByTagName('*')
+      const attachedTemplates: Element[] = []
+      const relationshipIds = new Map<string, number>()
       for (let i = 0; i < elements.length; i++) {
         const el = elements.item(i)!
         const local = (el.localName ?? el.nodeName).toLowerCase()
@@ -389,12 +445,31 @@ function safeDocx(bytes: Uint8Array, limits: ZipLimits): PizZip {
         )
           throw new Error('active-content')
         if (local === 'relationship') {
+          if (el.namespaceURI !== packageRelationshipsNs) throw new Error('external-relationship')
+          const id = el.getAttributeNS(null, 'Id')
+          if (cleanupNotices && isRels && id)
+            relationshipIds.set(id, (relationshipIds.get(id) ?? 0) + 1)
           if (
-            el.namespaceURI !== 'http://schemas.openxmlformats.org/package/2006/relationships' ||
             !['', 'internal'].includes((attrs.get('targetmode') ?? '').toLowerCase()) ||
             /^[a-z][a-z0-9+.-]*:|^\/\/|[\\%\x00-\x20]/i.test(attrs.get('target') ?? '')
-          )
-            throw new Error('external-relationship')
+          ) {
+            if (
+              cleanupNotices &&
+              isRels &&
+              root?.localName === 'Relationships' &&
+              root.namespaceURI === packageRelationshipsNs &&
+              el.parentNode === root &&
+              el.localName === 'Relationship' &&
+              id &&
+              el.getAttributeNS(null, 'TargetMode') === 'External' &&
+              el.getAttributeNS(null, 'Type')?.endsWith('/relationships/attachedTemplate') &&
+              el.getAttributeNS(null, 'Target') &&
+              !el.getElementsByTagName('*').length &&
+              !el.textContent?.trim()
+            )
+              attachedTemplates.push(el)
+            else throw new ExternalRelationshipError()
+          }
         }
         if (
           lower === '[content_types].xml' &&
@@ -410,17 +485,31 @@ function safeDocx(bytes: Uint8Array, limits: ZipLimits): PizZip {
           main = true
         }
       }
-      if (
-        lower.endsWith('.rels') &&
-        doc.documentElement?.namespaceURI !==
-          'http://schemas.openxmlformats.org/package/2006/relationships'
-      )
+      if (isRels && root?.namespaceURI !== packageRelationshipsNs)
         throw new Error('bad-relationships')
+      if (attachedTemplates.length) {
+        for (const el of attachedTemplates) {
+          const id = el.getAttributeNS(null, 'Id')!
+          if (relationshipIds.get(id) !== 1) throw new ExternalRelationshipError()
+          root!.removeChild(el)
+          // Relationship IDs are scoped to their source part.
+          if (lower === 'word/_rels/settings.xml.rels') removedSettingsIds.add(id)
+        }
+        zip.file(name, new XMLSerializer().serializeToString(doc))
+        cleanupNotices!.push(attachedTemplateNotice)
+        continue
+      }
     }
     zip.file(name, data)
   }
   if (!main || !entries.has('word/document.xml') || !entries.has('[Content_Types].xml'))
     throw new Error('missing-document-type')
+  if (
+    settings &&
+    removedSettingsIds.size &&
+    stripAttachedTemplateReferences(settings.doc, removedSettingsIds)
+  )
+    zip.file(settings.name, new XMLSerializer().serializeToString(settings.doc))
   return zip
 }
 
@@ -586,11 +675,15 @@ function uniqueTags(tags: string[]): string[] {
   return unique
 }
 
-export function normalizeDocx(data: ArrayBuffer | Uint8Array, limits: ZipLimits): NormalizedDocx {
+export function normalizeDocx(
+  data: ArrayBuffer | Uint8Array,
+  limits: ZipLimits,
+  { stripAttachedTemplate = false } = {},
+): NormalizedDocx {
   const bytes = asBytes(data)
-  const zip = safeDocx(bytes, limits)
   const notices: string[] = []
-  let changed = false
+  const zip = safeDocx(bytes, limits, stripAttachedTemplate ? notices : undefined)
+  let changed = notices.length > 0
   for (const part of zip.file(wordPartPattern)) {
     const xml = part.asText()
     if (xml.length > limits.maxUncompressedBytes) throw new Error('too-large')
@@ -645,6 +738,10 @@ export function readPhotoBlock(data: ArrayBuffer | Uint8Array): PhotoBlock | nul
 }
 
 export function splitFormatNotice(tags: string[]): string {
-  if (tags.length === 0) return ''
-  return `這些欄位在 Word 裡被拆成不同格式，已沿用第一個字的格式：${tags.join('、')}。`
+  const fields = tags.filter((tag) => tag !== attachedTemplateNotice)
+  const notices = []
+  if (tags.includes(attachedTemplateNotice)) notices.push(`${attachedTemplateNotice}。`)
+  if (fields.length)
+    notices.push(`這些欄位在 Word 裡被拆成不同格式，已沿用第一個字的格式：${fields.join('、')}。`)
+  return notices.join(' ')
 }

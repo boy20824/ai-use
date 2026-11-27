@@ -2,7 +2,7 @@ import { docxMimeType } from '../../shared/templateUpload.ts'
 
 // Loaded at runtime from this package. The production image does not contain frontend src/.
 export { hasZipHeader } from '../../shared/templateUpload.ts'
-export { listPlaceholders, normalizeDocx } from './docxXml.ts'
+export { ExternalRelationshipError, listPlaceholders, normalizeDocx } from './docxXml.ts'
 
 const allowedMimeTypes = new Set([
   '',

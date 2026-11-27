@@ -92,6 +92,17 @@ async function decision(confirm: boolean) {
     .click()
   await nextTick()
 }
+it('shows a collapsed placeholder count for documents in the overview', async () => {
+  await mount()
+  host.querySelector<HTMLButtonElement>('#tab-overview')!.click()
+  await nextTick()
+  const details = host.querySelector<HTMLDetailsElement>('#panel-overview li details')!
+  expect(details.querySelector('summary')?.textContent?.trim()).toBe('2 個欄位')
+  expect(details.open).toBe(false)
+  expect(details.textContent).toContain('姓名、日期')
+  expect(details.closest('label')).toBeNull()
+})
+
 it.each(['/categories/one', '/categories'])(
   'leaves an empty workbench at %s without prompting for automatic defaults',
   async (path) => {
