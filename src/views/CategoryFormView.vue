@@ -16,6 +16,8 @@ import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import { displayTemplateName } from '@/utils/fileName'
 import { fieldMappingIssues } from '@/workbench/fieldMapping'
+import { fieldUsage } from '@/workbench/fieldUsage'
+import { sharedFieldNames } from '@/workbench/stepFields'
 import { inputFields } from '@/workbench/overview'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
@@ -172,6 +174,9 @@ const editor = ref<InstanceType<typeof SopEditor> | null>(null)
 const form = ref<HTMLFormElement | null>(null)
 const confirmSave = ref(false)
 const confirmLeave = ref(false)
+const checkingFieldUsage = ref(false)
+const fieldUsageButton = ref<HTMLButtonElement | null>(null)
+const fieldUsageHeading = ref<HTMLElement | null>(null)
 let pendingLeave: Promise<boolean> | undefined
 let resolveLeave: ((allowed: boolean) => void) | undefined
 let leavingForLogout = false
@@ -183,6 +188,27 @@ const editingId = computed(() => {
 })
 const isEdit = computed(() => editingId.value.length > 0)
 const existing = computed(() => (editingId.value ? categories.byId(editingId.value) : undefined))
+const usage = computed(() => {
+  const workflow = existing.value ?? {
+    steps: steps.value.map((step) => ({
+      id: step.key,
+      body: step.body,
+      templateIds: step.templateIds,
+    })),
+    baseSteps: steps.value.map((step, sortOrder) => ({ stepId: step.key, sortOrder })),
+  }
+  const base = sharedFieldNames({
+    builtinFields: { 姓名: builtinName.value },
+    fields: fields.value.map((field) => ({ ...field, key: fieldKey(field) })),
+  })
+  return fieldUsage(workflow, base, (id) => templates.byId(id))
+})
+
+async function setFieldUsageOpen(open: boolean) {
+  checkingFieldUsage.value = open
+  await nextTick()
+  ;(open ? fieldUsageHeading.value : fieldUsageButton.value)?.focus()
+}
 const wizardSteps = computed(() => [
   { label: '名稱與分類', value: 1 },
   ...(isEdit.value ? [{ label: '情境', value: 2 }] : []),
@@ -263,6 +289,7 @@ watch([() => route.name, editingId], () => {
   formError.value = ''
   formNotice.value = ''
   savedNotice.value = ''
+  checkingFieldUsage.value = false
   wizard.value = isEdit.value ? 3 : 1
   nameError.value = ''
   invalidStepKey.value = ''
@@ -631,6 +658,75 @@ async function saveForm() {
     novalidate
     @submit.prevent="submit"
   >
+    <div class="mb-6">
+      <button
+        ref="fieldUsageButton"
+        type="button"
+        class="btn-secondary"
+        :aria-expanded="checkingFieldUsage"
+        aria-controls="category-field-usage"
+        @click="setFieldUsageOpen(!checkingFieldUsage)"
+      >
+        重複欄位檢查
+      </button>
+      <section
+        id="category-field-usage"
+        v-show="checkingFieldUsage"
+        aria-labelledby="category-field-usage-title"
+        class="mt-3 rounded-2xl border border-edge bg-surface p-4"
+        @keydown.esc.stop.prevent="setFieldUsageOpen(false)"
+      >
+        <template v-if="checkingFieldUsage">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h2
+              id="category-field-usage-title"
+              ref="fieldUsageHeading"
+              class="text-sm font-semibold text-ink"
+              tabindex="-1"
+            >
+              重複欄位檢查
+            </h2>
+            <button type="button" class="btn-secondary" @click="setFieldUsageOpen(false)">
+              關閉
+            </button>
+          </div>
+          <div class="mt-3 overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead>
+                <tr class="border-b border-edge">
+                  <th scope="col" class="px-3 py-2">標記</th>
+                  <th scope="col" class="px-3 py-2">出現位置</th>
+                  <th scope="col" class="px-3 py-2">次數</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-edge">
+                <tr v-for="{ tag, locations, count, shared } in usage.fields" :key="tag">
+                  <th scope="row" class="break-words px-3 py-2 align-top font-medium">{{ tag }}</th>
+                  <td class="break-words px-3 py-2">
+                    <ul>
+                      <li v-for="(location, index) in locations" :key="index">{{ location }}</li>
+                    </ul>
+                  </td>
+                  <td class="whitespace-nowrap px-3 py-2 align-top">
+                    {{ count }}<span v-if="shared" class="ml-2 text-ink-muted">共用</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <h3 class="mt-4 text-sm font-semibold text-ink">可能重複</h3>
+          <ul v-if="usage.possibleDuplicates.length" class="mt-2 list-disc pl-5 text-sm">
+            <li
+              v-for="[left, right] in usage.possibleDuplicates"
+              :key="JSON.stringify([left, right])"
+            >
+              {{ left }}／{{ right }}
+            </li>
+          </ul>
+          <p v-else class="mt-2 text-sm text-ink-muted">未發現相近的標記。</p>
+        </template>
+      </section>
+    </div>
     <nav v-if="isEdit" class="mb-6 flex flex-wrap gap-2" aria-label="表單區段">
       <button
         v-for="step in wizardSteps"

@@ -16,11 +16,11 @@ import {
 import { defaultRocDateSlash, parseRocDate } from '@/utils/rocDate'
 import AppIcon from '@/components/AppIcon.vue'
 import { parallelSteps } from '@/workbench/parallel'
+import { fieldOwnership } from '@/workbench/fieldOwnership'
 import {
   contextKey,
   generationContexts,
   sharedFieldNames,
-  sharedFieldLabels,
   localFieldNames,
   scopeKey,
   missingContextFields,
@@ -170,36 +170,85 @@ const mappingIssues = computed(() =>
     : [],
 )
 const fieldNames = computed(() => (category.value ? sharedFieldNames(category.value) : []))
-const sharedLabels = computed(() => sharedFieldLabels(visibleSteps.value, contexts.value))
+const ownership = computed(() =>
+  fieldOwnership(visibleSteps.value, contexts.value, fieldNames.value),
+)
+const stepNumbers = computed(
+  () => new Map(visibleSteps.value.map(({ id }, index) => [id, index + 1])),
+)
 function contextsFor(stepId: string) {
   return contexts.value.filter((context) => context.stepId === stepId)
 }
 function localFields(stepId: string) {
-  return localFieldNames(contextsFor(stepId), fieldNames.value)
+  return localFieldNames(contextsFor(stepId), ['日期'])
 }
 function setField(key: string, value: string) {
   values.value[key] = value
 }
 function setStepDateOverride(stepId: string, value: string | undefined) {
-  if (value === undefined) delete stepDateOverrides.value[stepId]
-  else stepDateOverrides.value[stepId] = value
+  const next = { ...stepDateOverrides.value }
+  if (value === undefined) delete next[stepId]
+  else next[stepId] = value
+  stepDateOverrides.value = next
 }
+const missingByStep = computed(
+  () =>
+    new Map(
+      visibleSteps.value.map(({ id }) => [
+        id,
+        missingContextFields(contextsFor(id), values.value, stepDateOverrides.value),
+      ]),
+    ),
+)
 function stepMissing(stepId: string) {
-  return missingContextFields(contextsFor(stepId), values.value, stepDateOverrides.value)
+  return missingByStep.value.get(stepId) ?? []
 }
+const missingFields = computed(() => missingOverviewFields(fieldNames.value, values.value))
+const workflowHints = computed(() => stepHints(visibleSteps.value, missingFields.value))
+const parallelHints = computed(() => stepHints(parallelWork.value))
+
+function hasDateOverride(stepId: string | undefined, key: string) {
+  return (
+    stepId !== undefined &&
+    (key === '日期' || key === '日期格式') &&
+    Object.hasOwn(stepDateOverrides.value, stepId)
+  )
+}
+
+function stepHints(steps: CategoryStep[], alreadyListed: string[] = []) {
+  const seen = new Set(alreadyListed)
+  return new Map(
+    steps.map(({ id }) => [
+      id,
+      stepMissing(id).filter((key) => {
+        if (hasDateOverride(id, key)) return true
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      }),
+    ]),
+  )
+}
+
 async function focusField(key: string, stepId?: string) {
   const name = key === '日期格式' ? '日期' : key
-  const overrideStep = name === '日期' && stepId && Object.hasOwn(stepDateOverrides.value, stepId)
-  // Switch to the first workflow occurrence even when called from the overview/sidebar.
+  const overrideStep = hasDateOverride(stepId, key)
   const inBase = fieldNames.value.includes(name)
-  const step = visibleSteps.value.find((step) => localFields(step.id).includes(name))
-  if (inBase || step || overrideStep) tab.value = 'steps'
+  const owner = ownership.value[name]
+  if (inBase || owner || overrideStep) tab.value = 'steps'
   await nextTick()
+  const root = inBase
+    ? workbench.value?.querySelector('.basic-data-row')
+    : owner
+      ? [...(workbench.value?.querySelectorAll<HTMLElement>('[data-field-step-id]') ?? [])].find(
+          (el) => el.dataset.fieldStepId === owner.owner,
+        )
+      : workbench.value?.querySelector('#panel-overview')
   const field = overrideStep
     ? [...(workbench.value?.querySelectorAll<HTMLElement>('[data-step-date-key]') ?? [])].find(
         (el) => el.dataset.stepDateKey === `step-${stepId}`,
       )
-    : [...(workbench.value?.querySelectorAll<HTMLElement>('[data-field-key]') ?? [])].find(
+    : [...(root?.querySelectorAll<HTMLElement>('[data-field-key]') ?? [])].find(
         (el) => el.dataset.fieldKey === name,
       )
   for (let ancestor = field?.parentElement; ancestor; ancestor = ancestor.parentElement) {
@@ -219,10 +268,6 @@ function focusOverviewField(key: string) {
 function canGenerateStep(stepId: string) {
   return !busy.value && photoProcessing.value.size === 0 && stepMissing(stepId).length === 0
 }
-const missingFields = computed(() => missingOverviewFields(fieldNames.value, values.value))
-const generateHint = computed(() =>
-  missingFields.value.length ? `請先在基本資料填寫：${missingFields.value.join('、')}。` : '',
-)
 
 const dateToken = '{{日期}}'
 const dateSlashToken = '{{日期_民國}}'
@@ -481,7 +526,7 @@ const overviewGroups = computed(() => {
       context,
       fields: localFieldNames(
         checkedOverview.value.filter((item) => scopeKey(item) === scopeKey(context)),
-        fieldNames.value,
+        context.stepId === null ? fieldNames.value : ['日期'],
       ),
     }))
 })
@@ -495,12 +540,6 @@ const canGenerateOverview = computed(
     !busy.value &&
     photoProcessing.value.size === 0,
 )
-const overviewHint = computed(() => {
-  if (checkedOverview.value.length === 0) return '請勾選至少一份文件。'
-  if (overviewMissing.value.some((name) => name === '日期格式')) return '日期不是有效的民國日期。'
-  if (overviewMissing.value.length === 0) return ''
-  return `請先填寫：${overviewMissing.value.join('、')}。`
-})
 
 const additionChoices = computed(() => {
   const linked = new Set(categoryTemplateIds.value)
@@ -768,7 +807,7 @@ defineExpose({ requestLeave, scrollToWorkbench })
       class="basic-data-row shared-fields-panel"
       aria-label="基本共用欄位"
     >
-      <p v-if="generateHint" class="mb-3 text-xs text-ink-muted">
+      <p v-if="missingFields.length" class="mb-3 text-xs text-ink-muted">
         請先填寫：
         <button
           v-for="key in missingFields"
@@ -901,6 +940,7 @@ defineExpose({ requestLeave, scrollToWorkbench })
             <li
               v-for="(step, index) in visibleSteps"
               :key="step.id"
+              :data-field-step-id="step.id"
               class="fixed-step flex gap-4 border-b border-edge py-5"
               :class="{
                 'bg-tone-ok': !step.canRunInParallel && completedSteps.includes(step.id),
@@ -995,11 +1035,14 @@ defineExpose({ requestLeave, scrollToWorkbench })
                 <WorkbenchStepFields
                   :fields="localFields(step.id)"
                   :date-override="stepDateOverrides[step.id]"
-                  :shared-labels="sharedLabels"
+                  :ownership="ownership"
+                  :step-id="step.id"
+                  :step-numbers="stepNumbers"
                   :values="values"
                   :definitions="category.fields"
                   :prefix="`step-${step.id}`"
                   :missing="stepMissing(step.id)"
+                  :missing-hint="workflowHints.get(step.id)"
                   :templates="templatesFor(step)"
                   :photo-cells="photoCells"
                   :busy="busy || photoProcessing.size > 0"
@@ -1183,7 +1226,9 @@ defineExpose({ requestLeave, scrollToWorkbench })
                 />
                 <StepFields
                   :fields="group.fields"
-                  :shared-labels="sharedLabels"
+                  :ownership="ownership"
+                  :step-id="group.context.stepId ?? undefined"
+                  :step-numbers="stepNumbers"
                   :values="values"
                   :definitions="category.fields"
                   :prefix="`overview-${scopeKey(group.context)}`"
@@ -1222,8 +1267,14 @@ defineExpose({ requestLeave, scrollToWorkbench })
                   <span v-if="busy" class="btn-spinner" aria-hidden="true"></span>
                   產生勾選文件
                 </button>
-                <p v-if="!canGenerateOverview && overviewHint" class="text-sm text-amber-900">
-                  <template v-if="overviewMissing.length"
+                <p
+                  v-if="overviewMissing.length || !checkedOverview.length"
+                  class="text-sm text-amber-900"
+                >
+                  <template v-if="overviewMissing.includes('日期格式')">
+                    日期不是有效的民國日期。
+                  </template>
+                  <template v-else-if="overviewMissing.length"
                     >請先填寫：
                     <button
                       v-for="key in overviewMissing"
@@ -1235,7 +1286,7 @@ defineExpose({ requestLeave, scrollToWorkbench })
                       {{ key }}
                     </button>
                   </template>
-                  <template v-else>{{ overviewHint }}</template>
+                  <template v-else>請勾選至少一份文件。</template>
                 </p>
               </div>
               <p
@@ -1325,11 +1376,14 @@ defineExpose({ requestLeave, scrollToWorkbench })
                 <WorkbenchStepFields
                   :fields="localFields(step.id)"
                   :date-override="stepDateOverrides[step.id]"
-                  :shared-labels="sharedLabels"
+                  :ownership="ownership"
+                  :step-id="step.id"
+                  :step-numbers="stepNumbers"
                   :values="values"
                   :definitions="category.fields"
                   :prefix="`parallel-${step.id}`"
                   :missing="stepMissing(step.id)"
+                  :missing-hint="parallelHints.get(step.id)"
                   :templates="templatesFor(step)"
                   :photo-cells="photoCells"
                   :busy="busy || photoProcessing.size > 0"

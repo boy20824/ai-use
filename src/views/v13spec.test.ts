@@ -403,9 +403,8 @@ it('places scenario inputs in their steps, preserves shared values through combi
     expect(host.textContent).not.toContain('n.docx')
     expect(host.querySelector('#step-stop-step-1')).not.toBeNull()
     await fill(host.querySelector('#step-stop-step-1')!, 'D-value')
-    expect(
-      (stepRow('攔查專屬').querySelector('input[type="number"]') as HTMLInputElement).value,
-    ).toBe('0.35')
+    expect(stepRow('攔查專屬').querySelector('input[type="number"]')).toBeNull()
+    expect(stepRow('攔查專屬').textContent).toContain('已填：0.35（填寫於步驟 1）')
     const generateD = [...stepRow('攔查專屬').querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === '產生',
     )!
@@ -416,7 +415,8 @@ it('places scenario inputs in their steps, preserves shared values through combi
       '共同步驟',
       '攔查專屬',
     ])
-    expect((host.querySelector('#step-stop-step-1') as HTMLInputElement).value).toBe('D-value')
+    expect(host.querySelector('#step-stop-step-1')).toBeNull()
+    expect(stepRow('攔查專屬').textContent).toContain('已填：D-value（填寫於步驟 1）')
     expect((host.querySelector('#step-crash-step-1') as HTMLInputElement).value).toBe('D-value')
     expect(generateD.disabled).toBe(false) // Missing N fields cannot block D.
     await fill(host.querySelector('#step-crash-step-1')!, 'F-value')

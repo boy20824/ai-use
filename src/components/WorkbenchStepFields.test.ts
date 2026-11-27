@@ -5,7 +5,7 @@ import WorkbenchStepFields from './WorkbenchStepFields.vue'
 
 vi.mock('@/stores/templates', () => ({ useTemplateStore: () => ({}) }))
 
-it('explains missing fields beside each disabled generate action and lets users jump to them', () => {
+it('lists each missing field once for the step and lets users jump to it', () => {
   const host = document.createElement('div')
   const focus = vi.fn()
   const app = createApp({
@@ -28,34 +28,29 @@ it('explains missing fields beside each disabled generate action and lets users 
   })
   app.mount(host)
   try {
-    const hints = [...host.querySelectorAll('p.text-xs.text-ink-muted')]
-    expect(hints.map((hint) => hint.className)).toEqual([
-      'mt-2 text-xs text-ink-muted',
-      'text-xs text-ink-muted',
-      'text-xs text-ink-muted',
-      'text-xs text-ink-muted',
+    const hints = host.querySelectorAll('p.text-xs.text-ink-muted')
+    expect(hints).toHaveLength(1)
+    const hint = hints[0]!
+    expect(hint.className).toBe('mt-2 text-xs text-ink-muted')
+    expect(hint.textContent).toBe(' 請先填寫： 姓名、日期')
+    const buttons = [...hint.querySelectorAll('button')]
+    expect(buttons.map((button) => button.className)).toEqual([
+      'focus-control underline',
+      'focus-control underline',
     ])
-    for (const hint of hints) {
-      expect(hint.textContent).toBe(' 請先填寫： 姓名、日期')
-      const buttons = [...hint.querySelectorAll('button')]
-      expect(buttons.map((button) => button.className)).toEqual([
-        'focus-control underline',
-        'focus-control underline',
-      ])
-      for (const [index, key] of ['姓名', '日期'].entries()) {
-        buttons[index]!.click()
-        expect(focus).toHaveBeenLastCalledWith(key)
-      }
+    for (const [index, key] of ['姓名', '日期'].entries()) {
+      buttons[index]!.click()
+      expect(focus).toHaveBeenLastCalledWith(key)
     }
     const generate = [...host.querySelectorAll<HTMLButtonElement>('button')].filter((b) =>
       b.textContent?.trim().startsWith('產生'),
     )
     expect(generate).toHaveLength(3)
-    for (const button of generate) {
-      expect(button.disabled).toBe(true)
-      const hint = button.parentElement!.querySelector('p')!
-      expect(hints).toContain(hint)
-    }
+    expect(generate.every((button) => button.disabled)).toBe(true)
+    expect(generate.slice(1).map((button) => button.title)).toEqual([
+      '姓名、姓名、日期',
+      '姓名、姓名、日期',
+    ])
   } finally {
     app.unmount()
   }
@@ -88,6 +83,10 @@ it('shows placeholder counts and keeps field names collapsed by default', () => 
     ])
     expect(details.map((item) => item.open)).toEqual([false, false])
     expect(details[0]?.textContent).toContain('姓名、案號')
+    const generate = [...host.querySelectorAll('button')].filter(
+      (button) => button.textContent?.trim() === '產生',
+    )
+    expect(generate.map((button) => button.title)).toEqual(['產出 .docx', '產出 .docx'])
   } finally {
     app.unmount()
   }
