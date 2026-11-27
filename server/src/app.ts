@@ -20,6 +20,7 @@ import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import type { AppConfig } from './config.ts'
 import {
+  ExternalRelationshipError,
   hasZipHeader,
   isAllowedDocxMime,
   listPlaceholders,
@@ -1500,17 +1501,17 @@ export async function buildApp(db: AppDatabase, config: AppConfig) {
           maxCompressedBytes: config.maxUploadBytes,
           maxUncompressedBytes: config.maxZipUncompressedBytes,
         }
-        const normalized = normalizeDocx(data, zipLimits)
+        const normalized = normalizeDocx(data, zipLimits, { stripAttachedTemplate: true })
         storedBytes = Buffer.from(normalized.data)
         formatNotices = normalized.notices
         placeholders = listPlaceholders(storedBytes, zipLimits)
       } catch (cause) {
-        return fail(
-          reply,
-          400,
-          'bad-upload',
-          cause instanceof PhotoBlockError ? cause.message : '無法讀取這份 Word 範本。',
-        )
+        let message = '無法讀取這份 Word 範本。'
+        if (cause instanceof PhotoBlockError) message = cause.message
+        if (cause instanceof ExternalRelationshipError)
+          message =
+            '文件含外部連結，請在 Word 另存新檔後再傳（或移除超連結、外部圖片、連結的物件）。'
+        return fail(reply, 400, 'bad-upload', message)
       }
     }
 
