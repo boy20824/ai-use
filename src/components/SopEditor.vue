@@ -12,7 +12,7 @@ import TemplatePicker from './TemplatePicker.vue'
 import CombinationOrderEditor from './CombinationOrderEditor.vue'
 import { focusAlert } from '@/utils/focusAlert'
 import { restoreMoveFocus } from '@/utils/stepFocus'
-import { displayFileName } from '@/utils/fileName'
+import { displayTemplateName } from '@/utils/fileName'
 const props = defineProps<{
   category: CaseCategory
   savingForm?: boolean
@@ -534,7 +534,9 @@ function moveTemplate(index: number, delta: number, button: HTMLButtonElement) {
             <p class="text-xs">
               {{
                 stepFor(r.stepId)
-                  ?.templateIds.map((id) => displayFileName(templates.byId(id)?.fileName ?? '範本'))
+                  ?.templateIds.map((id) =>
+                    displayTemplateName(templates.byId(id)?.fileName ?? '範本'),
+                  )
                   .join('、')
               }}
             </p>
@@ -663,7 +665,7 @@ function moveTemplate(index: number, delta: number, button: HTMLButtonElement) {
           />
           <ol>
             <li v-for="(id, i) in templateIds" :key="id">
-              {{ displayFileName(templates.byId(id)?.fileName ?? '範本')
+              {{ displayTemplateName(templates.byId(id)?.fileName ?? '範本')
               }}<span v-if="templates.byId(id)?.kind === 'pdf'" class="ml-2 text-xs text-ink-muted"
                 >參考文件</span
               >
@@ -673,7 +675,7 @@ function moveTemplate(index: number, delta: number, button: HTMLButtonElement) {
                   class="btn-move"
                   :disabled="i === 0"
                   data-move="up"
-                  :aria-label="`上移：${title || '步驟'}的範本 ${displayFileName(templates.byId(id)?.fileName ?? '範本')}`"
+                  :aria-label="`上移：${title || '步驟'}的範本 ${displayTemplateName(templates.byId(id)?.fileName ?? '範本')}`"
                   @click="moveTemplate(i, -1, $event.currentTarget as HTMLButtonElement)"
                 >
                   上移
@@ -683,7 +685,7 @@ function moveTemplate(index: number, delta: number, button: HTMLButtonElement) {
                   class="btn-move"
                   :disabled="i === templateIds.length - 1"
                   data-move="down"
-                  :aria-label="`下移：${title || '步驟'}的範本 ${displayFileName(templates.byId(id)?.fileName ?? '範本')}`"
+                  :aria-label="`下移：${title || '步驟'}的範本 ${displayTemplateName(templates.byId(id)?.fileName ?? '範本')}`"
                   @click="moveTemplate(i, 1, $event.currentTarget as HTMLButtonElement)"
                 >
                   下移

@@ -10,7 +10,7 @@ import { useTemplateStore } from '@/stores/templates'
 import type { TemplateSummary } from '@/storage'
 import AppIcon from '@/components/AppIcon.vue'
 import { categoryGroups } from '@/config/app'
-import { displayFileName } from '@/utils/fileName'
+import { displayTemplateName } from '@/utils/fileName'
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -107,7 +107,7 @@ function usageLabel(usages: TemplateSummary['usages']) {
             @pointermove="onMove"
             ><span class="entry-icon"><AppIcon /></span
             ><span
-              ><strong>{{ displayFileName(item.fileName) }}</strong
+              ><strong>{{ displayTemplateName(item.fileName) }}</strong
               ><small>{{ usageLabel(item.usages) }}</small></span
             ></RouterLink
           >

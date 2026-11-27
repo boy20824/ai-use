@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { expect, it } from 'vitest'
 import { createApp, h, nextTick, ref } from 'vue'
+import type { TemplateSummary } from '@/storage'
 import TemplatePicker from './TemplatePicker.vue'
 
 const items = [
@@ -10,13 +11,16 @@ const items = [
   { id: 'reference', fileName: 'MockReference.pdf', kind: 'pdf' },
 ] as const
 
-function mount(initialSelection: string[] = []) {
+function mount(
+  initialSelection: string[] = [],
+  pickerItems: readonly Pick<TemplateSummary, 'id' | 'fileName' | 'kind'>[] = items,
+) {
   const host = document.createElement('div')
   const selection = ref(initialSelection)
   const app = createApp({
     render: () =>
       h(TemplatePicker, {
-        items,
+        items: pickerItems,
         idPrefix: 'mock-picker',
         modelValue: selection.value,
         'onUpdate:modelValue': (ids) => (selection.value = ids),
@@ -26,6 +30,30 @@ function mount(initialSelection: string[] = []) {
   const boxes = () => [...host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
   return { host, selection, boxes, unmount: () => app.unmount() }
 }
+
+it('shows a photo insertion badge and finds the template by either name', async () => {
+  const { host, boxes, unmount } = mount(
+    [],
+    [
+      ...items,
+      { id: 'delivery', fileName: 'delivery-certificate-photos-template.docx', kind: 'docx' },
+    ],
+  )
+  try {
+    const search = host.querySelector<HTMLInputElement>('input[type="search"]')!
+    for (const keyword of ['送達證書', 'delivery-certificate-photos-template.docx']) {
+      search.value = keyword
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+      await nextTick()
+      expect(boxes().map((box) => box.value)).toEqual(['delivery'])
+      const label = boxes()[0]!.closest('label')
+      expect(label?.textContent).toContain('送達證書黏貼照片（可插入圖片）')
+      expect(label?.querySelector('.text-xs')?.textContent).toBe('可插入圖片')
+    }
+  } finally {
+    unmount()
+  }
+})
 
 it('searches the displayed filename without regard to case', async () => {
   const { host, boxes, unmount } = mount(['reference'])

@@ -16,7 +16,7 @@ import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import type { TemplateSummary } from '@/storage'
 import { formatBytes } from '@/utils/format'
-import { displayFileName } from '@/utils/fileName'
+import { displayFileName, displayTemplateName, photoTemplateLabel } from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -106,6 +106,7 @@ const visible = computed(() => {
           ...item.usages.map(
             (usage) => `${categoryNameFor(usage)} ${usage.stepTitle ?? usage.stepBody}`,
           ),
+          photoTemplateLabel(item.fileName) ?? '',
         ]
           .join(' ')
           .toLocaleLowerCase()
@@ -202,7 +203,7 @@ async function confirmRemove() {
     await categories.reload()
     pendingDelete.value = null
     feedbackTone.value = 'ok'
-    feedback.value = `已從範本庫移除「${displayFileName(item.fileName)}」。`
+    feedback.value = `已從範本庫移除「${displayTemplateName(item.fileName)}」。`
   } catch (cause) {
     feedbackTone.value = 'warn'
     feedback.value = cause instanceof Error ? cause.message : '無法移除範本。'
@@ -385,7 +386,10 @@ async function onFiles(files: File[]) {
               <span class="entry-icon"><AppIcon /></span>
               <div>
                 <p class="font-semibold text-ink [overflow-wrap:anywhere]">
-                  {{ displayFileName(item.fileName) }}
+                  {{ displayTemplateName(item.fileName) }}
+                </p>
+                <p v-if="photoTemplateLabel(item.fileName)" class="mt-1 text-xs text-ink-muted">
+                  此範本可在產生文件時插入照片
                 </p>
                 <span class="rounded border border-edge px-1.5 text-xs">{{
                   item.kind === 'pdf' ? 'PDF' : 'Word'
@@ -457,7 +461,7 @@ async function onFiles(files: File[]) {
                 <button
                   type="button"
                   class="focus-control download-template"
-                  :aria-label="`下載 ${displayFileName(item.fileName)}`"
+                  :aria-label="`下載 ${displayTemplateName(item.fileName)}`"
                   @click="downloadTemplate(item)"
                 >
                   <AppIcon name="download" /><span v-if="item.kind === 'pdf'">下載</span>
@@ -484,7 +488,7 @@ async function onFiles(files: File[]) {
                   v-if="session.canDelete"
                   type="button"
                   class="btn-secondary px-2.5 py-1.5 text-xs text-tone-danger-ink"
-                  :aria-label="`移除 ${displayFileName(item.fileName)}`"
+                  :aria-label="`移除 ${displayTemplateName(item.fileName)}`"
                   @click="askRemove(item)"
                 >
                   移除
@@ -523,12 +527,12 @@ async function onFiles(files: File[]) {
       <p class="mt-2 text-sm leading-6 text-stone-600">
         <template v-if="usageLinks(pendingDelete).length > 0">
           「{{
-            displayFileName(pendingDelete.fileName)
+            displayTemplateName(pendingDelete.fileName)
           }}」目前用在下列案件範本的步驟。確定後會解除這些連結，並從範本庫刪除檔案。案件範本與步驟會保留。
         </template>
         <template v-else>
           「{{
-            displayFileName(pendingDelete.fileName)
+            displayTemplateName(pendingDelete.fileName)
           }}」尚未連結任何步驟。確定後會從範本庫刪除檔案。
         </template>
       </p>

@@ -7,7 +7,7 @@ import StepDateField from './StepDateField.vue'
 import type { FieldDef } from '@/types/domain'
 import type { OverviewTemplate } from '@/workbench/overview'
 import { inputFields } from '@/workbench/overview'
-import { displayFileName } from '@/utils/fileName'
+import { displayTemplateName } from '@/utils/fileName'
 const props = defineProps<{
   sharedLabels?: Record<string, string>
   fields: string[]
@@ -63,7 +63,7 @@ const emit = defineEmits<{
       :key="item.id"
       class="mt-3"
     >
-      <p class="text-sm font-medium">{{ displayFileName(item.fileName) }}</p>
+      <p class="text-sm font-medium">{{ displayTemplateName(item.fileName) }}</p>
       <slot name="photos" :template-id="item.id" />
     </div>
   </section>
@@ -100,7 +100,7 @@ const emit = defineEmits<{
       >
         <div class="min-w-0">
           <span class="block break-all text-sm font-medium text-ink">{{
-            displayFileName(item.fileName)
+            displayTemplateName(item.fileName)
           }}</span>
           <details class="mt-1 text-xs text-ink-muted">
             <summary class="cursor-pointer">

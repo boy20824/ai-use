@@ -21,6 +21,7 @@ vi.mock('vue', async (importOriginal) => {
 
 const mocks = vi.hoisted(() => ({
   pdf: false,
+  firstFileName: '刑事文件.docx',
   additionalCategoryCount: 0,
   previewPdf: vi.fn(async () => {}),
   canUpload: false,
@@ -56,7 +57,7 @@ vi.mock('@/stores/templates', () => ({
     items: [
       {
         id: 'one',
-        fileName: '刑事文件.docx',
+        fileName: mocks.firstFileName,
         placeholders: ['姓名'],
         usages: [
           {
@@ -125,6 +126,7 @@ afterEach(() => {
   app?.unmount()
   host?.remove()
   mocks.pdf = false
+  mocks.firstFileName = '刑事文件.docx'
   mocks.additionalCategoryCount = 0
   mocks.canUpload = false
   mocks.canDelete = false
@@ -132,6 +134,44 @@ afterEach(() => {
 })
 const rows = () => host.querySelectorAll('tbody tr')
 const usageCell = (row: number) => rows()[row]!.querySelector('.template-usages')!
+
+it('labels the uploaded photo mock, explains photo insertion, and downloads by its original name', async () => {
+  mocks.firstFileName = 'scene-photos-template.docx'
+  await mount()
+  const label = '刑案現場照片（可插入圖片）'
+  const nameCell = rows()[0]!.querySelector('.template-name')!
+  expect(nameCell.querySelector('p')?.textContent?.trim()).toBe(label)
+  expect(nameCell.querySelector('p + p')?.textContent?.trim()).toBe('此範本可在產生文件時插入照片')
+  const otherName = rows()[1]!.querySelector('.template-name')!
+  expect(otherName.querySelector('p')?.textContent?.trim()).toBe('行政文件.docx')
+  expect(otherName.textContent).not.toContain('可插入圖片')
+
+  const search = host.querySelector<HTMLInputElement>('#template-search')!
+  for (const keyword of ['刑案現場照片', 'scene-photos-template.docx']) {
+    search.value = keyword
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+    expect(rows()).toHaveLength(1)
+    expect(rows()[0]?.textContent).toContain(label)
+  }
+
+  rows()[0]!.querySelector<HTMLButtonElement>(`[aria-label="下載 ${label}"]`)!.click()
+  await vi.waitFor(() =>
+    expect(mocks.downloadBytes).toHaveBeenCalledWith(
+      new Uint8Array([1, 2, 3]),
+      'scene-photos-template.docx',
+      expect.stringContaining('wordprocessingml'),
+    ),
+  )
+})
+
+it('renders an uploaded filename containing markup as sanitized text', async () => {
+  mocks.firstFileName = '<img src=x onerror="alert(1)">.docx'
+  await mount()
+  const nameCell = rows()[0]!.querySelector('.template-name')!
+  expect(nameCell.querySelector('p')?.textContent?.trim()).toBe('img src=x onerror=alert(1).docx')
+  expect(nameCell.querySelector('img, [onerror]')).toBeNull()
+})
 
 it('shows 尚未使用 for an unused template and lists a single category directly', async () => {
   await mount()
