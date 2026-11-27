@@ -1,10 +1,11 @@
 import bcrypt from 'bcryptjs'
 import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import type { SeedPasswords } from './config.ts'
 import { docxMimeType } from '../../shared/templateUpload.ts'
 import { listPlaceholders } from './docx.ts'
-import type { AppQueries, Role } from './db.ts'
-import { writeTemplateFile } from './files.ts'
+import { createQueries, type AppDatabase, type AppQueries, type Role } from './db.ts'
+import { removeTemplateFile, writeTemplateFile } from './files.ts'
 
 const users: {
   id: string
@@ -41,6 +42,61 @@ const users: {
 ]
 
 const sampleTemplateId = 'sample-field-note'
+const builtinTemplatesMigration = 'builtin-photo-templates-v1'
+const builtinTemplates = [
+  {
+    id: 'builtin-delivery-certificate-photos',
+    fileName: 'delivery-certificate-photos-template.docx',
+  },
+  { id: 'builtin-scene-photos', fileName: 'scene-photos-template.docx' },
+]
+
+export function seedBuiltinTemplates(db: AppDatabase, templateDir: string, uploadDir: string) {
+  const writtenFiles: string[] = []
+  try {
+    db.transaction(() => {
+      db.exec('CREATE TABLE IF NOT EXISTS config_migrations (id TEXT PRIMARY KEY)')
+      const migrationExists = db.prepare('SELECT 1 FROM config_migrations WHERE id = ?')
+      if (migrationExists.get(builtinTemplatesMigration)) return
+
+      const templateExists = db.prepare(
+        'SELECT 1 FROM templates WHERE id = ? OR file_name COLLATE NOCASE = ? LIMIT 1',
+      )
+      const queries = createQueries(db)
+      const addedAt = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      for (const { id, fileName } of builtinTemplates) {
+        if (templateExists.get(id, fileName)) continue
+        const data = readFileSync(path.join(templateDir, fileName))
+        queries.insertTemplate({
+          kind: 'docx',
+          id,
+          fileName,
+          mimeType: docxMimeType,
+          sizeBytes: data.byteLength,
+          addedAt,
+          placeholders: listPlaceholders(data),
+          origin: 'sample',
+          usages: [],
+          data,
+        })
+        writeTemplateFile(uploadDir, id, data)
+        writtenFiles.push(id)
+      }
+      db.prepare('INSERT INTO config_migrations (id) VALUES (?)').run(builtinTemplatesMigration)
+    }).immediate()
+  } catch (error) {
+    // SQLite rolls back the rows. Clean up files unless another process has since seeded them.
+    if (writtenFiles.length > 0) {
+      db.transaction(() => {
+        const templateExists = db.prepare('SELECT 1 FROM templates WHERE id = ?')
+        for (const id of writtenFiles) {
+          if (!templateExists.get(id)) removeTemplateFile(uploadDir, id)
+        }
+      }).immediate()
+    }
+    throw error
+  }
+}
 
 export function seedReferenceData(
   queries: AppQueries,

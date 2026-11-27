@@ -1,19 +1,31 @@
 import { loginWithCsrf } from './loginTestHelper.ts'
 import {
+  buildMinimalDocx,
   makeConfig,
   testPasswords as passwords,
   testSamplePath as samplePath,
 } from './testSupport.ts'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, describe, expect, it, vi } from 'vitest'
+import bcrypt from 'bcryptjs'
+import { docxMimeType } from '../../shared/templateUpload.ts'
 import { buildApp } from './app.ts'
 import { loadConfig, resolveServerPath } from './config.ts'
 import { createQueries, migrate, openDatabase } from './db.ts'
-import { templateFilePath } from './files.ts'
-import { seedReferenceData } from './seed.ts'
+import { readPhotoBlock } from './docxXml.ts'
+import { removeTemplateFile, templateFilePath, writeTemplateFile } from './files.ts'
+import { seedBuiltinTemplates, seedReferenceData } from './seed.ts'
 import { createShutdown } from './shutdown.ts'
 
 // Configuration tests use only explicit mock env values, never local .env files.
@@ -21,6 +33,11 @@ vi.mock('dotenv', () => ({ config: vi.fn() }))
 
 const scratch = mkdtempSync(path.join(tmpdir(), 'ai-use-deploy-'))
 const longSecret = 'a'.repeat(32)
+const builtinDir = fileURLToPath(new URL('../../public/templates', import.meta.url))
+const deliveryId = 'builtin-delivery-certificate-photos'
+const deliveryFileName = 'delivery-certificate-photos-template.docx'
+const sceneId = 'builtin-scene-photos'
+const sceneFileName = 'scene-photos-template.docx'
 const deploymentDefaults = {
   corsOrigins: [],
   maxZipEntries: 8,
@@ -28,7 +45,7 @@ const deploymentDefaults = {
   loginRatePerMinute: 20,
 }
 
-function withEnv(values: Record<string, string | undefined>, run: () => void) {
+function withEnv<T>(values: Record<string, string | undefined>, run: () => T): T {
   const previous = new Map<string, string | undefined>()
   for (const [key, value] of Object.entries(values)) {
     previous.set(key, process.env[key])
@@ -36,7 +53,7 @@ function withEnv(values: Record<string, string | undefined>, run: () => void) {
     else process.env[key] = value
   }
   try {
-    run()
+    return run()
   } finally {
     for (const [key, value] of previous) {
       if (value === undefined) delete process.env[key]
@@ -62,6 +79,8 @@ const baseProductionEnv = {
   CORS_ORIGIN: undefined,
   COOKIE_SECURE: undefined,
   SAMPLE_TEMPLATE_PATH: undefined,
+  BUILTIN_TEMPLATE_DIR: undefined,
+  SEED_SAMPLE_DATA: undefined,
 }
 
 describe('deployment config', () => {
@@ -104,10 +123,199 @@ describe('deployment config', () => {
           viewer: 'viewer-demo',
         })
         expect(config.staticDir).toBeUndefined()
+        expect(config.builtinTemplateDir).toBe(builtinDir)
         expect(config.trustProxy).toBe(false)
         expect(config.corsOrigins).toEqual(['http://localhost:5173', 'http://127.0.0.1:5173'])
       },
     )
+  })
+
+  it('ships the built-in templates in the runtime image and supports a directory override', () => {
+    const dockerfile = readFileSync(new URL('../../Dockerfile', import.meta.url), 'utf8')
+    const runner = dockerfile.split(' AS runner\n')[1]
+    expect(runner).toContain('BUILTIN_TEMPLATE_DIR=/app/public/templates')
+    expect(runner).toContain('COPY --from=build /app/public/templates /app/public/templates')
+    withEnv(
+      {
+        ...baseProductionEnv,
+        NODE_ENV: 'test',
+        SEED_DEMO_USERS: 'false',
+        BUILTIN_TEMPLATE_DIR: scratch,
+      },
+      () => expect(loadConfig().builtinTemplateDir).toBe(scratch),
+    )
+  })
+
+  it('seeds both mock photo templates in production and serves them to an ordinary user', async () => {
+    const staticDir = mkdtempSync(path.join(scratch, 'builtin-static-'))
+    writeFileSync(path.join(staticDir, 'index.html'), '<!doctype html><title>Mock</title>')
+    const config = withEnv(
+      {
+        ...baseProductionEnv,
+        STATIC_DIR: staticDir,
+        UPLOAD_DIR: mkdtempSync(path.join(scratch, 'builtin-uploads-')),
+      },
+      loadConfig,
+    )
+    expect(config.seedSampleData).toBe(false)
+    expect(config.builtinTemplateDir).toBe(builtinDir)
+    const db = openDatabase(':memory:')
+    try {
+      migrate(db)
+      const queries = createQueries(db)
+      seedBuiltinTemplates(db, config.builtinTemplateDir, config.uploadDir)
+      expect(queries.countUsers()).toBe(0)
+      expect(queries.listCategories()).toEqual([])
+      queries.insertUser({
+        id: 'mock-reader',
+        username: 'reader',
+        passwordHash: bcrypt.hashSync(passwords.viewer, 4),
+        displayName: 'Mock reader',
+        nickname: 'Mock',
+        role: 'user',
+      })
+
+      const app = await buildApp(db, config)
+      try {
+        const login = await loginWithCsrf(app, {
+          method: 'POST',
+          url: '/api/auth/login',
+          payload: { username: 'reader', password: passwords.viewer },
+        })
+        expect(login.statusCode).toBe(200)
+        const cookies = { session: login.cookies.find(({ name }) => name === 'session')!.value }
+        const list = await app.inject({ url: '/api/templates', cookies })
+        expect(list.statusCode).toBe(200)
+        const { templates } = list.json()
+        expect(templates).toHaveLength(2)
+        for (const { id, fileName, placeholders } of [
+          { id: deliveryId, fileName: deliveryFileName, placeholders: ['應受送達人'] },
+          {
+            id: sceneId,
+            fileName: sceneFileName,
+            placeholders: ['年', '月', '警局', '分局', '案次編號', '案由'],
+          },
+        ]) {
+          const original = readFileSync(path.join(builtinDir, fileName))
+          expect(templates).toContainEqual(
+            expect.objectContaining({
+              id,
+              fileName,
+              placeholders,
+              origin: 'sample',
+              kind: 'docx',
+              mimeType: docxMimeType,
+              sizeBytes: original.byteLength,
+              usages: [],
+              addedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/),
+            }),
+          )
+          const stored = queries.getTemplateFile(id)!.data!
+          expect(stored).toEqual(original)
+          expect(readPhotoBlock(stored)?.photoCellsPerPage).toBe(2)
+          expect(readFileSync(templateFilePath(config.uploadDir, id))).toEqual(original)
+          const download = await app.inject({ url: `/api/templates/${id}/file`, cookies })
+          expect(download.statusCode).toBe(200)
+          expect(download.headers['content-type']).toBe(docxMimeType)
+          expect(download.headers['content-disposition']).toContain(fileName)
+          expect(download.rawPayload).toEqual(original)
+        }
+      } finally {
+        await app.close()
+      }
+    } finally {
+      db.close()
+    }
+  })
+
+  it.each([
+    { id: 'mock-upload', fileName: sceneFileName },
+    { id: 'mock-upload', fileName: sceneFileName.toUpperCase() },
+    { id: sceneId, fileName: 'renamed-upload.docx' },
+  ])('preserves an existing upload ($id, $fileName)', ({ id, fileName }) => {
+    const db = openDatabase(':memory:')
+    try {
+      migrate(db)
+      const queries = createQueries(db)
+      const uploadDir = mkdtempSync(path.join(scratch, 'existing-upload-'))
+      const data = Buffer.from(buildMinimalDocx('{{Mock}}'))
+      queries.insertTemplate({
+        id,
+        fileName,
+        kind: 'docx',
+        mimeType: docxMimeType,
+        sizeBytes: data.byteLength,
+        addedAt: '2026-01-01 00:00',
+        placeholders: ['Mock'],
+        origin: 'upload',
+        usages: [],
+        data,
+      })
+      writeTemplateFile(uploadDir, id, data)
+      const before = queries.getTemplateFile(id)
+
+      seedBuiltinTemplates(db, builtinDir, uploadDir)
+
+      expect(queries.listTemplates().map((record) => record.id)).toEqual([deliveryId, id])
+      expect(queries.getTemplateFile(id)).toEqual(before)
+      expect(readFileSync(templateFilePath(uploadDir, id))).toEqual(data)
+      expect(readdirSync(uploadDir).sort()).toEqual([`${deliveryId}.docx`, `${id}.docx`].sort())
+    } finally {
+      db.close()
+    }
+  })
+
+  it('seeds only once per database, even after a built-in is deleted', () => {
+    const databasePath = path.join(scratch, 'builtin-marker.sqlite')
+    const uploadDir = mkdtempSync(path.join(scratch, 'builtin-marker-uploads-'))
+    const db = openDatabase(databasePath)
+    try {
+      migrate(db)
+      const queries = createQueries(db)
+      seedBuiltinTemplates(db, builtinDir, uploadDir)
+      const seeded = queries.listTemplates()
+      expect(seeded).toHaveLength(2)
+      seedBuiltinTemplates(db, builtinDir, uploadDir)
+      expect(queries.listTemplates()).toEqual(seeded)
+      expect(queries.deleteTemplate(deliveryId)).toBe(1)
+      removeTemplateFile(uploadDir, deliveryId)
+    } finally {
+      db.close()
+    }
+    const reopened = openDatabase(databasePath)
+    try {
+      migrate(reopened)
+      seedBuiltinTemplates(reopened, builtinDir, uploadDir)
+      expect(
+        createQueries(reopened)
+          .listTemplates()
+          .map(({ id }) => id),
+      ).toEqual([sceneId])
+      expect(readdirSync(uploadDir)).toEqual([`${sceneId}.docx`])
+    } finally {
+      reopened.close()
+    }
+  })
+
+  it('rolls back rows and files and can retry after a missing built-in source is restored', () => {
+    const db = openDatabase(':memory:')
+    try {
+      migrate(db)
+      const templateDir = mkdtempSync(path.join(scratch, 'incomplete-builtins-'))
+      const uploadDir = mkdtempSync(path.join(scratch, 'incomplete-uploads-'))
+      copyFileSync(
+        path.join(builtinDir, deliveryFileName),
+        path.join(templateDir, deliveryFileName),
+      )
+      expect(() => seedBuiltinTemplates(db, templateDir, uploadDir)).toThrow()
+      expect(createQueries(db).listTemplates()).toEqual([])
+      expect(readdirSync(uploadDir)).toEqual([])
+
+      seedBuiltinTemplates(db, builtinDir, uploadDir)
+      expect(createQueries(db).listTemplates()).toHaveLength(2)
+    } finally {
+      db.close()
+    }
   })
 
   it('refuses a missing, short, or demo session secret in production', () => {

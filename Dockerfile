@@ -28,6 +28,7 @@ ENV NODE_ENV=production \
     UPLOAD_DIR=/data/uploads \
     STATIC_DIR=/app/dist \
     SAMPLE_TEMPLATE_PATH=/app/public/samples/field-note.docx \
+    BUILTIN_TEMPLATE_DIR=/app/public/templates \
     TRUST_PROXY=true \
     SEED_DEMO_USERS=false
 WORKDIR /app
@@ -38,6 +39,7 @@ RUN groupadd --system --gid 1001 app \
 COPY --from=build /prod /app/server
 COPY --from=build /app/dist /app/dist
 COPY --from=build /app/public/samples /app/public/samples
+COPY --from=build /app/public/templates /app/public/templates
 # docx.ts loads this file when the process starts. pnpm deploy should already
 # include it; copy it again so a pack filter cannot drop the module.
 COPY --from=build /app/server/src/docxXml.ts /app/server/src/docxXml.ts

@@ -43,6 +43,7 @@ export function makeConfig(
     registerGlobalLimit: 30,
     registerWindowMs: 60 * 60 * 1000,
     sampleTemplatePath: testSamplePath,
+    builtinTemplateDir: path.resolve(path.dirname(testSamplePath), '../templates'),
     seedSampleData: false,
     staticDir: undefined,
     trustProxy: false,

@@ -2,7 +2,7 @@ import { loadConfig } from './config.ts'
 import { createQueries, migrate, openDatabase } from './db.ts'
 import { ensureUploadDir } from './files.ts'
 import { dropRootPrivileges } from './privileges.ts'
-import { seedReferenceData } from './seed.ts'
+import { seedBuiltinTemplates, seedReferenceData } from './seed.ts'
 import { createShutdown } from './shutdown.ts'
 import { buildApp } from './app.ts'
 
@@ -13,6 +13,11 @@ async function main() {
   const db = openDatabase(config.databasePath)
   try {
     migrate(db)
+    try {
+      seedBuiltinTemplates(db, config.builtinTemplateDir, config.uploadDir)
+    } catch {
+      console.warn('Built-in photo template seeding failed. Startup will continue.')
+    }
     seedReferenceData(
       createQueries(db),
       config.passwords,
