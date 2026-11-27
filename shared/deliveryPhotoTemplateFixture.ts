@@ -1,19 +1,20 @@
 import PizZip from 'pizzip'
 import { buildDocx, run, wordDocument } from './docxFixture.ts'
 
-const title = '送達證書黏貼照片（可插入圖片）'
+const title = '臺南市政府警察局白河分局白河所相片黏貼用紙'
 const tableWidth = 9490
 const centered = '<w:jc w:val="center"/>'
-const tinyParagraphProperties =
-  '<w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/></w:pPr>'
+const emptyTinyParagraph =
+  '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/></w:pPr></w:p>'
 
-function paragraph(text: string, size: number, properties = '', lineSpacing = '') {
+function paragraph(text: string, size: number, properties = '', line?: number) {
+  const lineSpacing = line === undefined ? '' : ` w:line="${line}" w:lineRule="exact"`
   const runProperties = `<w:rPr><w:rFonts w:ascii="標楷體" w:eastAsia="標楷體" w:hAnsi="標楷體"/><w:sz w:val="${size}"/></w:rPr>`
   return `<w:p><w:pPr><w:spacing w:before="0" w:after="0"${lineSpacing}/>${properties}</w:pPr>${run(runProperties, text)}</w:p>`
 }
 
 function marker(text: string) {
-  return `<w:p>${tinyParagraphProperties}${run('<w:rPr><w:sz w:val="2"/></w:rPr>', text)}</w:p>`
+  return paragraph(text, 2, '', 20)
 }
 
 function row(content: string, height: number, heightRule: 'exact' | 'atLeast', header = '') {
@@ -22,12 +23,9 @@ function row(content: string, height: number, heightRule: 'exact' | 'atLeast', h
 
 function photoRow(height: number) {
   return row(
-    paragraph('{{#照片格}}編號{{照片編號}}', 20) +
-      // The image shares a cell with two text paragraphs, so reserve room for both.
-      paragraph('{{照片}}', 20, centered, ' w:line="800" w:lineRule="atLeast"') +
-      paragraph('{{照片說明}}{{/照片格}}', 20),
+    marker('{{#照片格}}') + paragraph('{{照片}}', 20, centered) + marker('{{/照片格}}'),
     height,
-    'atLeast',
+    'exact',
   )
 }
 
@@ -37,20 +35,31 @@ export function buildDeliveryPhotoTemplate(): Uint8Array {
     .join('')
   const table =
     `<w:tbl><w:tblPr><w:tblW w:w="${tableWidth}" w:type="dxa"/>${centered}<w:tblBorders>${borders}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="28" w:type="dxa"/><w:right w:w="28" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid><w:gridCol w:w="${tableWidth}"/></w:tblGrid>` +
-    row(paragraph(title, 32, centered), 770, 'exact', '<w:tblHeader/>') +
-    row(paragraph('應受送達人：{{應受送達人}}', 24), 513, 'atLeast', '<w:tblHeader/>') +
+    row(paragraph(title, 40, '<w:jc w:val="distribute"/>', 600), 770, 'exact', '<w:tblHeader/>') +
+    row(
+      paragraph(
+        '說明：檢附應受送達人({{應受送達人}})之送達證書。',
+        28,
+        '<w:jc w:val="both"/>',
+        280,
+      ),
+      513,
+      'atLeast',
+      '<w:tblHeader/>',
+    ) +
     photoRow(6627) +
     photoRow(6175) +
     '</w:tbl>'
   const document = wordDocument(
     marker('{{#照片頁}}') +
-      paragraph(title, 28, `${centered}<w:outlineLvl w:val="0"/>`) +
+      emptyTinyParagraph +
       table +
-      `<w:p>${tinyParagraphProperties}</w:p>` +
-      marker('{{/照片頁}}'),
+      emptyTinyParagraph +
+      marker('{{/照片頁}}') +
+      paragraph('備註：', 24, '', 240),
   ).replace(
     '</w:sectPr>',
-    '<w:pgSz w:w="11906" w:h="16838" w:orient="portrait"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1418" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>',
+    '<w:pgSz w:w="11906" w:h="16838" w:orient="portrait"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1418" w:header="851" w:footer="992" w:gutter="0"/></w:sectPr>',
   )
   const zip = new PizZip(buildDocx({ document }))
   // ZIP stores local date fields. Keep them fixed across rebuilds and time zones.

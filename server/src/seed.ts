@@ -1,11 +1,12 @@
 import bcrypt from 'bcryptjs'
-import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { SeedPasswords } from './config.ts'
 import { docxMimeType } from '../../shared/templateUpload.ts'
 import { listPlaceholders } from './docx.ts'
 import { createQueries, type AppDatabase, type AppQueries, type Role } from './db.ts'
-import { removeTemplateFile, writeTemplateFile } from './files.ts'
+import { removeTemplateFile, templateFilePath, writeTemplateFile } from './files.ts'
 
 const users: {
   id: string
@@ -43,11 +44,15 @@ const users: {
 
 const sampleTemplateId = 'sample-field-note'
 const builtinTemplatesMigration = 'builtin-photo-templates-v1'
+const deliveryTemplateTextMigration = 'builtin-delivery-template-text-v2'
+export const builtinDeliveryTemplateV1Sha256 =
+  '3535d32b94a914a1af3547dfe473a90562d05882d11a20406da2f5e30a0bb949'
+const deliveryTemplate = {
+  id: 'builtin-delivery-certificate-photos',
+  fileName: 'delivery-certificate-photos-template.docx',
+}
 const builtinTemplates = [
-  {
-    id: 'builtin-delivery-certificate-photos',
-    fileName: 'delivery-certificate-photos-template.docx',
-  },
+  deliveryTemplate,
   { id: 'builtin-scene-photos', fileName: 'scene-photos-template.docx' },
 ]
 
@@ -92,6 +97,52 @@ export function seedBuiltinTemplates(db: AppDatabase, templateDir: string, uploa
         for (const id of writtenFiles) {
           if (!templateExists.get(id)) removeTemplateFile(uploadDir, id)
         }
+      }).immediate()
+    }
+    throw error
+  }
+
+  updateBuiltinDeliveryTemplate(db, templateDir, uploadDir)
+}
+
+function updateBuiltinDeliveryTemplate(db: AppDatabase, templateDir: string, uploadDir: string) {
+  const { id, fileName } = deliveryTemplate
+  const migrationExists = db.prepare('SELECT 1 FROM config_migrations WHERE id = ?')
+  const matchesV1 = (data: Buffer | undefined) =>
+    data && createHash('sha256').update(data).digest('hex') === builtinDeliveryTemplateV1Sha256
+  let overwrittenFile: { previousBytes: Buffer | undefined } | undefined
+  try {
+    db.transaction(() => {
+      if (migrationExists.get(deliveryTemplateTextMigration)) return
+
+      const queries = createQueries(db)
+      const previous = queries.getTemplateFile(id)
+      if (previous && matchesV1(previous.data)) {
+        const data = readFileSync(path.join(templateDir, fileName))
+        const target = templateFilePath(uploadDir, id, previous.kind)
+        const previousBytes = existsSync(target) ? readFileSync(target) : undefined
+        queries.replaceTemplate({
+          ...previous,
+          data,
+          sizeBytes: data.byteLength,
+          placeholders: listPlaceholders(data),
+        })
+        writeTemplateFile(uploadDir, id, data, previous.kind)
+        overwrittenFile = { previousBytes }
+      }
+
+      db.prepare('INSERT INTO config_migrations (id) VALUES (?)').run(deliveryTemplateTextMigration)
+    }).immediate()
+  } catch (error) {
+    const file = overwrittenFile
+    if (file) {
+      // Another process may have completed the migration since SQLite rolled back.
+      db.transaction(() => {
+        if (migrationExists.get(deliveryTemplateTextMigration)) return
+        const current = createQueries(db).getTemplateFile(id)
+        if (!current || !matchesV1(current.data)) return
+        if (file.previousBytes) writeTemplateFile(uploadDir, id, file.previousBytes, current.kind)
+        else removeTemplateFile(uploadDir, id, current.kind)
       }).immediate()
     }
     throw error

@@ -43,7 +43,7 @@ function changeXml(change: (xml: string) => string) {
 
 it.each([
   ['scene-photos-template.docx', ['照片編號', '攝影時間', '攝影地點', '攝影人', '照片說明']],
-  ['delivery-certificate-photos-template.docx', ['照片編號', '照片說明']],
+  ['delivery-certificate-photos-template.docx', []],
 ])('只列出 %s 照片格內實際使用的文字欄位', (fileName, fields) => {
   const bytes = new Uint8Array(
     readFileSync(new URL(`../../public/templates/${fileName}`, import.meta.url)),
@@ -297,7 +297,8 @@ describe('送達證書黏貼照片（可插入圖片）Mock 範本', () => {
       new URL('../../public/templates/delivery-certificate-photos-template.docx', import.meta.url),
     ),
   )
-  const title = '送達證書黏貼照片（可插入圖片）'
+  const title = '臺南市政府警察局白河分局白河所相片黏貼用紙'
+  const description = (recipient: string) => `說明：檢附應受送達人(${recipient})之送達證書。`
 
   it('可逐位元組重建、只含內部關聯，且只列出應受送達人', () => {
     const rebuilt = buildDeliveryPhotoTemplate()
@@ -311,35 +312,59 @@ describe('送達證書黏貼照片（可插入圖片）Mock 範本', () => {
     expect(listPlaceholders(delivery)).toEqual(['應受送達人'])
   })
 
-  it('A4 直式單欄表格以標題段落起始，兩個照片格各占一列', () => {
+  it('A4 直式單欄表格前留空段落，表頭沿用白河所文字，兩個照片格各占一列', () => {
     const xml = xmlOf(delivery)
     const block = parsePhotoBlock(xml)!
     expect(readPhotoBlock(delivery)?.photoCellsPerPage).toBe(2)
     expect(xml).toContain('<w:pgSz w:w="11906" w:h="16838" w:orient="portrait"/>')
-    expect(xml).toContain('<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1418"')
+    expect(xml).toContain(
+      '<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1418" w:header="851" w:footer="992"',
+    )
     expect(xml).toContain('<w:tblW w:w="9490" w:type="dxa"/>')
     expect(xml.match(/<w:gridCol w:w="9490"\/>/g)).toHaveLength(1)
     expect(xml).toContain('<w:tblLayout w:type="fixed"/>')
     expect(xml.match(/<w:tbl>/g)).toHaveLength(1)
-    expect(xml).toContain('<w:trHeight w:val="770" w:hRule="exact"/>')
-    expect(xml).toContain('<w:trHeight w:val="513"')
-    const heading = xml.slice(block.contentStart, xml.indexOf('<w:tbl>'))
-    expect(text(heading)).toBe(title)
-    expect(heading).toContain('<w:outlineLvl w:val="0"/>')
-    expect(block.cells.map(({ width, height }) => [width, height])).toEqual(
-      [6627, 6175].map((rowHeight) => [(9490 - 56) * 635, (rowHeight - 800) * 635]),
+    expect(xml.match(/<w:cantSplit\/>/g)).toHaveLength(4)
+    expect(xml).toContain('<w:left w:w="28" w:type="dxa"/><w:right w:w="28" w:type="dxa"/>')
+    const [titleRow, descriptionRow] = [...xml.matchAll(/<w:tr>[\s\S]*?<\/w:tr>/g)].map(
+      (match) => match[0],
     )
-    for (const cell of block.cells) {
+    expect(text(titleRow!)).toBe(title)
+    expect(titleRow).toContain('<w:trHeight w:val="770" w:hRule="exact"/><w:tblHeader/>')
+    expect(titleRow).toContain('w:line="600" w:lineRule="exact"')
+    expect(titleRow).toContain('<w:jc w:val="distribute"/>')
+    expect(titleRow).toContain('<w:sz w:val="40"/>')
+    expect(text(descriptionRow!)).toBe(description('{{應受送達人}}'))
+    expect(descriptionRow).toContain('<w:trHeight w:val="513" w:hRule="atLeast"/><w:tblHeader/>')
+    expect(descriptionRow).toContain('w:line="280" w:lineRule="exact"')
+    expect(descriptionRow).toContain('<w:jc w:val="both"/>')
+    expect(descriptionRow).toContain('<w:sz w:val="28"/>')
+    const heading = xml.slice(block.contentStart, xml.indexOf('<w:tbl>'))
+    expect(heading).toMatch(/^<w:p>[\s\S]*<\/w:p>$/)
+    expect(text(heading)).toBe('')
+    expect(heading).toContain('w:line="20" w:lineRule="exact"')
+    expect(heading).not.toContain('<w:outlineLvl')
+    const notes = xml.slice(block.end, xml.indexOf('<w:sectPr>'))
+    expect(text(notes)).toBe('備註：')
+    expect(notes).toContain('w:line="240" w:lineRule="exact"')
+    expect(text(xml)).not.toContain('送達證書黏貼照片')
+    expect(block.cells.map(({ width, height }) => [width, height])).toEqual(
+      [6627, 6175].map((rowHeight) => [(9490 - 56) * 635, (rowHeight - 300) * 635]),
+    )
+    for (const [index, cell] of block.cells.entries()) {
       const row = xml.slice(cell.start, cell.end)
       expect(row.match(/<w:tr>/g)).toHaveLength(1)
+      expect(row).toContain(`<w:trHeight w:val="${[6627, 6175][index]}" w:hRule="exact"/>`)
       expect(row).toContain('<w:tcW w:w="9490" w:type="dxa"/>')
       expect(row).toContain('<w:vAlign w:val="center"/>')
       expect([...row.matchAll(/<w:p>[\s\S]*?<\/w:p>/g)].map((match) => text(match[0]))).toEqual([
-        '{{#照片格}}編號{{照片編號}}',
+        '{{#照片格}}',
         '{{照片}}',
-        '{{照片說明}}{{/照片格}}',
+        '{{/照片格}}',
       ])
-      expect(xml.slice(cell.imageStart, cell.imageEnd)).toContain('<w:jc w:val="center"/>')
+      const image = xml.slice(cell.imageStart, cell.imageEnd)
+      expect(image).toContain('<w:spacing w:before="0" w:after="0"/>')
+      expect(image).toContain('<w:jc w:val="center"/>')
     }
   })
 
@@ -362,25 +387,24 @@ describe('送達證書黏貼照片（可插入圖片）Mock 範本', () => {
     expect(tables).toHaveLength(pages)
     expect(xml.match(/<w:pageBreakBefore\/>/g) ?? []).toHaveLength(Math.max(0, pages - 1))
     expect(xml.match(/<wp:inline\b/g) ?? []).toHaveLength(count)
-    expect(xml).not.toMatch(/\{\{[#/]照片[頁格]\}\}|\{\{應受送達人\}\}/)
+    expect(xml).not.toContain('{{')
     expect([...parts.keys()].filter((name) => name.startsWith('word/media/'))).toHaveLength(count)
     for (const table of tables) {
-      expect(text(table)).toContain(title + '應受送達人：' + recipient)
+      expect(text(table)).toBe(title + description(recipient))
       expect(table).toContain('Mock &lt;收件人&gt; &amp; 測試')
       expect(table.match(/<w:tr>/g)).toHaveLength(4)
     }
-    for (const photo of draft.photos) expect(text(xml)).toContain(photo.description)
+    expect(text(xml)).toBe((title + description(recipient)).repeat(pages) + '備註：')
+    expect(text(xml)).not.toContain('送達證書黏貼照片')
     if (count >= 1) {
       expect(parts.has('word/media/photo-1.png')).toBe(true)
-      expect(xml).toContain('&lt;script&gt;alert(1)&lt;/script&gt; &amp; &lt;b&gt;')
     }
     if (count >= 2) expect(parts.has('word/media/photo-2.jpeg')).toBe(true)
     if (count % 2) {
       const lastRow = [...tables.at(-1)!.matchAll(/<w:tr>[\s\S]*?<\/w:tr>/g)].at(-1)![0]
-      expect(text(lastRow)).toBe('編號')
+      expect(text(lastRow)).toBe('')
       expect(lastRow).toContain('<w:trHeight w:val="6175"')
       expect(lastRow).not.toMatch(/<wp:inline|\{\{/)
     }
-    if (count === 0) expect(text(xml)).toBe('')
   })
 })
