@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   addFiles: vi.fn(),
   create: vi.fn(async () => ({ id: 'created' })),
   update: vi.fn(async () => {}),
+  reloadTemplates: vi.fn(async () => {}),
   byId: vi.fn<() => CaseCategory | undefined>(() => undefined),
 }))
 vi.mock('@/stores/categories', () => ({
@@ -28,7 +29,7 @@ vi.mock('@/stores/templates', () => ({
       return mocks.templates
     },
     byId: (id: string) => mocks.templates.find((item) => item.id === id),
-    reload: async () => {},
+    reload: mocks.reloadTemplates,
     addFiles: mocks.addFiles,
   }),
 }))
@@ -47,6 +48,7 @@ afterEach(() => {
   mocks.templates = []
   mocks.create.mockClear()
   mocks.update.mockClear()
+  mocks.reloadTemplates.mockClear()
   mocks.byId.mockReset()
   mocks.addFiles.mockReset()
   if (execCommandDescriptor) Object.defineProperty(document, 'execCommand', execCommandDescriptor)
@@ -217,7 +219,7 @@ it('shows a manual-copy message when both clipboard methods fail', async () => {
   expect(host.textContent).not.toContain('已複製')
 })
 
-it('offers PDF reference attachments in the step picker with PDF upload accepted', async () => {
+it('accepts PDF reference attachments and refreshes their usage after category creation', async () => {
   mocks.templates = [
     {
       kind: 'pdf',
@@ -246,6 +248,15 @@ it('offers PDF reference attachments in the step picker with PDF upload accepted
   await nextTick()
   expect(checkbox.checked).toBe(true)
   expect(host.querySelector('input[type="file"]')?.getAttribute('accept')).toContain('.pdf')
+  await type('#category-step-0', 'Mock PDF step')
+  button('建立案件範本').click()
+  await vi.waitFor(() => expect(mocks.create).toHaveBeenCalledOnce())
+  expect(mocks.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      steps: [expect.objectContaining({ templateIds: ['mock-pdf'] })],
+    }),
+  )
+  await vi.waitFor(() => expect(mocks.reloadTemplates).toHaveBeenCalledOnce())
 })
 
 it.each(['manual', 'builtin', 'both'])(

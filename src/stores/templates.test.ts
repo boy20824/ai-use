@@ -104,6 +104,48 @@ it('retries a failed list and shares concurrent load requests', async () => {
   expect(store.error).toBe('')
 })
 
+it('refreshes cached usages without clearing the ready list', async () => {
+  const record: StoredTemplate = {
+    id: 'mock-template',
+    kind: 'docx',
+    fileName: 'Mock.docx',
+    mimeType: '',
+    sizeBytes: 0,
+    addedAt: '',
+    placeholders: [],
+    origin: 'upload',
+    usages: [],
+    data: new ArrayBuffer(0),
+  }
+  mocks.rows = [record]
+  const store = useTemplateStore()
+  await store.load()
+  const updated = {
+    ...record,
+    usages: [
+      {
+        categoryId: 'case',
+        categoryName: 'Mock case',
+        stepId: 's',
+        stepBody: 'Mock step',
+        sortOrder: 0,
+      },
+    ],
+  }
+  mocks.rows = [updated]
+  const refresh = store.load({ refresh: true })
+  expect(store.ready).toBe(true)
+  expect(store.items[0]?.usages).toEqual([])
+  await refresh
+  expect(store.items[0]?.usages).toEqual(updated.usages)
+
+  mocks.list.mockRejectedValueOnce(new Error('Mock unavailable'))
+  await store.load({ refresh: true })
+  expect(store.ready).toBe(true)
+  expect(store.error).toBe('')
+  expect(store.items[0]?.usages).toEqual(updated.usages)
+})
+
 it.each([undefined, 'not-an-array', {}])(
   'loads a Word summary with malformed placeholders %j',
   async (placeholders) => {

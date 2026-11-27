@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createApp, h, nextTick, type App } from 'vue'
+import { createApp, h, KeepAlive, nextTick, type App } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import TemplatesView from './TemplatesView.vue'
 
@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   canDelete: false,
   bytesFor: vi.fn(async () => new Uint8Array([1, 2, 3]).buffer),
   downloadBytes: vi.fn(),
+  load: vi.fn(async () => {}),
   remove: vi.fn(async () => {}),
 }))
 vi.mock('@/services/pdfPreview', () => ({ previewPdf: mocks.previewPdf }))
@@ -49,6 +50,7 @@ vi.mock('@/stores/templates', () => ({
   useTemplateStore: () => ({
     ready: true,
     total: 3,
+    load: mocks.load,
     bytesFor: mocks.bytesFor,
     remove: mocks.remove,
     items: [
@@ -57,7 +59,13 @@ vi.mock('@/stores/templates', () => ({
         fileName: '刑事文件.docx',
         placeholders: ['姓名'],
         usages: [
-          { categoryId: 'criminal', categoryName: '舊刑事類別', stepId: 's1', stepBody: '受理' },
+          {
+            categoryId: 'criminal',
+            categoryName: '舊刑事類別',
+            stepId: 's1',
+            stepBody: '受理',
+            stepTitle: '受理報案',
+          },
           ...[
             { categoryId: 'admin', categoryName: '行政類別', stepId: 's2', stepBody: '登錄' },
             { categoryId: 'civil', categoryName: '民事類別', stepId: 's3', stepBody: '送達' },
@@ -89,7 +97,7 @@ vi.mock('@/stores/templates', () => ({
 }))
 let app: App | undefined
 let host: HTMLDivElement
-async function mount() {
+async function mount(path = '/templates', keepAlive = false) {
   host = document.createElement('div')
   document.body.append(host)
   const router = createRouter({
@@ -99,9 +107,16 @@ async function mount() {
       { path: '/categories/:id', component: { render: () => null } },
     ],
   })
-  await router.push('/templates')
+  await router.push(path)
   await router.isReady()
-  app = createApp({ render: () => h(TemplatesView) }).use(router)
+  app = createApp({
+    render: () =>
+      keepAlive
+        ? h(KeepAlive, null, () =>
+            router.currentRoute.value.path === '/templates' ? h(TemplatesView) : null,
+          )
+        : h(TemplatesView),
+  }).use(router)
   app.mount(host)
   await nextTick()
   return router
@@ -120,6 +135,7 @@ const usageCell = (row: number) => rows()[row]!.querySelector('.template-usages'
 
 it('shows 尚未使用 for an unused template and lists a single category directly', async () => {
   await mount()
+  expect(mocks.load).toHaveBeenCalledExactlyOnceWith({ refresh: true })
   expect(usageCell(2).textContent?.trim()).toBe('尚未使用')
   const cell = usageCell(0)
   expect(cell.querySelector('details')).toBeNull()
@@ -141,7 +157,7 @@ it('lists two categories directly and groups shortened steps under their own cat
       group.querySelector('p')?.textContent?.trim(),
     ]),
   ).toEqual([
-    ['/categories/criminal', '刑事類別', '受理、複核 123456789012345678901…'],
+    ['/categories/criminal', '刑事類別', '受理報案、複核 123456789012345678901…'],
     ['/categories/admin', '行政類別', '登錄'],
   ])
 })
@@ -220,6 +236,40 @@ it('combines real filename/field search, group tabs, and the existing route filt
   clear.click()
   await vi.waitFor(() => expect(rows()).toHaveLength(3))
 })
+
+it('refreshes the library when returning to a cached view', async () => {
+  const router = await mount('/templates', true)
+  mocks.load.mockClear()
+  await router.push('/categories/criminal')
+  await router.push('/templates')
+  await nextTick()
+  expect(mocks.load).toHaveBeenCalledExactlyOnceWith({ refresh: true })
+  expect(rows()).toHaveLength(3)
+})
+
+it('filters by a usage category missing from the category store', async () => {
+  mocks.additionalCategoryCount = 2
+  const router = await mount('/templates?category=civil')
+  const select = host.querySelector<HTMLSelectElement>('#template-category')!
+  expect(select.value).toBe('civil')
+  expect(select.selectedOptions[0]?.textContent?.trim()).toBe('民事類別')
+  expect(rows()).toHaveLength(1)
+  expect(rows()[0]?.textContent).toContain('刑事文件.docx')
+  await router.replace({ query: { category: 'unknown' } })
+  await nextTick()
+  expect(select.value).toBe('')
+  expect(rows()).toHaveLength(3)
+})
+
+it('searches by the displayed step title and the current category name', async () => {
+  await mount()
+  const search = host.querySelector<HTMLInputElement>('#template-search')!
+  search.value = '刑事類別 受理報案'
+  search.dispatchEvent(new Event('input', { bubbles: true }))
+  await nextTick()
+  expect(rows()).toHaveLength(1)
+  expect(rows()[0]?.textContent).toContain('刑事文件.docx')
+})
 it('downloads the selected original template and hides maintenance controls for readers', async () => {
   await mount()
   expect(host.querySelector('input[type="file"]')).toBeNull()
@@ -276,7 +326,7 @@ it('uses the shared keyboard dialog for deletion, preserves existing loss copy, 
   expect(dialog.textContent).toContain(
     '確定後會解除這些連結，並從範本庫刪除檔案。案件範本與步驟會保留。',
   )
-  expect(dialog.textContent).toContain('受理')
+  expect(dialog.textContent).toContain('受理報案')
   expect(dialog.contains(document.activeElement)).toBe(true)
   document.activeElement!.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),

@@ -74,6 +74,134 @@ describe('category library', () => {
     for (const db of databases.splice(0)) db.close()
   })
 
+  it('counts only base and scenario references, even with a saved combination order', async () => {
+    const { app, db } = await boot()
+    databases.push(db)
+    try {
+      const admin = auth(
+        await loginWithCsrf(app, {
+          method: 'POST',
+          url: '/api/auth/login',
+          payload: { username: 'admin', password: passwords.admin },
+        }),
+      )
+      const created = await app.inject({
+        method: 'POST',
+        url: '/api/categories',
+        ...admin,
+        payload: {
+          name: 'Mock case',
+          variants: [
+            { id: 'scene', name: 'Mock scenario' },
+            { id: 'shared', name: 'Mock shared scenario' },
+          ],
+          steps: [
+            { id: 'base', body: 'Mock base' },
+            { id: 'module-only', body: 'Mock scenario step', variantIds: ['scene', 'shared'] },
+            { id: 'removed', body: 'Mock removed step' },
+          ],
+        },
+      })
+      expect(created.statusCode, created.body).toBe(201)
+      const category = created.json().category
+      const url = `/api/categories/${category.id}`
+      const [base, moduleOnly, removed] = category.steps.map((step: { id: string }) => step.id)
+      const upload = async (fileName: string, stepId: string) => {
+        const form = multipart(fileName, buildMinimalDocx('Mock content'), stepId)
+        const response = await app.inject({
+          method: 'POST',
+          url: '/api/templates',
+          cookies: admin.cookies,
+          headers: { ...admin.headers, ...form.headers },
+          payload: form.payload,
+        })
+        expect(response.statusCode, response.body).toBe(201)
+        return response.json().template.id as string
+      }
+      const shared = await upload('scene-photos-template.docx', base)
+      const orphanOnly = await upload('mock-orphan-only.docx', removed)
+      for (const id of [moduleOnly, removed]) {
+        const linked = await app.inject({
+          method: 'PATCH',
+          url: `${url}/steps/${id}`,
+          ...admin,
+          payload: { templateIds: id === removed ? [orphanOnly, shared] : [shared] },
+        })
+        expect(linked.statusCode, linked.body).toBe(200)
+      }
+      const combination = await app.inject({
+        method: 'PUT',
+        url: `${url}/combination-order`,
+        ...admin,
+        payload: { moduleIds: ['scene', 'shared'], stepIds: [moduleOnly, removed, base] },
+      })
+      expect(combination.statusCode, combination.body).toBe(200)
+      const list = async (categoryId?: string) => {
+        const response = await app.inject({
+          method: 'GET',
+          url: '/api/templates',
+          ...admin,
+          ...(categoryId ? { query: { categoryId } } : {}),
+        })
+        expect(response.statusCode, response.body).toBe(200)
+        return response.json().templates as {
+          id: string
+          linkedCategoryCount: number
+          usages: { categoryId: string; stepId: string }[]
+        }[]
+      }
+      const removeRef = async (scope: string, stepId: string) => {
+        const response = await app.inject({
+          method: 'DELETE',
+          url: `${url}/refs/${scope}/${stepId}`,
+          ...admin,
+        })
+        expect(response.statusCode, response.body).toBe(200)
+        return response.json().category
+      }
+      const expectSharedSteps = async (...stepIds: string[]) => {
+        const template = (await list()).find((item) => item.id === shared)!
+        expect(template.usages.map((usage) => [usage.categoryId, usage.stepId])).toEqual(
+          stepIds.map((id) => [category.id, id]),
+        )
+        expect(template.linkedCategoryCount).toBe(stepIds.length ? 1 : 0)
+      }
+
+      await expectSharedSteps(base, moduleOnly, removed)
+      const afterRemove = await removeRef('base', removed)
+      expect(
+        afterRemove.steps.find((step: { id: string }) => step.id === removed).templateIds,
+      ).toEqual([orphanOnly, shared])
+      expect(afterRemove.combinationOrders[0].stepIds).toContain(removed)
+      await expectSharedSteps(base, moduleOnly)
+      expect(afterRemove.templateCount).toBe(2)
+      expect((await list()).find((item) => item.id === orphanOnly)).toMatchObject({
+        linkedCategoryCount: 0,
+        usages: [],
+      })
+      expect((await list(category.id)).map((item) => item.id)).toEqual([shared])
+
+      const deletedStep = await app.inject({
+        method: 'DELETE',
+        url: `${url}/steps/${removed}`,
+        ...admin,
+        payload: { confirm: true },
+      })
+      expect(deletedStep.statusCode, deletedStep.body).toBe(204)
+      expect(createQueries(db).stepImpact(removed).templates).toEqual([])
+      await expectSharedSteps(base, moduleOnly)
+      await removeRef('scene', moduleOnly)
+      await expectSharedSteps(base, moduleOnly)
+      const deletedCategory = await app.inject({ method: 'DELETE', url, ...admin })
+      expect(deletedCategory.statusCode, deletedCategory.body).toBe(204)
+      await expectSharedSteps()
+      expect(createQueries(db).stepImpact(moduleOnly).templates).toEqual([])
+      expect(await list()).toHaveLength(2)
+    } finally {
+      await app.close()
+    }
+  })
+
   it('accepts the Mock photo template and generated 2/5/7-photo documents via the real upload route, and reports syntax positions', async () => {
     const { app, db } = await boot()
     databases.push(db)
@@ -279,6 +407,10 @@ describe('category library', () => {
     expect(theftSteps.map((step) => step.body)).toEqual(['通知事主', '製作筆錄'])
     expect(theftSteps.map((step) => step.id)).toEqual(createdSteps.map((step) => step.id))
     expect(renamed.json().category).not.toHaveProperty('code')
+    // Model a retained step whose stored title and body differ.
+    db.prepare(
+      "UPDATE category_steps SET details = json_set(details, '$.title', ?) WHERE id = ?",
+    ).run('聯絡事主', theftSteps[0]?.id)
 
     const viewerPatch = await app.inject({
       method: 'PATCH',
@@ -325,6 +457,7 @@ describe('category library', () => {
         categoryName: '竊盜案',
         stepId: theftSteps[0]?.id,
         stepBody: '通知事主',
+        stepTitle: '聯絡事主',
       }),
     ])
 

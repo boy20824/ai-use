@@ -5,6 +5,7 @@ interface TemplateUsage {
   categoryName: string
   stepId: string
   stepBody: string
+  stepTitle?: string
   sortOrder: number
 }
 

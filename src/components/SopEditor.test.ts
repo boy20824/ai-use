@@ -7,6 +7,7 @@ import type { CaseCategory } from '@/types/domain'
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   reload: vi.fn(async () => {}),
+  reloadTemplates: vi.fn(async () => {}),
   isSysadmin: false,
   templates: [{ id: 'mock-doc', fileName: 'Mock.docx', kind: 'docx' }],
 }))
@@ -20,6 +21,7 @@ vi.mock('@/stores/session', () => ({ useSessionStore: () => ({ isSysadmin: mocks
 vi.mock('@/stores/templates', () => ({
   useTemplateStore: () => ({
     items: mocks.templates,
+    reload: mocks.reloadTemplates,
     byId: (id: string) => mocks.templates.find((item) => item.id === id),
   }),
 }))
@@ -103,6 +105,7 @@ it('confirms taking a step out of the current list and lets the user add it back
     method: 'DELETE',
   })
   expect(current.value.steps).toHaveLength(3)
+  expect(mocks.reloadTemplates).toHaveBeenCalledOnce()
 
   const select = host.querySelector('select')!
   expect([...select.options].map((option) => option.value)).toEqual(['', 's', 'unreferenced'])
@@ -250,6 +253,7 @@ it('selects related documents in the scrollable picker and keeps the ordered lis
   button('儲存這個步驟').click()
   await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledOnce())
   expect(JSON.parse(mocks.request.mock.lastCall![1].body).templateIds).toEqual(['mock-doc'])
+  await vi.waitFor(() => expect(mocks.reloadTemplates).toHaveBeenCalledOnce())
 })
 
 it('loads, toggles and saves the strict parallel boolean with existing step configuration', async () => {

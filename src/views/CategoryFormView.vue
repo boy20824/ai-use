@@ -530,6 +530,8 @@ async function saveForm() {
       return
     }
     const created = await categories.create(input)
+    if (prepared.some((step) => step.templateIds.length > 0))
+      await templates.reload().catch(() => {})
     baseline.value = formSnapshot()
     const notice = { id: created.id, name: created.name || input.name }
     createdCategoryNotice.value = notice

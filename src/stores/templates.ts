@@ -53,6 +53,8 @@ export const useTemplateStore = defineStore('templates', () => {
   const ready = ref(false)
   const error = ref('')
   let pending: Promise<void> | null = null
+  let listRequest = 0
+  let appliedListRequest = 0
 
   const total = computed(() => items.value.length)
 
@@ -66,14 +68,18 @@ export const useTemplateStore = defineStore('templates', () => {
   }
 
   async function reload() {
-    remember(await repository.list())
+    const request = ++listRequest
+    const records = await repository.list()
+    if (request < appliedListRequest) return
+    appliedListRequest = request
+    remember(records)
   }
 
-  function load() {
-    if (ready.value) return Promise.resolve()
+  function load({ refresh = false } = {}) {
+    if (ready.value && !refresh) return Promise.resolve()
     pending ??= (async () => {
       try {
-        if (import.meta.env.DEV && templateStorageMode() === 'indexeddb') {
+        if (!ready.value && import.meta.env.DEV && templateStorageMode() === 'indexeddb') {
           const { ensureSampleTemplates } = await import('@/dev/sampleSeed')
           await ensureSampleTemplates(repository)
         }
@@ -81,7 +87,7 @@ export const useTemplateStore = defineStore('templates', () => {
         error.value = ''
         ready.value = true
       } catch {
-        error.value = '無法讀取範本文件。'
+        if (!ready.value) error.value = '無法讀取範本文件。'
       } finally {
         pending = null
       }

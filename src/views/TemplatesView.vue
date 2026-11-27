@@ -18,7 +18,7 @@ import type { TemplateSummary } from '@/storage'
 import { formatBytes } from '@/utils/format'
 import { displayFileName } from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -56,6 +56,11 @@ onMounted(() => {
   resetTabSlider()
   window.addEventListener('resize', resetTabSlider)
 })
+function refreshLibrary() {
+  void templates.load({ refresh: true })
+}
+onMounted(refreshLibrary)
+onActivated(refreshLibrary)
 onUnmounted(() => window.removeEventListener('resize', resetTabSlider))
 watch(group, async () => {
   await nextTick()
@@ -64,12 +69,27 @@ watch(group, async () => {
 
 const disabledReason = '需要可維護流程的權限才能上傳範本。刪除範本只有系統管理員可以操作。'
 
+const categoryOptions = computed(() => {
+  const options = new Map(categories.items.map(({ id, name }) => [id, name]))
+  for (const item of templates.items) {
+    for (const usage of item.usages) {
+      if (!options.has(usage.categoryId))
+        options.set(usage.categoryId, usage.categoryName || usage.categoryId)
+    }
+  }
+  return options
+})
+
 const requestedCategory = computed(() => {
   const raw = route.query.category
   const value = Array.isArray(raw) ? raw[0] : raw
   if (typeof value !== 'string') return ''
-  return categories.byId(value) ? value : ''
+  return categoryOptions.value.has(value) ? value : ''
 })
+
+function categoryNameFor(usage: TemplateSummary['usages'][number]) {
+  return categories.byId(usage.categoryId)?.name ?? usage.categoryName
+}
 
 const visible = computed(() => {
   const query = keyword.value.trim().toLocaleLowerCase()
@@ -78,14 +98,14 @@ const visible = computed(() => {
       (!requestedCategory.value ||
         item.usages.some((usage) => usage.categoryId === requestedCategory.value)) &&
       (!group.value ||
-        item.usages.some(
-          (usage) => (categories.byId(usage.categoryId)?.group ?? 'criminal') === group.value,
-        )) &&
+        item.usages.some((usage) => categories.byId(usage.categoryId)?.group === group.value)) &&
       (!query ||
         [
           displayFileName(item.fileName),
           ...item.placeholders,
-          ...item.usages.map((usage) => `${usage.categoryName} ${usage.stepBody}`),
+          ...item.usages.map(
+            (usage) => `${categoryNameFor(usage)} ${usage.stepTitle ?? usage.stepBody}`,
+          ),
         ]
           .join(' ')
           .toLocaleLowerCase()
@@ -117,8 +137,8 @@ async function previewTemplate(item: TemplateSummary) {
   }
 }
 
-function shortenStepBody(body: string) {
-  const step = body.replace(/\s+/g, ' ').trim()
+function shortenStepLabel(label: string) {
+  const step = label.replace(/\s+/g, ' ').trim()
   return step.length > 24 ? `${step.slice(0, 24)}…` : step
 }
 
@@ -129,12 +149,12 @@ function groupedUsages(item: TemplateSummary) {
     if (!category) {
       category = {
         categoryId: usage.categoryId,
-        name: categories.byId(usage.categoryId)?.name ?? usage.categoryName,
+        name: categoryNameFor(usage),
         steps: [],
       }
       groups.set(usage.categoryId, category)
     }
-    const step = shortenStepBody(usage.stepBody)
+    const step = shortenStepLabel(usage.stepTitle ?? usage.stepBody)
     if (step) category.steps.push(step)
   }
   return [...groups.values()]
@@ -147,8 +167,8 @@ const usageGroupsByTemplate = computed(() =>
 function usageLinks(item: TemplateSummary) {
   return item.usages
     .map((usage) => {
-      const categoryName = categories.byId(usage.categoryId)?.name ?? usage.categoryName
-      const short = shortenStepBody(usage.stepBody)
+      const categoryName = categoryNameFor(usage)
+      const short = shortenStepLabel(usage.stepTitle ?? usage.stepBody)
       return {
         id: `${usage.categoryId}-${usage.stepId}`,
         categoryId: usage.categoryId,
@@ -295,8 +315,8 @@ async function onFiles(files: File[]) {
         /><label for="template-category" class="sr-only">使用於案件</label
         ><select id="template-category" class="field" :value="requestedCategory" @change="onFilter">
           <option value="">使用於：全部案件</option>
-          <option v-for="item in categories.items" :key="item.id" :value="item.id">
-            {{ item.name }}
+          <option v-for="[id, name] in categoryOptions" :key="id" :value="id">
+            {{ name }}
           </option>
         </select>
       </div>
