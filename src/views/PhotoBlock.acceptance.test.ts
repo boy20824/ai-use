@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs'
 import { confirmedNavigation } from '@/test/confirmedNavigation'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, reactive, type App } from 'vue'
@@ -8,9 +9,10 @@ import JSZip from 'jszip'
 import CategoryView from './CategoryView.vue'
 import { fieldDefaults } from '@/config/fieldDefaults'
 import { buildPhotoTemplate } from '../../shared/photoTemplateFixture'
-import { mockPhotoDraft } from '../../shared/photoMock'
+import { mockJpeg, mockPhotoDraft } from '../../shared/photoMock'
 import { buildDocx, paragraph, run, wordDocument } from '../../shared/docxFixture'
-import { decodeXml, listPlaceholders } from '../../server/src/docxXml'
+import { decodeXml, docxZipLimits, listPlaceholders, readSafeZip } from '../../server/src/docxXml'
+import type { BlockPhoto } from '../../shared/photoBlockRender'
 import type { CaseCategory } from '@/types/domain'
 
 const mocks = vi.hoisted(() => ({
@@ -75,6 +77,107 @@ afterEach(() => {
   host?.remove()
   vi.restoreAllMocks()
   vi.clearAllMocks()
+})
+
+async function mountPublicPhotoTemplate(fileName: string) {
+  const data = new Uint8Array(readFileSync(`public/templates/${fileName}`))
+  mocks.library = [
+    { id: 'photo', fileName, data, sizeBytes: data.length, placeholders: listPlaceholders(data) },
+  ]
+  mocks.category = reactive({
+    id: 'mock',
+    name: 'Mock 照片驗收',
+    summary: '',
+    updatedAt: '',
+    templateCount: 1,
+    steps: [{ id: 'step', body: 'Mock 照片步驟', templateIds: ['photo'] }],
+    baseSteps: [{ stepId: 'step', sortOrder: 0 }],
+  })
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: '/categories/:id', component: CategoryView }],
+  })
+  await confirmedNavigation(router, '/categories/mock')
+  host = document.createElement('div')
+  document.body.append(host)
+  app = createApp({ render: () => h(RouterView) }).use(router)
+  app.mount(host)
+  return vi.waitFor(() => {
+    const panel = host.querySelector('[aria-label="照片區塊 photo"]')
+    expect(panel).not.toBeNull()
+    return panel!
+  })
+}
+
+function uploadPhoto(panel: Element, photo: BlockPhoto) {
+  const extension = photo.mime === 'image/jpeg' ? 'jpg' : 'png'
+  const file = new File([new Uint8Array(photo.bytes)], `${photo.id}.${extension}`, {
+    type: photo.mime,
+  })
+  mocks.read.mockResolvedValueOnce({ ...photo, description: '' })
+  const fileInput = panel.querySelector<HTMLInputElement>('input[type=file]')!
+  Object.defineProperty(fileInput, 'files', { configurable: true, value: [file] })
+  fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+  expect(mocks.read).toHaveBeenLastCalledWith(file)
+}
+
+it('送達證書從步驟加入 PNG/JPEG，以每頁兩格產生文件並隱藏未使用的攝影欄位', async () => {
+  const request = vi.spyOn(globalThis, 'fetch')
+  const panel = await mountPublicPhotoTemplate('delivery-certificate-photos-template.docx')
+  expect(panel.textContent).toContain('照片區塊（每頁 2 格）')
+  const recipient = 'Mock 收件人'
+  await input(
+    host.querySelector<HTMLInputElement>('[data-field-key="應受送達人"] input')!,
+    recipient,
+  )
+  const generate = button(host.querySelector('.fixed-step .step-documents')!, '產生')
+  const photos = mockPhotoDraft(3).photos
+  photos[1] = { ...photos[1]!, ...mockJpeg }
+
+  for (const [index, pages] of [1, 1, 2].entries()) {
+    const count = index + 1
+    uploadPhoto(panel, photos[index]!)
+    await vi.waitFor(() => expect(panel.textContent).toContain(`${count} 張 → ${pages} 頁`))
+    expect(panel.textContent).not.toMatch(/攝影時間|攝影地點|攝影人|覆寫共用值/)
+    expect(panel.querySelector('select, input:not([type="file"])')).toBeNull()
+    const note = `Mock 照片說明 ${count}`
+    await input(labeled(panel, `照片${count}說明`), note)
+    await vi.waitFor(() => expect(generate.disabled).toBe(false))
+    generate.click()
+    await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledTimes(count))
+    const [bytes, fileName] = mocks.download.mock.calls[index]!
+    expect(fileName).toBe('產生-delivery-certificate-photos-template.docx')
+    const parts = readSafeZip(bytes, docxZipLimits)
+    expect([...parts.keys()].filter((name) => name.startsWith('word/media/'))).toHaveLength(count)
+    const xml = xmlOf(bytes)
+    expect(xml.match(/<w:drawing\b/g) ?? []).toHaveLength(count)
+    expect(xml.match(/<w:pageBreakBefore\b/g) ?? []).toHaveLength(pages - 1)
+    const plain = textOf(bytes)
+    expect(plain.split(`應受送達人：${recipient}`)).toHaveLength(pages + 1)
+    expect(plain).toContain(note)
+    expect(plain).not.toContain('{{')
+    expect(xml).not.toContain('{{')
+  }
+  expect(request).not.toHaveBeenCalled()
+})
+
+it('刑案現場照片保留所有共用攝影欄位、單張覆寫與照片說明', async () => {
+  const panel = await mountPublicPhotoTemplate('scene-photos-template.docx')
+  expect(panel.textContent).toContain('共用攝影時間（民國年）')
+  expect(panel.querySelectorAll('select')).toHaveLength(3)
+  expect(labeled(panel, '共用攝影地點')).toBeInstanceOf(HTMLInputElement)
+  expect(labeled(panel, '共用攝影人')).toBeInstanceOf(HTMLInputElement)
+  uploadPhoto(panel, mockPhotoDraft(1).photos[0]!)
+  await vi.waitFor(() => expect(panel.textContent).toContain('1 張 → 1 頁'))
+  expect(labeled(panel, '照片1說明')).toBeInstanceOf(HTMLTextAreaElement)
+  const row = panel.querySelector('[aria-label="照片清單"] > li')!
+  const toggle = labeled(row, '覆寫共用值')
+  toggle.click()
+  await nextTick()
+  expect(row.textContent).toContain('照片1攝影時間')
+  expect(row.querySelectorAll('select')).toHaveLength(3)
+  expect(labeled(row, '照片1攝影地點')).toBeInstanceOf(HTMLInputElement)
+  expect(labeled(row, '照片1攝影人')).toBeInstanceOf(HTMLInputElement)
 })
 
 it('照片表單、同步區、單份與 ZIP 依範本隔離，排序、覆寫、離開清除，無寫入請求或草稿', async () => {

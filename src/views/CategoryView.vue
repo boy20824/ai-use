@@ -73,6 +73,7 @@ const defaultedFields = new Set<string>()
 const draftGeneration = ref(0)
 const photoDrafts = ref<PhotoDrafts>({})
 const photoCells = ref<Record<string, number>>({})
+const photoFieldsByTemplate = ref<Record<string, string[]>>({})
 const photoProcessing = ref(new Set<symbol>())
 function setPhotoProcessing(id: symbol, active: boolean) {
   if (active) photoProcessing.value.add(id)
@@ -288,6 +289,7 @@ function clearDraft() {
   photoDrafts.value = {}
   photoProcessing.value.clear()
   photoCells.value = {}
+  photoFieldsByTemplate.value = {}
   photoRevision++
   message.value = ''
   messageStepId.value = ''
@@ -325,6 +327,7 @@ async function renderOne(context: GenerationContext) {
   const draft = photoDrafts.value[id]
   if (
     photoCells.value[id] &&
+    (photoFieldsByTemplate.value[id]?.includes('攝影時間') ?? true) &&
     draft?.photos.some((photo) => {
       const time = photo.overrides?.time ?? draft.common.time
       return time !== '' && !parseRocDate(time)
@@ -435,19 +438,24 @@ watch(
     const readable = ids.filter((id) => (templates.byId(id)?.sizeBytes ?? 0) > 0)
     photoMetadataLoading = (async () => {
       const next: Record<string, number> = {}
+      const nextFields: Record<string, string[]> = {}
       for (const id of readable) {
         try {
           const bytes = await templates.bytesFor(id)
           if (version !== photoRevision) return
           if (!bytes) continue
           const block = readPhotoBlock(bytes)
-          if (block) next[id] = block.photoCellsPerPage
+          if (block) {
+            next[id] = block.photoCellsPerPage
+            nextFields[id] = block.fields
+          }
         } catch {
           /* Upload validation reports invalid syntax; unavailable files cannot render. */
         }
       }
       if (version !== photoRevision) return
       photoCells.value = next
+      photoFieldsByTemplate.value = nextFields
       photoDrafts.value = Object.fromEntries(
         Object.entries(photoDrafts.value).filter(([id]) => !!next[id]),
       )
@@ -1008,6 +1016,7 @@ defineExpose({ requestLeave, scrollToWorkbench })
                       v-if="photoCells[templateId]"
                       :template-id="templateId"
                       :cells="photoCells[templateId]!"
+                      :fields="photoFieldsByTemplate[templateId]"
                       :draft="photoDrafts[templateId]"
                       :busy="busy || photoProcessing.size > 0"
                       @update="setPhotoDraft(templateId, $event)"
@@ -1193,6 +1202,7 @@ defineExpose({ requestLeave, scrollToWorkbench })
                     <PhotoBlockFields
                       :template-id="templateId"
                       :cells="photoCells[templateId]!"
+                      :fields="photoFieldsByTemplate[templateId]"
                       :draft="photoDrafts[templateId]"
                       :busy="busy || photoProcessing.size > 0"
                       @update="setPhotoDraft(templateId, $event)"
@@ -1342,6 +1352,7 @@ defineExpose({ requestLeave, scrollToWorkbench })
                       v-if="photoCells[templateId]"
                       :template-id="templateId"
                       :cells="photoCells[templateId]!"
+                      :fields="photoFieldsByTemplate[templateId]"
                       :draft="photoDrafts[templateId]"
                       :busy="busy || photoProcessing.size > 0"
                       @update="setPhotoDraft(templateId, $event)"

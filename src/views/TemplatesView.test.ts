@@ -22,6 +22,7 @@ vi.mock('vue', async (importOriginal) => {
 const mocks = vi.hoisted(() => ({
   pdf: false,
   firstFileName: '刑事文件.docx',
+  unusedFileName: '未連結.docx',
   additionalCategoryCount: 0,
   previewPdf: vi.fn(async () => {}),
   canUpload: false,
@@ -87,7 +88,7 @@ vi.mock('@/stores/templates', () => ({
       },
       {
         id: 'three',
-        fileName: mocks.pdf ? '作業規定（Mock）.pdf' : '未連結.docx',
+        fileName: mocks.pdf ? '作業規定（Mock）.pdf' : mocks.unusedFileName,
         kind: mocks.pdf ? 'pdf' : 'docx',
         mimeType: mocks.pdf ? 'application/pdf' : undefined,
         placeholders: [],
@@ -105,6 +106,7 @@ async function mount(path = '/templates', keepAlive = false) {
     history: createMemoryHistory(),
     routes: [
       { path: '/templates', component: TemplatesView },
+      { path: '/categories', component: { render: () => null } },
       { path: '/categories/:id', component: { render: () => null } },
     ],
   })
@@ -127,6 +129,7 @@ afterEach(() => {
   host?.remove()
   mocks.pdf = false
   mocks.firstFileName = '刑事文件.docx'
+  mocks.unusedFileName = '未連結.docx'
   mocks.additionalCategoryCount = 0
   mocks.canUpload = false
   mocks.canDelete = false
@@ -142,6 +145,8 @@ it('labels the uploaded photo mock, explains photo insertion, and downloads by i
   const nameCell = rows()[0]!.querySelector('.template-name')!
   expect(nameCell.querySelector('p')?.textContent?.trim()).toBe(label)
   expect(nameCell.querySelector('p + p')?.textContent?.trim()).toBe('此範本可在產生文件時插入照片')
+  expect(usageCell(0).querySelector('a[href="/categories/criminal"]')).not.toBeNull()
+  expect(usageCell(0).querySelector('a[href="/categories"]')).toBeNull()
   const otherName = rows()[1]!.querySelector('.template-name')!
   expect(otherName.querySelector('p')?.textContent?.trim()).toBe('行政文件.docx')
   expect(otherName.textContent).not.toContain('可插入圖片')
@@ -177,12 +182,29 @@ it('shows 尚未使用 for an unused template and lists a single category direct
   await mount()
   expect(mocks.load).toHaveBeenCalledExactlyOnceWith({ refresh: true })
   expect(usageCell(2).textContent?.trim()).toBe('尚未使用')
+  expect(usageCell(2).querySelector('a')).toBeNull()
   const cell = usageCell(0)
   expect(cell.querySelector('details')).toBeNull()
   expect(cell.querySelectorAll('a')).toHaveLength(1)
   expect(cell.querySelector('a')?.getAttribute('href')).toBe('/categories/criminal')
   expect(cell.querySelector('a')?.textContent?.trim()).toBe('刑事類別')
 })
+
+it.each(['delivery-certificate-photos-template.docx', 'scene-photos-template.docx'])(
+  'links the unused %s template to the case template list',
+  async (fileName) => {
+    mocks.unusedFileName = fileName
+    const router = await mount()
+    const cell = usageCell(2)
+    expect(cell.textContent).toContain('尚未使用')
+    expect(cell.textContent).toContain('要插入照片，請到案件範本的步驟選用這份範本')
+    const link = cell.querySelector('a')!
+    expect(link.textContent?.trim()).toBe('前往案件範本')
+    expect(link.getAttribute('href')).toBe('/categories')
+    link.click()
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/categories'))
+  },
+)
 
 it('lists two categories directly and groups shortened steps under their own category', async () => {
   mocks.additionalCategoryCount = 1

@@ -16,6 +16,7 @@ import { defaultRocDateSlash } from '@/utils/rocDate'
 const props = defineProps<{
   templateId: string
   cells: number
+  fields?: readonly string[]
   draft?: PhotoDraft
   busy?: boolean
 }>()
@@ -28,6 +29,11 @@ const empty: PhotoDraft = {
   photos: [],
 }
 const state = computed(() => props.draft ?? empty)
+const showTime = computed(() => props.fields?.includes('攝影時間') ?? true)
+const showLocation = computed(() => props.fields?.includes('攝影地點') ?? true)
+const showPhotographer = computed(() => props.fields?.includes('攝影人') ?? true)
+const showDescription = computed(() => props.fields?.includes('照片說明') ?? true)
+const showCommon = computed(() => showTime.value || showLocation.value || showPhotographer.value)
 const error = ref('')
 const loading = ref(false)
 let disposed = false
@@ -162,22 +168,22 @@ function dragStart(event: DragEvent, index: number) {
       </label>
       <span class="ml-2 text-xs text-ink-muted">或將照片拖放到此區</span>
       <p v-if="loading" role="status" class="mt-2 text-sm">正在本機處理照片…</p>
-      <div class="mt-3 grid gap-3">
-        <div>
+      <div v-if="showCommon" class="mt-3 grid gap-3">
+        <div v-if="showTime">
           <span class="text-sm">共用攝影時間（民國年）</span
           ><RocDateField
             :model-value="state.common.time"
             @update:model-value="common('time', $event)"
           />
         </div>
-        <label class="text-sm"
+        <label v-if="showLocation" class="text-sm"
           >共用攝影地點<input
             class="field mt-1 w-full"
             :value="state.common.location"
             autocomplete="off"
             @input="common('location', ($event.target as HTMLInputElement).value)"
         /></label>
-        <label class="text-sm"
+        <label v-if="showPhotographer" class="text-sm"
           >共用攝影人<input
             class="field mt-1 w-full"
             :value="state.common.photographer"
@@ -229,35 +235,35 @@ function dragStart(event: DragEvent, index: number) {
             </button>
           </div>
           <PhotoThumbnail :photo="photo" />
-          <label class="mt-2 block text-sm"
+          <label v-if="showDescription" class="mt-2 block text-sm"
             >照片{{ index + 1 }}說明<textarea
               class="field mt-1 w-full"
               :value="photo.description"
               @input="description(index, ($event.target as HTMLTextAreaElement).value)"
             />
           </label>
-          <label class="mt-2 inline-flex items-center gap-2 text-sm"
+          <label v-if="showCommon" class="mt-2 inline-flex items-center gap-2 text-sm"
             ><input
               type="checkbox"
               :checked="!!photo.overrides"
               @change="toggleOverride(index, ($event.target as HTMLInputElement).checked)"
             />覆寫共用值</label
           >
-          <div v-if="photo.overrides" class="mt-2 grid gap-2">
-            <div>
+          <div v-if="showCommon && photo.overrides" class="mt-2 grid gap-2">
+            <div v-if="showTime">
               <span class="text-sm">照片{{ index + 1 }}攝影時間</span
               ><RocDateField
                 :model-value="photo.overrides.time ?? state.common.time"
                 @update:model-value="override(index, 'time', $event)"
               />
             </div>
-            <label class="text-sm"
+            <label v-if="showLocation" class="text-sm"
               >照片{{ index + 1 }}攝影地點<input
                 class="field mt-1 w-full"
                 :value="photo.overrides.location ?? state.common.location"
                 @input="override(index, 'location', ($event.target as HTMLInputElement).value)"
             /></label>
-            <label class="text-sm"
+            <label v-if="showPhotographer" class="text-sm"
               >照片{{ index + 1 }}攝影人<input
                 class="field mt-1 w-full"
                 :value="photo.overrides.photographer ?? state.common.photographer"
