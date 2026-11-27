@@ -7,6 +7,7 @@ import SopEditor from '@/components/SopEditor.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import FileDropzone from '@/components/FileDropzone.vue'
 import PageIntro from '@/components/PageIntro.vue'
+import TemplatePicker from '@/components/TemplatePicker.vue'
 import { createdCategoryNotice, editPermissionHint } from '@/stores/categoryNotices'
 import { focusAlert } from '@/utils/focusAlert'
 import { restoreMoveFocus } from '@/utils/stepFocus'
@@ -372,14 +373,6 @@ function templateName(id: string) {
     : '範本'
 }
 
-function pickerMatches(step: DraftStep) {
-  const query = step.query.trim().toLocaleLowerCase()
-  if (!query) return templates.items
-  return templates.items.filter((item) =>
-    displayFileName(item.fileName).toLocaleLowerCase().includes(query),
-  )
-}
-
 function togglePicker(index: number) {
   const next = [...steps.value]
   const current = next[index]
@@ -388,23 +381,11 @@ function togglePicker(index: number) {
   steps.value = next
 }
 
-function setQuery(index: number, event: Event) {
-  const target = event.target
-  if (!(target instanceof HTMLInputElement)) return
+function toggleTemplate(index: number, templateId: string, checked: boolean) {
   const next = [...steps.value]
   const current = next[index]
   if (!current) return
-  next[index] = { ...current, query: target.value }
-  steps.value = next
-}
-
-function toggleTemplate(index: number, templateId: string, event: Event) {
-  const target = event.target
-  if (!(target instanceof HTMLInputElement)) return
-  const next = [...steps.value]
-  const current = next[index]
-  if (!current) return
-  const templateIds = target.checked
+  const templateIds = checked
     ? current.templateIds.includes(templateId)
       ? current.templateIds
       : [...current.templateIds, templateId]
@@ -890,41 +871,17 @@ async function saveForm() {
               從範本庫選取
             </button>
             <div v-if="step.pickerOpen" class="mt-3 rounded-2xl border border-edge bg-surface p-4">
-              <label class="block text-xs font-medium text-stone-600" :for="`picker-${step.key}`">
-                搜尋範本
-              </label>
-              <input
-                :id="`picker-${step.key}`"
-                :value="step.query"
-                type="search"
-                placeholder="請輸入檔名"
-                class="field mt-2 w-full"
-                @input="setQuery(index, $event)"
-              />
-              <p v-if="templates.items.length === 0" class="mt-3 text-sm text-ink-muted">
-                範本庫還沒有文件。可先在下方上傳。
-              </p>
-              <p v-else-if="pickerMatches(step).length === 0" class="mt-3 text-sm text-ink-muted">
-                沒有符合的範本。
-              </p>
-              <ul v-else class="mt-3 max-h-48 space-y-2 overflow-auto">
-                <li v-for="item in pickerMatches(step)" :key="item.id">
-                  <label class="flex items-start gap-2 text-sm text-stone-800">
-                    <input
-                      type="checkbox"
-                      class="mt-1"
-                      :checked="step.templateIds.includes(item.id)"
-                      @change="toggleTemplate(index, item.id, $event)"
-                    />
-                    <span class="break-all"
-                      >{{ displayFileName(item.fileName) }}
-                      <span v-if="item.kind === 'pdf'" class="text-xs text-ink-muted"
-                        >參考文件</span
-                      ></span
-                    >
-                  </label>
-                </li>
-              </ul>
+              <TemplatePicker
+                v-model:query="step.query"
+                :items="templates.items"
+                :model-value="step.templateIds"
+                :id-prefix="`picker-${step.key}`"
+                @toggle="(id, checked) => toggleTemplate(index, id, checked)"
+              >
+                <template v-if="templates.items.length === 0" #empty>
+                  範本庫還沒有文件。可先在下方上傳。
+                </template>
+              </TemplatePicker>
               <div class="mt-4">
                 <FileDropzone
                   :enabled="true"

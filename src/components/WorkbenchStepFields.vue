@@ -98,14 +98,21 @@ const emit = defineEmits<{
         class="flex items-center justify-between gap-3 px-4 py-3"
         :class="{ 'flex-wrap': !!photoCells?.[item.id] }"
       >
-        <span class="min-w-0">
+        <div class="min-w-0">
           <span class="block break-all text-sm font-medium text-ink">{{
             displayFileName(item.fileName)
           }}</span>
-          <span class="mt-1 block text-xs text-ink-muted">
-            {{ item.placeholders.length > 0 ? item.placeholders.join('、') : '沒有偵測到欄位' }}
-          </span>
-        </span>
+          <details class="mt-1 text-xs text-ink-muted">
+            <summary class="cursor-pointer">
+              {{
+                item.placeholders.length ? `${item.placeholders.length} 個欄位` : '沒有偵測到欄位'
+              }}
+            </summary>
+            <span v-if="item.placeholders.length" class="block break-words">
+              {{ item.placeholders.join('、') }}
+            </span>
+          </details>
+        </div>
         <div class="flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"

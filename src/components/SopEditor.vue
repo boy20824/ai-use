@@ -8,6 +8,7 @@ import { useTemplateStore } from '@/stores/templates'
 import type { CaseCategory, CategoryModule, CategoryStep, StepRef } from '@/types/domain'
 import ConfirmDialog from './ConfirmDialog.vue'
 import FileDropzone from './FileDropzone.vue'
+import TemplatePicker from './TemplatePicker.vue'
 import CombinationOrderEditor from './CombinationOrderEditor.vue'
 import { focusAlert } from '@/utils/focusAlert'
 import { restoreMoveFocus } from '@/utils/stepFocus'
@@ -27,6 +28,7 @@ const titleError = ref('')
 const titleAlert = ref<HTMLElement | null>(null)
 const uploadError = ref('')
 const titleErrorId = useId()
+const templatePickerId = `sop-picker-${useId()}`
 const existingStepSelect = ref<HTMLSelectElement | null>(null)
 const selectedStepId = ref('')
 const scopePanel = ref<HTMLElement | null>(null)
@@ -637,13 +639,12 @@ function moveTemplate(index: number, delta: number, button: HTMLButtonElement) {
         >
         <fieldset>
           <legend>關聯文件（沿用範本庫）</legend>
-          <label v-for="t in templates.items" :key="t.id" class="block"
-            ><input v-model="templateIds" type="checkbox" :value="t.id" />
-            {{ displayFileName(t.fileName)
-            }}<span v-if="t.kind === 'pdf'" class="ml-2 text-xs text-ink-muted"
-              >參考文件</span
-            ></label
-          >
+          <TemplatePicker
+            :key="editing.id"
+            v-model="templateIds"
+            :items="templates.items"
+            :id-prefix="templatePickerId"
+          />
           <ol>
             <li v-for="(id, i) in templateIds" :key="id">
               {{ displayFileName(templates.byId(id)?.fileName ?? '範本')

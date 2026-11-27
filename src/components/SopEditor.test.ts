@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   reload: vi.fn(async () => {}),
   isSysadmin: false,
+  templates: [{ id: 'mock-doc', fileName: 'Mock.docx', kind: 'docx' }],
 }))
 vi.mock('./CombinationOrderEditor.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/services/api', () => ({
@@ -17,7 +18,10 @@ vi.mock('@/services/api', () => ({
 vi.mock('@/stores/categories', () => ({ useCategoryStore: () => ({ reload: mocks.reload }) }))
 vi.mock('@/stores/session', () => ({ useSessionStore: () => ({ isSysadmin: mocks.isSysadmin }) }))
 vi.mock('@/stores/templates', () => ({
-  useTemplateStore: () => ({ items: [], byId: () => undefined }),
+  useTemplateStore: () => ({
+    items: mocks.templates,
+    byId: (id: string) => mocks.templates.find((item) => item.id === id),
+  }),
 }))
 const category: CaseCategory = {
   id: 'mock',
@@ -219,6 +223,33 @@ it('keeps scenario deletion hidden for maintainers', async () => {
   button('Mock module').click()
   await nextTick()
   expect(host.textContent).not.toContain('刪除這個情境')
+})
+
+it('selects related documents in the scrollable picker and keeps the ordered list below', async () => {
+  await mount()
+  mocks.request.mockResolvedValueOnce(
+    new Response(JSON.stringify({ impact: { base: [], modules: [] } }), { status: 200 }),
+  )
+  button('編輯這個步驟').click()
+  await vi.waitFor(() => expect(host.textContent).toContain('這個步驟用在'))
+  const legend = [...host.querySelectorAll('legend')].find((node) =>
+    node.textContent?.includes('關聯文件（沿用範本庫）'),
+  )!
+  const fieldset = legend.parentElement!
+  expect(fieldset.querySelector('input[type="search"]')?.getAttribute('placeholder')).toBe(
+    '請輸入檔名',
+  )
+  const list = fieldset.querySelector('ul.max-h-48.overflow-auto')!
+  const checkbox = list.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+  checkbox.checked = true
+  checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+  await nextTick()
+  expect(fieldset.querySelector('ol li')?.textContent).toContain('Mock.docx')
+  expect(fieldset.querySelector('ol button[data-move="up"]')).not.toBeNull()
+
+  button('儲存這個步驟').click()
+  await vi.waitFor(() => expect(mocks.reload).toHaveBeenCalledOnce())
+  expect(JSON.parse(mocks.request.mock.lastCall![1].body).templateIds).toEqual(['mock-doc'])
 })
 
 it('loads, toggles and saves the strict parallel boolean with existing step configuration', async () => {

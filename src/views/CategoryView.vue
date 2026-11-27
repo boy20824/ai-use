@@ -4,6 +4,7 @@ import { fieldMappingIssues } from '@/workbench/fieldMapping'
 import StepFields from '@/components/StepFields.vue'
 import StepDateField from '@/components/StepDateField.vue'
 import ReferenceDocuments from '@/components/ReferenceDocuments.vue'
+import TemplatePicker from '@/components/TemplatePicker.vue'
 import WorkbenchStepFields from '@/components/WorkbenchStepFields.vue'
 import PhotoBlockFields from '@/components/PhotoBlockFields.vue'
 import { readPhotoBlock } from '../../server/src/docxXml'
@@ -495,12 +496,7 @@ const overviewHint = computed(() => {
 
 const additionChoices = computed(() => {
   const linked = new Set(categoryTemplateIds.value)
-  const query = pickerQuery.value.trim().toLocaleLowerCase()
-  return templates.items.filter((item) => {
-    if (item.kind === 'pdf' || linked.has(item.id)) return false
-    if (!query) return true
-    return displayFileName(item.fileName).toLocaleLowerCase().includes(query)
-  })
+  return templates.items.filter((item) => item.kind !== 'pdf' && !linked.has(item.id))
 })
 
 function isTemporary(id: string) {
@@ -513,12 +509,10 @@ function toggleOverview(id: string, event: Event) {
   unchecked.value = { ...unchecked.value, [id]: !target.checked }
 }
 
-function toggleTemporary(id: string, event: Event) {
-  const target = event.target
-  if (!(target instanceof HTMLInputElement)) return
+function toggleTemporary(id: string, checked: boolean) {
   if (categoryTemplateIds.value.includes(id)) return
   const key = contextKey(null, id)
-  if (target.checked) {
+  if (checked) {
     if (!temporaryIds.value.includes(id)) temporaryIds.value = [...temporaryIds.value, id]
     if (unchecked.value[key]) {
       const next = { ...unchecked.value }
@@ -532,12 +526,6 @@ function toggleTemporary(id: string, event: Event) {
   const next = { ...unchecked.value }
   delete next[key]
   unchecked.value = next
-}
-
-function onPickerQuery(event: Event) {
-  const target = event.target
-  if (!(target instanceof HTMLInputElement)) return
-  pickerQuery.value = target.value
 }
 
 async function produceChecked() {
@@ -1091,15 +1079,20 @@ defineExpose({ requestLeave, scrollToWorkbench })
                       <span v-if="item.canRunInParallel" class="block text-sm"
                         >此步驟可請其他人同步進行</span
                       >
-                      <span class="mt-1 block text-xs text-ink-muted">
-                        {{
-                          item.placeholders.length > 0
-                            ? item.placeholders.join('、')
-                            : '沒有偵測到欄位'
-                        }}
-                      </span>
                     </span>
                   </label>
+                  <details class="ml-7 mt-1 text-xs text-ink-muted">
+                    <summary class="cursor-pointer">
+                      {{
+                        item.placeholders.length
+                          ? `${item.placeholders.length} 個欄位`
+                          : '沒有偵測到欄位'
+                      }}
+                    </summary>
+                    <span v-if="item.placeholders.length" class="block break-words">
+                      {{ item.placeholders.join('、') }}
+                    </span>
+                  </details>
                 </li>
               </ul>
 
@@ -1107,39 +1100,24 @@ defineExpose({ requestLeave, scrollToWorkbench })
                 v-if="pickerOpen"
                 class="mt-3 rounded-2xl border border-edge bg-surface-muted p-4"
               >
-                <label class="block text-xs font-medium text-stone-600" for="overview-picker">
-                  搜尋範本
-                </label>
-                <input
-                  id="overview-picker"
-                  :value="pickerQuery"
-                  type="search"
-                  placeholder="請輸入檔名"
-                  class="field mt-2 w-full"
-                  @input="onPickerQuery"
-                />
-                <p class="mt-2 text-xs leading-5 text-ink-muted">
-                  這裡勾選的範本只加進這次清單，不會寫進案件範本或步驟。
-                </p>
-                <p v-if="templates.items.length === 0" class="mt-3 text-sm text-ink-muted">
-                  範本庫還沒有文件。
-                </p>
-                <p v-else-if="additionChoices.length === 0" class="mt-3 text-sm text-ink-muted">
-                  沒有其他可加入的範本。
-                </p>
-                <ul v-else class="mt-3 max-h-48 space-y-2 overflow-auto">
-                  <li v-for="item in additionChoices" :key="item.id">
-                    <label class="flex items-start gap-2 text-sm text-stone-800">
-                      <input
-                        type="checkbox"
-                        class="mt-1"
-                        :checked="temporaryIds.includes(item.id)"
-                        @change="toggleTemporary(item.id, $event)"
-                      />
-                      <span class="break-all">{{ displayFileName(item.fileName) }}</span>
-                    </label>
-                  </li>
-                </ul>
+                <TemplatePicker
+                  v-model:query="pickerQuery"
+                  :items="additionChoices"
+                  :model-value="temporaryIds"
+                  id-prefix="overview-picker"
+                  @toggle="toggleTemporary"
+                >
+                  <template #hint>
+                    <p class="mt-2 text-xs leading-5 text-ink-muted">
+                      這裡勾選的範本只加進這次清單，不會寫進案件範本或步驟。
+                    </p>
+                  </template>
+                  <template #empty>
+                    {{
+                      templates.items.length === 0 ? '範本庫還沒有文件。' : '沒有其他可加入的範本。'
+                    }}
+                  </template>
+                </TemplatePicker>
               </div>
             </div>
 
