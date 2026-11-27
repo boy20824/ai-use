@@ -123,6 +123,7 @@ export interface TemplateUsage {
   categoryName: string
   stepId: string
   stepBody: string
+  stepTitle?: string
   sortOrder: number
 }
 
@@ -237,6 +238,7 @@ interface UsageRow {
   category_name: string
   step_id: string
   step_body: string
+  step_title: string | null
   sort_order: number
 }
 
@@ -637,6 +639,17 @@ export function createQueries(db: AppDatabase) {
   const deleteSession = db.prepare('DELETE FROM sessions WHERE id = ?')
   const deleteUserSessions = db.prepare('DELETE FROM sessions WHERE user_id = ?')
 
+  const referencedStep = `(
+    EXISTS (
+      SELECT 1 FROM base_step_refs br
+      WHERE br.category_id = cs.category_id AND br.step_id = cs.id
+    )
+    OR EXISTS (
+      SELECT 1 FROM module_step_refs mr
+      JOIN category_modules m ON m.id = mr.module_id
+      WHERE m.category_id = cs.category_id AND mr.step_id = cs.id
+    )
+  )`
   const listCategoryRows = db.prepare(`
     SELECT
       id,
@@ -648,7 +661,7 @@ export function createQueries(db: AppDatabase) {
         SELECT COUNT(*)
         FROM step_templates st
         JOIN category_steps cs ON cs.id = st.step_id
-        WHERE cs.category_id = categories.id
+        WHERE cs.category_id = categories.id AND ${referencedStep}
       ) AS templateCount
     FROM categories
   `)
@@ -673,7 +686,7 @@ export function createQueries(db: AppDatabase) {
         SELECT COUNT(*)
         FROM step_templates st
         JOIN category_steps cs ON cs.id = st.step_id
-        WHERE cs.category_id = categories.id
+        WHERE cs.category_id = categories.id AND ${referencedStep}
       ) AS templateCount
     FROM categories
     WHERE id = ?
@@ -721,7 +734,7 @@ export function createQueries(db: AppDatabase) {
     FROM templates t
     JOIN step_templates st ON st.template_id = t.id
     JOIN category_steps cs ON cs.id = st.step_id
-    WHERE cs.category_id = ?
+    WHERE cs.category_id = ? AND ${referencedStep}
     GROUP BY t.id
     ORDER BY MIN(cs.sort_order), MIN(st.sort_order), t.id LIMIT ? OFFSET ?
   `)
@@ -736,11 +749,12 @@ export function createQueries(db: AppDatabase) {
       c.name AS category_name,
       cs.id AS step_id,
       cs.body AS step_body,
+      json_extract(cs.details, '$.title') AS step_title,
       st.sort_order
     FROM step_templates st
     JOIN category_steps cs ON cs.id = st.step_id
     JOIN categories c ON c.id = cs.category_id
-    WHERE st.template_id = ?
+    WHERE st.template_id = ? AND ${referencedStep}
     ORDER BY c.name COLLATE NOCASE, cs.sort_order, st.sort_order, st.template_id
   `)
   const insertLink = db.prepare(
@@ -835,6 +849,7 @@ export function createQueries(db: AppDatabase) {
         categoryName: row.category_name,
         stepId: row.step_id,
         stepBody: row.step_body,
+        ...(typeof row.step_title === 'string' ? { stepTitle: row.step_title } : {}),
         sortOrder: row.sort_order,
       })
       grouped.set(row.template_id, list)

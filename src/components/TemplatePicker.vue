@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick } from 'vue'
 import type { TemplateSummary } from '@/storage'
-import { displayFileName } from '@/utils/fileName'
+import { displayFileName, photoTemplateLabel } from '@/utils/fileName'
 
 const props = defineProps<{
   items: readonly Pick<TemplateSummary, 'id' | 'fileName' | 'kind'>[]
@@ -21,8 +21,16 @@ const selectedCount = computed(
 const matches = computed(() => {
   const search = query.value.trim().toLocaleLowerCase()
   return props.items
-    .map((item) => ({ ...item, name: displayFileName(item.fileName) }))
-    .filter((item) => item.name.toLocaleLowerCase().includes(search))
+    .map((item) => {
+      const label = photoTemplateLabel(item.fileName)
+      const fileName = displayFileName(item.fileName)
+      return { ...item, fileName, name: label ?? fileName, canInsertPhotos: !!label }
+    })
+    .filter(
+      (item) =>
+        item.name.toLocaleLowerCase().includes(search) ||
+        item.fileName.toLocaleLowerCase().includes(search),
+    )
     .sort((a, b) => Number(selected.value.has(b.id)) - Number(selected.value.has(a.id)))
 })
 
@@ -78,6 +86,7 @@ async function toggle(id: string, event: Event) {
           <span class="break-all">
             {{ item.name }}
             <span v-if="item.kind === 'pdf'" class="text-xs text-ink-muted">參考文件</span>
+            <span v-if="item.canInsertPhotos" class="block text-xs text-ink-muted">可插入圖片</span>
           </span>
         </label>
       </li>

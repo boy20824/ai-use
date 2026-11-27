@@ -47,6 +47,7 @@ describe('動態照片區塊', () => {
       readFileSync(new URL('../../public/templates/scene-photos-template.docx', import.meta.url)),
     )
     expect(xmlOf(checkedIn)).toBe(xmlOf(template))
+    expect(text(xmlOf(checkedIn))).toContain('刑案現場照片（可插入圖片）')
     expect(new PizZip(checkedIn).file('docProps/core.xml')!.asText()).toContain(
       '<dc:creator>Mock</dc:creator>',
     )
@@ -68,6 +69,7 @@ describe('動態照片區塊', () => {
     expect(xml.match(/<w:tbl>/g) ?? []).toHaveLength(pages)
     expect(xml.match(/<w:pageBreakBefore\/>/g) ?? []).toHaveLength(Math.max(0, pages - 1))
     expect(xml.match(/<wp:inline\b/g) ?? []).toHaveLength(count)
+    expect(plain.match(/刑案現場照片（可插入圖片）/g) ?? []).toHaveLength(pages)
     expect(plain.match(/Mock 竊盜案/g) ?? []).toHaveLength(pages)
     expect([...plain.matchAll(/編號（(\d+)）/g)].map((m) => Number(m[1]))).toEqual(
       Array.from({ length: count }, (_, i) => i + 1),
@@ -75,7 +77,7 @@ describe('動態照片區塊', () => {
     expect(() => readSafeZip(output, docxZipLimits)).not.toThrow()
     expect(() => assertSafeZip(output, docxZipLimits)).not.toThrow()
     expect(() => normalizeDocx(output, docxZipLimits)).not.toThrow()
-    if (!count) expect(xml).not.toMatch(/Mock 現場照片|<w:br|pageBreakBefore|照片頁/)
+    if (!count) expect(xml).not.toMatch(/<w:br|pageBreakBefore|照片頁/)
   })
   it('5 張最後一格保留 4 列、框線、標題，所有內容空白', () => {
     const xml = xmlOf(renderPhotoDocx(template, mockPhotoFields, mockPhotoDraft(5)))
@@ -277,13 +279,13 @@ describe('動態照片區塊', () => {
   })
 })
 
-describe('Mock 送達證書黏貼單', () => {
+describe('送達證書黏貼照片（可插入圖片）Mock 範本', () => {
   const delivery = new Uint8Array(
     readFileSync(
       new URL('../../public/templates/delivery-certificate-photos-template.docx', import.meta.url),
     ),
   )
-  const title = 'Mock 送達證書黏貼單'
+  const title = '送達證書黏貼照片（可插入圖片）'
 
   it('可逐位元組重建、只含內部關聯，且只列出應受送達人', () => {
     const rebuilt = buildDeliveryPhotoTemplate()

@@ -1,6 +1,8 @@
 import PizZip from 'pizzip'
 import { buildDocx, wordDocument } from './docxFixture.ts'
 
+const title = '刑案現場照片（可插入圖片）'
+
 function p(text: string, size = 28, extra = '') {
   return `<w:p><w:pPr><w:spacing w:before="0" w:after="0"/>${extra}</w:pPr><w:r><w:rPr><w:rFonts w:ascii="標楷體" w:eastAsia="標楷體" w:hAnsi="標楷體"/><w:sz w:val="${size}"/></w:rPr><w:t>${text}</w:t></w:r></w:p>`
 }
@@ -33,11 +35,7 @@ export function buildPhotoTemplate(): Uint8Array {
   const borders = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']
     .map((side) => `<w:${side} w:val="single" w:sz="4" w:color="auto"/>`)
     .join('')
-  const heading = p(
-    'Mock 現場照片',
-    40,
-    '<w:jc w:val="distribute"/><w:ind w:left="1560" w:right="1560"/>',
-  )
+  const heading = p(title, 40, '<w:jc w:val="distribute"/><w:ind w:left="1560" w:right="1560"/>')
   const table =
     `<w:tbl><w:tblPr><w:tblW w:w="8791" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders>${borders}</w:tblBorders><w:tblCellMar><w:left w:w="28" w:type="dxa"/><w:right w:w="28" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tblGrid>${grid.map((w) => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>` +
     row(
@@ -65,7 +63,7 @@ export function buildPhotoTemplate(): Uint8Array {
   const zip = new PizZip(buildDocx({ document: doc }))
   zip.file(
     'docProps/core.xml',
-    '<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Mock</dc:creator><cp:lastModifiedBy>Mock</cp:lastModifiedBy><dc:title>Mock 現場照片範本</dc:title></cp:coreProperties>',
+    `<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>Mock</dc:creator><cp:lastModifiedBy>Mock</cp:lastModifiedBy><dc:title>Mock ${title} 範本</dc:title></cp:coreProperties>`,
   )
   zip.file(
     '[Content_Types].xml',

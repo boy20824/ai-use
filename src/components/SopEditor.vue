@@ -12,7 +12,7 @@ import TemplatePicker from './TemplatePicker.vue'
 import CombinationOrderEditor from './CombinationOrderEditor.vue'
 import { focusAlert } from '@/utils/focusAlert'
 import { restoreMoveFocus } from '@/utils/stepFocus'
-import { displayFileName } from '@/utils/fileName'
+import { displayTemplateName } from '@/utils/fileName'
 const props = defineProps<{
   category: CaseCategory
   savingForm?: boolean
@@ -139,7 +139,10 @@ async function request(path: string, method: string, body?: unknown) {
   if (!response.ok) throw new Error(await apiErrorMessage(response, '無法儲存設定。'))
   return response.status === 204 ? {} : await response.json()
 }
-async function run(action: () => Promise<void>, errorTarget = error) {
+async function run(
+  action: () => Promise<void>,
+  { errorTarget = error, refreshTemplates = false } = {},
+) {
   if (busy.value) return false
   busy.value = true
   error.value = ''
@@ -149,6 +152,7 @@ async function run(action: () => Promise<void>, errorTarget = error) {
   try {
     await action()
     await categories.reload()
+    if (refreshTemplates) await templates.reload().catch(() => {})
     return true
   } catch (cause) {
     errorTarget.value = cause instanceof Error ? cause.message : '無法儲存設定。'
@@ -171,10 +175,13 @@ async function removeRef() {
   const item = pendingRemoval.value
   if (!item) return
   pendingRemoval.value = null
-  const removed = await run(async () => {
-    await request(refPath(item.stepId), 'DELETE')
-    if (editing.value?.id === item.stepId) void closeEditor(false)
-  })
+  const removed = await run(
+    async () => {
+      await request(refPath(item.stepId), 'DELETE')
+      if (editing.value?.id === item.stepId) void closeEditor(false)
+    },
+    { refreshTemplates: true },
+  )
   if (removed) {
     await nextTick()
     ;(existingStepSelect.value ?? addStepButton.value)?.focus()
@@ -183,7 +190,7 @@ async function removeRef() {
 async function addExistingStep() {
   const id = selectedStepId.value
   if (!availableSteps.value.some((step) => step.id === id)) return
-  const added = await run(() => putRef(id, nextSortOrder()))
+  const added = await run(() => putRef(id, nextSortOrder()), { refreshTemplates: true })
   if (added) {
     selectedStepId.value = ''
     await nextTick()
@@ -271,12 +278,15 @@ async function deleteModule() {
   const module = pendingModuleDelete.value
   pendingModuleDelete.value = null
   if (!module || !session.isSysadmin || dirtyStep.value) return
-  const deleted = await run(async () => {
-    await request(`/modules/${module.id}`, 'DELETE', { confirm: true })
-    void closeEditor(false)
-    scope.value = 'base'
-    selectedStepId.value = ''
-  })
+  const deleted = await run(
+    async () => {
+      await request(`/modules/${module.id}`, 'DELETE', { confirm: true })
+      void closeEditor(false)
+      scope.value = 'base'
+      selectedStepId.value = ''
+    },
+    { refreshTemplates: true },
+  )
   if (deleted) {
     await nextTick()
     scenarioHeading.value?.focus()
@@ -355,23 +365,26 @@ async function saveStep(restoreFocus = true) {
     canRunInParallel: canRunInParallel.value,
     templateIds: templateIds.value,
   }
-  const saved = await run(async () => {
-    const id = step.id || newStepId
-    const result = await request(
-      id ? `/steps/${encodeURIComponent(id)}` : '/steps',
-      id ? 'PATCH' : 'POST',
-      data,
-    )
-    if (!step.id) {
-      // The server adds a new step to the base list. Continue wiring the same
-      // step if a later request fails and the editor retries.
-      newStepId ||= result.step.id as string
-      const current = refs.value.find((ref) => ref.stepId === newStepId)
-      await putRef(newStepId, current?.sortOrder ?? nextSortOrder())
-      if (scope.value !== 'base')
-        await request(`/refs/base/${encodeURIComponent(newStepId)}`, 'DELETE')
-    }
-  })
+  const saved = await run(
+    async () => {
+      const id = step.id || newStepId
+      const result = await request(
+        id ? `/steps/${encodeURIComponent(id)}` : '/steps',
+        id ? 'PATCH' : 'POST',
+        data,
+      )
+      if (!step.id) {
+        // The server adds a new step to the base list. Continue wiring the same
+        // step if a later request fails and the editor retries.
+        newStepId ||= result.step.id as string
+        const current = refs.value.find((ref) => ref.stepId === newStepId)
+        await putRef(newStepId, current?.sortOrder ?? nextSortOrder())
+        if (scope.value !== 'base')
+          await request(`/refs/base/${encodeURIComponent(newStepId)}`, 'DELETE')
+      }
+    },
+    { refreshTemplates: true },
+  )
   if (!saved) return false
   savedStep.value = step.id || 'new'
   await closeEditor(restoreFocus)
@@ -393,12 +406,15 @@ defineExpose({
   dismissConfirmation,
 })
 async function upload(files: File[]) {
-  await run(async () => {
-    const result = await templates.addFiles(files, editing.value?.id || undefined)
-    templateIds.value = [...new Set([...templateIds.value, ...result.ids])]
-    uploadError.value =
-      result.rejected.join('。') || (result.ids.length ? '' : '沒有可保存的 Word 或 PDF 範本。')
-  }, uploadError)
+  await run(
+    async () => {
+      const result = await templates.addFiles(files, editing.value?.id || undefined)
+      templateIds.value = [...new Set([...templateIds.value, ...result.ids])]
+      uploadError.value =
+        result.rejected.join('。') || (result.ids.length ? '' : '沒有可保存的 Word 或 PDF 範本。')
+    },
+    { errorTarget: uploadError },
+  )
 }
 function moveTemplate(index: number, delta: number, button: HTMLButtonElement) {
   const target = index + delta
@@ -518,7 +534,9 @@ function moveTemplate(index: number, delta: number, button: HTMLButtonElement) {
             <p class="text-xs">
               {{
                 stepFor(r.stepId)
-                  ?.templateIds.map((id) => displayFileName(templates.byId(id)?.fileName ?? '範本'))
+                  ?.templateIds.map((id) =>
+                    displayTemplateName(templates.byId(id)?.fileName ?? '範本'),
+                  )
                   .join('、')
               }}
             </p>
@@ -647,7 +665,7 @@ function moveTemplate(index: number, delta: number, button: HTMLButtonElement) {
           />
           <ol>
             <li v-for="(id, i) in templateIds" :key="id">
-              {{ displayFileName(templates.byId(id)?.fileName ?? '範本')
+              {{ displayTemplateName(templates.byId(id)?.fileName ?? '範本')
               }}<span v-if="templates.byId(id)?.kind === 'pdf'" class="ml-2 text-xs text-ink-muted"
                 >參考文件</span
               >
@@ -657,7 +675,7 @@ function moveTemplate(index: number, delta: number, button: HTMLButtonElement) {
                   class="btn-move"
                   :disabled="i === 0"
                   data-move="up"
-                  :aria-label="`上移：${title || '步驟'}的範本 ${displayFileName(templates.byId(id)?.fileName ?? '範本')}`"
+                  :aria-label="`上移：${title || '步驟'}的範本 ${displayTemplateName(templates.byId(id)?.fileName ?? '範本')}`"
                   @click="moveTemplate(i, -1, $event.currentTarget as HTMLButtonElement)"
                 >
                   上移
@@ -667,7 +685,7 @@ function moveTemplate(index: number, delta: number, button: HTMLButtonElement) {
                   class="btn-move"
                   :disabled="i === templateIds.length - 1"
                   data-move="down"
-                  :aria-label="`下移：${title || '步驟'}的範本 ${displayFileName(templates.byId(id)?.fileName ?? '範本')}`"
+                  :aria-label="`下移：${title || '步驟'}的範本 ${displayTemplateName(templates.byId(id)?.fileName ?? '範本')}`"
                   @click="moveTemplate(i, 1, $event.currentTarget as HTMLButtonElement)"
                 >
                   下移

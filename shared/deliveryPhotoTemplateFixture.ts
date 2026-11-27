@@ -1,7 +1,7 @@
 import PizZip from 'pizzip'
 import { buildDocx, run, wordDocument } from './docxFixture.ts'
 
-const title = 'Mock 送達證書黏貼單'
+const title = '送達證書黏貼照片（可插入圖片）'
 const tableWidth = 9490
 const centered = '<w:jc w:val="center"/>'
 const tinyParagraphProperties =

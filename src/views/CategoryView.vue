@@ -39,7 +39,7 @@ import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import type { CategoryStep } from '@/types/domain'
 import { downloadBlob, downloadBytes } from '@/utils/download'
-import { displayFileName } from '@/utils/fileName'
+import { displayFileName, displayTemplateName } from '@/utils/fileName'
 import { composeSteps } from '@/workbench/compose'
 import { applyFieldDefaults } from '@/config/fieldDefaults'
 import { initialDraftValues } from '@/workbench/draft'
@@ -380,7 +380,7 @@ async function produceStep(stepId: string, templateIds: string[], index: number)
       rendered.push(await renderOne(context))
     } catch {
       const template = templates.byId(templateId)
-      failed.push(template ? displayFileName(template.fileName) : '範本')
+      failed.push(template ? displayTemplateName(template.fileName) : '範本')
     }
     if (version !== draftVersion) return
   }
@@ -540,7 +540,7 @@ async function produceChecked() {
     try {
       rendered.push(await renderOne(template))
     } catch {
-      failed.push(displayFileName(template.fileName))
+      failed.push(displayTemplateName(template.fileName))
     }
     if (version !== draftVersion) return
   }
@@ -1068,7 +1068,7 @@ defineExpose({ requestLeave, scrollToWorkbench })
                     />
                     <span class="min-w-0">
                       <span class="block break-all font-medium text-ink">
-                        {{ item.stepTitle }}：{{ displayFileName(item.fileName) }}
+                        {{ item.stepTitle }}：{{ displayTemplateName(item.fileName) }}
                         <span
                           v-if="isTemporary(item.templateId)"
                           class="ml-2 text-xs font-normal text-accent-ink"
@@ -1188,7 +1188,7 @@ defineExpose({ requestLeave, scrollToWorkbench })
                 >
                   <div v-if="photoCells[templateId]" class="mt-4">
                     <p class="text-sm font-medium">
-                      {{ displayFileName(templates.byId(templateId)?.fileName ?? '') }}
+                      {{ displayTemplateName(templates.byId(templateId)?.fileName ?? '') }}
                     </p>
                     <PhotoBlockFields
                       :template-id="templateId"
@@ -1255,7 +1255,7 @@ defineExpose({ requestLeave, scrollToWorkbench })
                 :disabled="!canGenerateStep(item.stepId!)"
                 @click="produceOne(item.stepId!, item.templateId)"
               >
-                {{ item.stepTitle }}：{{ displayFileName(item.fileName) }}
+                {{ item.stepTitle }}：{{ displayTemplateName(item.fileName) }}
               </button>
             </li>
           </ul>

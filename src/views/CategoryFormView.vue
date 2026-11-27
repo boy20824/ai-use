@@ -14,7 +14,7 @@ import { restoreMoveFocus } from '@/utils/stepFocus'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
-import { displayFileName } from '@/utils/fileName'
+import { displayTemplateName } from '@/utils/fileName'
 import { fieldMappingIssues } from '@/workbench/fieldMapping'
 import { inputFields } from '@/workbench/overview'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
@@ -369,7 +369,7 @@ function onStep(index: number, event: Event) {
 function templateName(id: string) {
   const found = templates.byId(id)
   return found
-    ? `${displayFileName(found.fileName)}${found.kind === 'pdf' ? '（參考文件）' : ''}`
+    ? `${displayTemplateName(found.fileName)}${found.kind === 'pdf' ? '（參考文件）' : ''}`
     : '範本'
 }
 
@@ -530,6 +530,8 @@ async function saveForm() {
       return
     }
     const created = await categories.create(input)
+    if (prepared.some((step) => step.templateIds.length > 0))
+      await templates.reload().catch(() => {})
     baseline.value = formSnapshot()
     const notice = { id: created.id, name: created.name || input.name }
     createdCategoryNotice.value = notice

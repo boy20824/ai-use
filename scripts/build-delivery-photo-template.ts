@@ -5,4 +5,4 @@ await writeFile(
   new URL('../public/templates/delivery-certificate-photos-template.docx', import.meta.url),
   buildDeliveryPhotoTemplate(),
 )
-console.log('已建立 Mock 送達證書黏貼單範本。')
+console.log('已建立 送達證書黏貼照片（可插入圖片）Mock 範本。')

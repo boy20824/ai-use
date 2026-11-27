@@ -7,9 +7,10 @@ import { editPermissionHint } from '@/stores/categoryNotices'
 import { useCategoryStore } from '@/stores/categories'
 import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
+import type { TemplateSummary } from '@/storage'
 import AppIcon from '@/components/AppIcon.vue'
 import { categoryGroups } from '@/config/app'
-import { displayFileName } from '@/utils/fileName'
+import { displayTemplateName } from '@/utils/fileName'
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 
@@ -20,11 +21,11 @@ const { onMove } = useSpotlight()
 
 const latestTemplates = computed(() => templates.items.slice(0, 4))
 
-function usageLabel(usages: { categoryId: string; categoryName: string; stepBody: string }[]) {
+function usageLabel(usages: TemplateSummary['usages']) {
   const labels = usages
     .map((usage) => {
       const categoryName = categories.byId(usage.categoryId)?.name ?? usage.categoryName
-      const step = usage.stepBody.replace(/\s+/g, ' ').trim()
+      const step = (usage.stepTitle ?? usage.stepBody).replace(/\s+/g, ' ').trim()
       if (!categoryName) return step
       return step ? `${categoryName} → ${step}` : categoryName
     })
@@ -106,7 +107,7 @@ function usageLabel(usages: { categoryId: string; categoryName: string; stepBody
             @pointermove="onMove"
             ><span class="entry-icon"><AppIcon /></span
             ><span
-              ><strong>{{ displayFileName(item.fileName) }}</strong
+              ><strong>{{ displayTemplateName(item.fileName) }}</strong
               ><small>{{ usageLabel(item.usages) }}</small></span
             ></RouterLink
           >

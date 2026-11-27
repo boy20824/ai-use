@@ -64,17 +64,21 @@ const photoTags = '{{照片}}、{{照片編號}}、{{攝影時間}}、{{攝影�
     </p>
     <ul class="mt-2 space-y-1">
       <li>
-        <a class="text-accent-ink underline" href="/templates/scene-photos-template.docx" download>
-          下載 Mock 照片區塊範本（每頁 2 格）
+        <a
+          class="text-accent-ink underline"
+          href="/templates/scene-photos-template.docx"
+          download="刑案現場照片（可插入圖片）.docx"
+        >
+          下載 刑案現場照片（可插入圖片）Mock 範本
         </a>
       </li>
       <li>
         <a
           class="text-accent-ink underline"
           href="/templates/delivery-certificate-photos-template.docx"
-          download
+          download="送達證書黏貼照片（可插入圖片）.docx"
         >
-          下載 Mock 送達證書黏貼單（每頁 2 格）
+          下載 送達證書黏貼照片（可插入圖片）Mock 範本
         </a>
       </li>
     </ul>

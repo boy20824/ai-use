@@ -16,9 +16,9 @@ import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import type { TemplateSummary } from '@/storage'
 import { formatBytes } from '@/utils/format'
-import { displayFileName } from '@/utils/fileName'
+import { displayFileName, displayTemplateName, photoTemplateLabel } from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -56,6 +56,11 @@ onMounted(() => {
   resetTabSlider()
   window.addEventListener('resize', resetTabSlider)
 })
+function refreshLibrary() {
+  void templates.load({ refresh: true })
+}
+onMounted(refreshLibrary)
+onActivated(refreshLibrary)
 onUnmounted(() => window.removeEventListener('resize', resetTabSlider))
 watch(group, async () => {
   await nextTick()
@@ -64,12 +69,27 @@ watch(group, async () => {
 
 const disabledReason = '需要可維護流程的權限才能上傳範本。刪除範本只有系統管理員可以操作。'
 
+const categoryOptions = computed(() => {
+  const options = new Map(categories.items.map(({ id, name }) => [id, name]))
+  for (const item of templates.items) {
+    for (const usage of item.usages) {
+      if (!options.has(usage.categoryId))
+        options.set(usage.categoryId, usage.categoryName || usage.categoryId)
+    }
+  }
+  return options
+})
+
 const requestedCategory = computed(() => {
   const raw = route.query.category
   const value = Array.isArray(raw) ? raw[0] : raw
   if (typeof value !== 'string') return ''
-  return categories.byId(value) ? value : ''
+  return categoryOptions.value.has(value) ? value : ''
 })
+
+function categoryNameFor(usage: TemplateSummary['usages'][number]) {
+  return categories.byId(usage.categoryId)?.name ?? usage.categoryName
+}
 
 const visible = computed(() => {
   const query = keyword.value.trim().toLocaleLowerCase()
@@ -78,14 +98,15 @@ const visible = computed(() => {
       (!requestedCategory.value ||
         item.usages.some((usage) => usage.categoryId === requestedCategory.value)) &&
       (!group.value ||
-        item.usages.some(
-          (usage) => (categories.byId(usage.categoryId)?.group ?? 'criminal') === group.value,
-        )) &&
+        item.usages.some((usage) => categories.byId(usage.categoryId)?.group === group.value)) &&
       (!query ||
         [
           displayFileName(item.fileName),
           ...item.placeholders,
-          ...item.usages.map((usage) => `${usage.categoryName} ${usage.stepBody}`),
+          ...item.usages.map(
+            (usage) => `${categoryNameFor(usage)} ${usage.stepTitle ?? usage.stepBody}`,
+          ),
+          photoTemplateLabel(item.fileName) ?? '',
         ]
           .join(' ')
           .toLocaleLowerCase()
@@ -117,8 +138,8 @@ async function previewTemplate(item: TemplateSummary) {
   }
 }
 
-function shortenStepBody(body: string) {
-  const step = body.replace(/\s+/g, ' ').trim()
+function shortenStepLabel(label: string) {
+  const step = label.replace(/\s+/g, ' ').trim()
   return step.length > 24 ? `${step.slice(0, 24)}…` : step
 }
 
@@ -129,12 +150,12 @@ function groupedUsages(item: TemplateSummary) {
     if (!category) {
       category = {
         categoryId: usage.categoryId,
-        name: categories.byId(usage.categoryId)?.name ?? usage.categoryName,
+        name: categoryNameFor(usage),
         steps: [],
       }
       groups.set(usage.categoryId, category)
     }
-    const step = shortenStepBody(usage.stepBody)
+    const step = shortenStepLabel(usage.stepTitle ?? usage.stepBody)
     if (step) category.steps.push(step)
   }
   return [...groups.values()]
@@ -147,8 +168,8 @@ const usageGroupsByTemplate = computed(() =>
 function usageLinks(item: TemplateSummary) {
   return item.usages
     .map((usage) => {
-      const categoryName = categories.byId(usage.categoryId)?.name ?? usage.categoryName
-      const short = shortenStepBody(usage.stepBody)
+      const categoryName = categoryNameFor(usage)
+      const short = shortenStepLabel(usage.stepTitle ?? usage.stepBody)
       return {
         id: `${usage.categoryId}-${usage.stepId}`,
         categoryId: usage.categoryId,
@@ -182,7 +203,7 @@ async function confirmRemove() {
     await categories.reload()
     pendingDelete.value = null
     feedbackTone.value = 'ok'
-    feedback.value = `已從範本庫移除「${displayFileName(item.fileName)}」。`
+    feedback.value = `已從範本庫移除「${displayTemplateName(item.fileName)}」。`
   } catch (cause) {
     feedbackTone.value = 'warn'
     feedback.value = cause instanceof Error ? cause.message : '無法移除範本。'
@@ -295,8 +316,8 @@ async function onFiles(files: File[]) {
         /><label for="template-category" class="sr-only">使用於案件</label
         ><select id="template-category" class="field" :value="requestedCategory" @change="onFilter">
           <option value="">使用於：全部案件</option>
-          <option v-for="item in categories.items" :key="item.id" :value="item.id">
-            {{ item.name }}
+          <option v-for="[id, name] in categoryOptions" :key="id" :value="id">
+            {{ name }}
           </option>
         </select>
       </div>
@@ -365,7 +386,10 @@ async function onFiles(files: File[]) {
               <span class="entry-icon"><AppIcon /></span>
               <div>
                 <p class="font-semibold text-ink [overflow-wrap:anywhere]">
-                  {{ displayFileName(item.fileName) }}
+                  {{ displayTemplateName(item.fileName) }}
+                </p>
+                <p v-if="photoTemplateLabel(item.fileName)" class="mt-1 text-xs text-ink-muted">
+                  此範本可在產生文件時插入照片
                 </p>
                 <span class="rounded border border-edge px-1.5 text-xs">{{
                   item.kind === 'pdf' ? 'PDF' : 'Word'
@@ -437,7 +461,7 @@ async function onFiles(files: File[]) {
                 <button
                   type="button"
                   class="focus-control download-template"
-                  :aria-label="`下載 ${displayFileName(item.fileName)}`"
+                  :aria-label="`下載 ${displayTemplateName(item.fileName)}`"
                   @click="downloadTemplate(item)"
                 >
                   <AppIcon name="download" /><span v-if="item.kind === 'pdf'">下載</span>
@@ -464,7 +488,7 @@ async function onFiles(files: File[]) {
                   v-if="session.canDelete"
                   type="button"
                   class="btn-secondary px-2.5 py-1.5 text-xs text-tone-danger-ink"
-                  :aria-label="`移除 ${displayFileName(item.fileName)}`"
+                  :aria-label="`移除 ${displayTemplateName(item.fileName)}`"
                   @click="askRemove(item)"
                 >
                   移除
@@ -503,12 +527,12 @@ async function onFiles(files: File[]) {
       <p class="mt-2 text-sm leading-6 text-stone-600">
         <template v-if="usageLinks(pendingDelete).length > 0">
           「{{
-            displayFileName(pendingDelete.fileName)
+            displayTemplateName(pendingDelete.fileName)
           }}」目前用在下列案件範本的步驟。確定後會解除這些連結，並從範本庫刪除檔案。案件範本與步驟會保留。
         </template>
         <template v-else>
           「{{
-            displayFileName(pendingDelete.fileName)
+            displayTemplateName(pendingDelete.fileName)
           }}」尚未連結任何步驟。確定後會從範本庫刪除檔案。
         </template>
       </p>
