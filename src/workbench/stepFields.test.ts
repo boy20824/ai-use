@@ -8,7 +8,6 @@ import {
   generationContexts,
   sharedFieldNames,
   localFieldNames,
-  sharedFieldLabels,
   contextValues,
   filledContext,
   missingContextFields,
@@ -102,13 +101,6 @@ describe('step field placement acceptance', () => {
   it('deduplicates tags in first appearance order and omits photo-specific markers (2)', () => {
     const { contexts } = fixture()
     expect(localFieldNames(contexts, ['日期', '承辦單位'])).toEqual(['被害人姓名', '案由', '姓名'])
-  })
-  it('labels only visible steps with current composition numbers and counts each step once (3,7)', () => {
-    const { steps, contexts } = fixture()
-    expect(sharedFieldLabels(steps, contexts)['案由']).toBe('共用：步驟 2、5')
-    expect(sharedFieldLabels(steps, contexts)['被害人姓名']).toBeUndefined()
-    const reversed = [...steps].reverse()
-    expect(sharedFieldLabels(reversed, contexts)['案由']).toBe('共用：步驟 1、4')
   })
   it('shares exact same-name values across steps and temporary templates (3,9)', () => {
     const { contexts } = fixture()

@@ -5,17 +5,21 @@ import ReferenceDocuments from './ReferenceDocuments.vue'
 import StepFields from './StepFields.vue'
 import StepDateField from './StepDateField.vue'
 import type { FieldDef } from '@/types/domain'
+import type { FieldOwnership } from '@/workbench/fieldOwnership'
 import type { OverviewTemplate } from '@/workbench/overview'
 import { inputFields } from '@/workbench/overview'
 import { displayTemplateName } from '@/utils/fileName'
 const props = defineProps<{
-  sharedLabels?: Record<string, string>
+  ownership?: FieldOwnership
+  stepId?: string
+  stepNumbers?: ReadonlyMap<string, number>
   fields: string[]
   values: Record<string, string>
   dateOverride?: string
   definitions?: FieldDef[]
   prefix: string
   missing: string[]
+  missingHint?: string[]
   templates: OverviewTemplate[]
   photoCells?: Record<string, number>
   busy: boolean
@@ -54,7 +58,9 @@ const emit = defineEmits<{
       :fields="fields"
       :values="values"
       :definitions="definitions"
-      :shared-labels="sharedLabels"
+      :ownership="ownership"
+      :step-id="stepId"
+      :step-numbers="stepNumbers"
       :prefix="prefix"
       @update="(key, value) => emit('update', key, value)"
     />
@@ -68,8 +74,8 @@ const emit = defineEmits<{
     </div>
   </section>
   <MissingFieldsHint
-    v-if="missing.length"
-    :missing="missing"
+    v-if="(missingHint ?? missing).length"
+    :missing="missingHint ?? missing"
     class="mt-2"
     @focus="emit('focusField', $event)"
   />
@@ -85,11 +91,6 @@ const emit = defineEmits<{
       >
         產生本步驟全部
       </button>
-      <MissingFieldsHint
-        v-if="missing.length"
-        :missing="missing"
-        @focus="emit('focusField', $event)"
-      />
     </div>
     <ul class="step-template-list divide-y divide-edge">
       <li
@@ -123,11 +124,6 @@ const emit = defineEmits<{
           >
             產生
           </button>
-          <MissingFieldsHint
-            v-if="missing.length"
-            :missing="missing"
-            @focus="emit('focusField', $event)"
-          />
         </div>
       </li>
     </ul>

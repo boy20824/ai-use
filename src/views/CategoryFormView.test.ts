@@ -128,6 +128,77 @@ it('keeps create views narrow throughout the wizard', async () => {
   }
 })
 
+it('opens a read-only check for base and module tags, escapes marker text and restores focus', async () => {
+  mocks.byId.mockReturnValue({
+    id: 'existing',
+    name: 'Mock',
+    summary: '',
+    updatedAt: '',
+    templateCount: 2,
+    builtinFields: { 姓名: true },
+    steps: [
+      { id: 'base', body: 'Mock 基本步驟', templateIds: ['base-doc'] },
+      { id: 'module-step', body: 'Mock 模組步驟', templateIds: ['module-doc'] },
+    ],
+    baseSteps: [{ stepId: 'base', sortOrder: 0 }],
+    modules: [
+      {
+        id: 'module',
+        categoryId: 'existing',
+        name: 'Mock 模組',
+        sortOrder: 0,
+        steps: [{ stepId: 'module-step', sortOrder: 0 }],
+      },
+    ],
+  })
+  mocks.templates = ['base-doc', 'module-doc'].map((id) => ({
+    id,
+    fileName: `${id}.docx`,
+    kind: 'docx',
+    mimeType: 'mock/docx',
+    sizeBytes: 0,
+    addedAt: '',
+    origin: 'upload',
+    usages: [],
+    placeholders:
+      id === 'base-doc' ? ['姓名', '地址'] : ['姓名', '員警姓名', '案發地址', '<img src=x>'],
+  }))
+  await mountForm('/categories/existing/edit')
+  const open = button('重複欄位檢查')
+  const panel = document.getElementById(open.getAttribute('aria-controls')!)!
+  open.focus()
+  open.click()
+  await nextTick()
+  expect(open.getAttribute('aria-expanded')).toBe('true')
+  expect(document.activeElement).toBe(panel.querySelector('h2'))
+  expect([...panel.querySelectorAll('thead th')].map((cell) => cell.textContent)).toEqual([
+    '標記',
+    '出現位置',
+    '次數',
+  ])
+  const rows = [...panel.querySelectorAll('tbody tr')]
+  const row = (name: string) => rows.find((item) => item.querySelector('th')?.textContent === name)!
+  expect([...row('姓名').querySelectorAll('li')].map((item) => item.textContent)).toEqual([
+    '基本 SOP',
+    '基本 SOP－Mock 基本步驟－base-doc.docx',
+    'Mock 模組－Mock 模組步驟－module-doc.docx',
+  ])
+  expect(row('姓名').querySelector('td:last-child')?.textContent?.trim()).toBe('3共用')
+  expect(row('員警姓名').querySelector('td:last-child')?.textContent?.trim()).toBe('1')
+  expect(row('<img src=x>')).toBeDefined()
+  expect(panel.querySelector('img, input')).toBeNull()
+  expect(panel.textContent).toContain('姓名／員警姓名')
+  expect(panel.textContent).toContain('地址／案發地址')
+  document.activeElement?.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+  )
+  await nextTick()
+  expect(open.getAttribute('aria-expanded')).toBe('false')
+  expect(panel.style.display).toBe('none')
+  expect(document.activeElement).toBe(open)
+  expect(mocks.update).not.toHaveBeenCalled()
+})
+
 it('widens only the existing SOP step and preserves its reorder across internal transitions', async () => {
   mocks.byId.mockReturnValue({
     id: 'existing',

@@ -352,6 +352,7 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   writeFileSync(`${evidence}/d-document.xml`, xml)
   writeFileSync(`${evidence}/d-text.txt`, xml.replace(/<[^>]+>/g, ''))
   await check(host.querySelector('[aria-label="情境選擇"] input[value="n"]')!, true)
+  await click('修改', row('F Mock').querySelector('[data-field-key="Y"]')!)
   await field(row('F Mock'), 'Mock Y label', '99.25')
   expect(saved.fields?.some((field) => field.key === 'Z')).toBe(false)
   await field(row('F Mock'), 'Z', 'Mock Only N')
@@ -359,7 +360,9 @@ it('maintainer mapping/save/reopen, step field entry and shared values, producti
   await categories.reload()
   await settle()
   expect(host.querySelector('.fixed-step h3')?.textContent?.trim()).toBe('F Mock')
-  expect((row('D Mock').querySelector('input[type="number"]') as HTMLInputElement).value).toBe(
+  expect(row('D Mock').querySelector('input[type="number"]')).toBeNull()
+  expect(row('D Mock').textContent).toContain('已填：99.25（填寫於步驟 1）')
+  expect((row('F Mock').querySelector('input[type="number"]') as HTMLInputElement).value).toBe(
     '99.25',
   )
   await click('全部文件總覽')

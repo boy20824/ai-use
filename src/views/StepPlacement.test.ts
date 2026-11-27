@@ -118,6 +118,9 @@ function main(id: string) {
 function field(root: ParentNode, name: string) {
   return root.querySelector<HTMLInputElement>(`[data-field-key="${name}"] input`)!
 }
+function fieldRow(root: ParentNode, name: string) {
+  return root.querySelector<HTMLElement>(`[data-field-key="${name}"]`)!
+}
 function button(root: ParentNode, label: string) {
   return [...root.querySelectorAll('button')].find((el) => el.textContent?.trim() === label)!
 }
@@ -152,19 +155,29 @@ it('places deduplicated first-occurrence fields in their step, with only Taipei 
   expect(main('二').querySelector('select')).toBeNull()
   expect(host.textContent).not.toContain('編輯流程')
 })
-it('synchronizes shared mock data in both directions including parallel work, labels steps 2/5 and renders both documents (3)', async () => {
+it('keeps later uses collapsed in both panels and shares values edited from either panel', async () => {
   await mount()
   const parallel = host.querySelector('.parallel-work-item')!
   await fill(field(main('二'), '被害人姓名'), '王小明（Mock）')
   await fill(field(main('二'), '姓名'), '<script>Mock</script>')
+  for (const region of [main('五'), parallel]) {
+    const row = fieldRow(region, '案由')
+    expect(row.textContent).toContain('未填（請於步驟 2 填寫）')
+    expect(field(region, '案由')).toBeNull()
+    expect(button(row, '在此填寫').getAttribute('aria-expanded')).toBe('false')
+  }
+  await click(fieldRow(main('五'), '案由'), '在此填寫')
   await fill(field(main('五'), '案由'), '詐欺（Mock）')
   expect(field(main('二'), '案由').value).toBe('詐欺（Mock）')
-  expect(field(parallel, '案由').value).toBe('詐欺（Mock）')
-  expect(main('二').textContent).toContain('共用：步驟 2、5')
-  expect(parallel.textContent).toContain('共用：步驟 2、5')
+  expect(field(parallel, '案由')).toBeNull()
+  expect(main('二').textContent).toContain('共用於：步驟 5')
+  expect(parallel.textContent).toContain('已填：詐欺（Mock）（填寫於步驟 2）')
+  await click(fieldRow(parallel, '案由'), '修改')
   await fill(field(parallel, '案由'), '更新（Mock）')
   expect(field(main('五'), '案由').value).toBe('更新（Mock）')
   await fill(field(main('五'), '案由'), '詐欺（Mock）')
+  await click(fieldRow(parallel, '案由'), '收合')
+  expect(field(parallel, '案由')).toBeNull()
   await click(main('二'), '產生')
   await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledTimes(1))
   await click(parallel, '產生')
@@ -180,28 +193,86 @@ it('synchronizes shared mock data in both directions including parallel work, la
   expect(host.querySelector('script')).toBeNull()
   expect(field(main('二'), '姓名').value).toBe('<script>Mock</script>')
 })
-it('deduplicates missing prompts in a step and overview; clicking either focuses the first occurrence (8)', async () => {
+it('shows base values in both step panels and edits the same value used in each document', async () => {
+  mocks.category!.builtinFields!['姓名'] = true
+  mocks.library.find((item) => item.id === 'b')!.placeholders.push('姓名')
   await mount()
-  const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {})
-  const prompts = [...main('二').querySelectorAll('p')].filter((p) =>
-    p.textContent?.includes('請先填寫：'),
-  )
-  expect(prompts.length).toBeGreaterThan(1)
-  for (const prompt of prompts) {
-    expect(prompt.querySelectorAll('button')).toHaveLength(3)
+  const base = host.querySelector('.basic-data-row')!
+  const later = main('五')
+  const parallel = host.querySelector('.parallel-work-item')!
+  expect(fieldRow(later, '姓名').textContent).toContain('沿用基本 SOP：姓名＝未填')
+  expect(field(later, '姓名')).toBeNull()
+  await fill(field(base, '姓名'), '王小明')
+  expect(fieldRow(later, '姓名').textContent).toContain('沿用基本 SOP：姓名＝王小明')
+  const row = fieldRow(parallel, '姓名')
+  const modify = button(row, '修改')
+  expect(modify.getAttribute('aria-label')).toBe('修改：姓名')
+  const controlled = document.getElementById(modify.getAttribute('aria-controls')!)
+  modify.focus()
+  await click(row, '修改')
+  expect(document.activeElement).toBe(modify)
+  expect(modify.getAttribute('aria-expanded')).toBe('true')
+  expect(controlled?.contains(field(parallel, '姓名'))).toBe(true)
+  await fill(field(parallel, '姓名'), '李大華')
+  expect(field(base, '姓名').value).toBe('李大華')
+  for (const step of [main('二'), later]) {
+    expect(fieldRow(step, '姓名').textContent).toContain('沿用基本 SOP：姓名＝李大華')
   }
-  await click(main('五'), '案由')
+  await click(row, '收合')
+  expect(modify.getAttribute('aria-expanded')).toBe('false')
+  expect(field(parallel, '姓名')).toBeNull()
+  await fill(field(main('二'), '被害人姓名'), 'Mock victim')
+  await fill(field(main('二'), '案由'), 'Mock reason')
+  await click(main('二'), '產生')
+  await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledTimes(1))
+  await click(parallel, '產生')
+  await vi.waitFor(() => expect(mocks.download).toHaveBeenCalledTimes(2))
+  expect(mocks.render.mock.calls.map(([, values]) => values['姓名'])).toEqual(['李大華', '李大華'])
+})
+
+it('lists each missing tag once per workflow, overview and parallel area and focuses its owner', async () => {
+  mocks.category!.builtinFields!['姓名'] = true
+  mocks.library.find((item) => item.id === 'b')!.placeholders.push('姓名')
+  await mount()
+  vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {})
+  const mainPanel = host.querySelector('#panel-steps')!
+  const base = host.querySelector('.basic-data-row')!
+  const parallel = host.querySelector('#parallel-work')!
+  const missingLinks = (root: ParentNode, name: string) =>
+    [...root.querySelectorAll('p button')].filter((el) => el.textContent?.trim() === name)
+  expect(missingLinks(mainPanel, '姓名')).toHaveLength(0)
+  expect(missingLinks(base, '姓名')).toHaveLength(1)
+  expect(missingLinks(mainPanel, '案由')).toHaveLength(1)
+  expect(missingLinks(parallel, '案由')).toHaveLength(1)
+  await click(main('二'), '案由')
   expect(document.activeElement).toBe(field(main('二'), '案由'))
-  expect(scroll).toHaveBeenCalledOnce()
+  await click(parallel, '案由')
+  expect(document.activeElement).toBe(field(main('二'), '案由'))
+  await click(parallel, '姓名')
+  expect(document.activeElement).toBe(field(base, '姓名'))
   await click(host, '全部文件總覽')
   const overview = host.querySelector('#panel-overview')!
-  expect(
-    [...overview.querySelectorAll('p button')].filter((el) => el.textContent?.trim() === '案由'),
-  ).toHaveLength(1)
+  expect(overview.textContent).toContain('請先填寫：')
+  expect(missingLinks(overview, '案由')).toHaveLength(1)
+  expect(missingLinks(overview, '姓名')).toHaveLength(1)
   await click(overview, '案由')
   expect(host.querySelector('#panel-steps')).not.toBeNull()
   expect(document.activeElement).toBe(field(main('二'), '案由'))
-  expect(scroll).toHaveBeenCalledTimes(2)
+})
+
+it('opens the new first step on composition reorder and keeps all entered fields', async () => {
+  await mount()
+  await fill(field(main('二'), '案由'), 'Mock reason')
+  await fill(field(main('二'), '姓名'), 'Mock name')
+  mocks.category!.combinationOrders = [{ moduleIds: [], stepIds: ['s5', 's1', 's2', 's3', 's4'] }]
+  await nextTick()
+  expect(field(main('二'), '案由')).toBeNull()
+  expect(fieldRow(main('二'), '案由').textContent).toContain('已填：Mock reason（填寫於步驟 1）')
+  expect(field(main('五'), '案由').value).toBe('Mock reason')
+  expect(field(main('二'), '姓名').value).toBe('Mock name')
+  const parallel = host.querySelector('.parallel-work-item')!
+  expect(field(parallel, '案由').value).toBe('Mock reason')
+  expect(fieldRow(parallel, '案由').textContent).toContain('共用於：步驟 3')
 })
 it('focuses a missing top date and opens its collapsed details from overview (6,8)', async () => {
   await mount()
@@ -244,7 +315,7 @@ it('hides unselected module fields without blocking generation and shares tempor
   expect(host.textContent).not.toContain('隱藏必填')
   await fill(field(main('二'), '被害人姓名'), '王小明（Mock）')
   await fill(field(main('二'), '姓名'), 'Mock')
-  await fill(field(main('五'), '案由'), '詐欺（Mock）')
+  await fill(field(main('二'), '案由'), '詐欺（Mock）')
   expect(button(main('二'), '產生').disabled).toBe(false)
   const module = host.querySelector<HTMLInputElement>('[aria-label="情境選擇"] input')!
   module.checked = true
@@ -298,7 +369,7 @@ it('keeps independent memory-only dates across steps, parallel/overview, and all
   await mount()
   await fill(field(main('二'), '被害人姓名'), 'Mock victim')
   await fill(field(main('二'), '姓名'), 'Mock name')
-  await fill(field(main('五'), '案由'), 'Mock reason')
+  await fill(field(main('二'), '案由'), 'Mock reason')
   expect(main('一').querySelector('[data-step-date]')).toBeNull()
   expect(main('二').textContent).toContain('沿用上方日期：115/11/11')
   await click(main('二'), '產生')
@@ -369,18 +440,17 @@ it('blocks invalid/empty overrides per step and overview, and clears them with t
   const router = await mount()
   await fill(field(main('二'), '被害人姓名'), 'Mock victim')
   await fill(field(main('二'), '姓名'), 'Mock name')
-  await fill(field(main('五'), '案由'), 'Mock reason')
+  await fill(field(main('二'), '案由'), 'Mock reason')
   await toggleDate(main('五'), true)
   await setDate(main('五').querySelector('[data-step-date]')!, ['115', '2', '30'])
   expect(button(main('五'), '產生').disabled).toBe(true)
   expect(button(main('二'), '產生').disabled).toBe(false)
   expect(main('五').textContent).toContain('日期格式')
   await click(host, '全部文件總覽')
-  expect(button(host, '產生勾選文件').disabled).toBe(true)
-  vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {})
-  await click(host.querySelector('#panel-overview')!, '日期格式')
-  expect(document.activeElement).toBe(main('五').querySelector('select'))
-  await click(host, '全部文件總覽')
+  const overview = host.querySelector('#panel-overview')!
+  expect(button(overview, '產生勾選文件').disabled).toBe(true)
+  expect(overview.textContent).toContain('日期不是有效的民國日期。')
+  expect(overview.textContent).not.toContain('請先填寫：')
   await click(host, '範本步驟')
   await setDate(main('五').querySelector('[data-step-date]')!, ['115', '2', ''])
   expect(button(main('五'), '產生').disabled).toBe(true)

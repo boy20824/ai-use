@@ -144,9 +144,15 @@ it('shows empty state, selected-only stable deduped list and visible main hints 
     expect(main(id).classList.contains('parallel-step')).toBe(true)
     expect(main(id).querySelector('.parallel-hint')?.textContent).toContain('可請其他人同步處理')
     expect(main(id).querySelector('.parallel-hint svg[aria-hidden="true"]')).not.toBeNull()
-    expect(item(id).querySelector('input[type="text"]')).not.toBeNull()
     expect(item(id).textContent).toContain(`${id} 說明`)
   }
+  expect(item('D').querySelector('input[type="text"]')).not.toBeNull()
+  expect(item('J').querySelector('input[type="text"]')).toBeNull()
+  expect(item('J').textContent).toContain('未填（請於步驟 2 填寫）')
+  const hints = [...region().querySelectorAll('p button')].map((button) =>
+    button.textContent?.trim(),
+  )
+  expect(hints.filter((name) => name === '專屬值')).toHaveLength(1)
   expect(handled(main('A')).checked).toBe(false)
   expect(host.textContent).not.toContain('編輯流程')
   expect(host.querySelector('input[aria-label*="canRunInParallel"]')).toBeNull()
@@ -158,7 +164,7 @@ it('shares values bidirectionally across collapse and tabs, shares identical tag
   await fill(host.querySelector('#draft-0')!, 'Mock Person')
   await fill(item('D').querySelector('input[type="text"]')!, 'D only')
   expect(main('D').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('D only')
-  expect(item('J').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('D only')
+  expect(item('J').textContent).toContain('已填：D only（填寫於步驟 2）')
   await fill(main('D').querySelector('input[type="text"]')!, 'D updated')
   const details = item('D').querySelector<HTMLDetailsElement>(':scope > details')!
   details.open = true
@@ -215,6 +221,10 @@ it('clears exited notes, retains shared field values, and clears on case change 
   await select('alcohol')
   await select('arrest')
   for (const id of ['D', 'J']) {
+    if (id === 'J') {
+      item(id).querySelector<HTMLButtonElement>('[aria-label="修改：專屬值"]')!.click()
+      await nextTick()
+    }
     await fill(item(id).querySelector('input[type="text"]')!, `${id} only`)
     await check(handled(item(id)), true)
   }
@@ -224,7 +234,7 @@ it('clears exited notes, retains shared field values, and clears on case change 
   expect(item('D').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('J only')
   await select('arrest')
   expect(handled(item('J')).checked).toBe(false)
-  expect(item('J').querySelector<HTMLInputElement>('input[type="text"]')!.value).toBe('J only')
+  expect(item('J').textContent).toContain('已填：J only')
   expect((host.querySelector('#draft-0') as HTMLInputElement).value).toBe('Shared')
   await confirmedNavigation(router, '/categories/other')
   await select('alcohol')

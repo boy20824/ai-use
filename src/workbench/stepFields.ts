@@ -41,7 +41,9 @@ export function generationContexts(
 }
 
 /** Only explicit base definitions belong above the workflow. */
-export function sharedFieldNames(category: CaseCategory): string[] {
+export function sharedFieldNames(
+  category: Pick<CaseCategory, 'builtinFields' | 'fields'>,
+): string[] {
   return [
     ...new Set([
       ...(category.builtinFields?.['姓名'] === true ? ['姓名'] : []),
@@ -53,25 +55,6 @@ export function sharedFieldNames(category: CaseCategory): string[] {
   ]
 }
 
-/** Visible composition order, counting a repeated template only once per step. */
-export function sharedFieldLabels(
-  steps: CategoryStep[],
-  contexts: GenerationContext[],
-): Record<string, string> {
-  const occurrences = new Map<string, number[]>()
-  steps.forEach((step, index) => {
-    for (const key of inputFields(contexts.filter((context) => context.stepId === step.id))) {
-      const numbers = occurrences.get(key) ?? []
-      numbers.push(index + 1)
-      occurrences.set(key, numbers)
-    }
-  })
-  return Object.fromEntries(
-    [...occurrences]
-      .filter(([, numbers]) => numbers.length > 1)
-      .map(([key, numbers]) => [key, `共用：步驟 ${numbers.join('、')}`]),
-  )
-}
 export const localFieldNames = (contexts: GenerationContext[], shared: string[]) =>
   inputFields(contexts).filter((key) => !shared.includes(key))
 export const scopeKey = (context: GenerationContext) =>
