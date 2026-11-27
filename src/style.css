@@ -41,6 +41,11 @@
   --shadow-card: 0 1px 2px rgb(15 28 38 / 0.02);
   --shadow-float: 0 12px 40px rgb(20 18 16 / 0.14);
 
+  --ease-out-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --duration-fast: 140ms;
+  --duration-base: 200ms;
+  --duration-slow: 260ms;
+
   --text-xs: 0.75rem;
   --text-sm: 0.875rem;
   --text-base: 1.125rem;
@@ -1422,7 +1427,7 @@
   background: #e8edee;
 }
 .group-tabs [aria-selected='true'] {
-  background: white;
+  background: var(--selected-tab-background, white);
   color: var(--color-ink);
   box-shadow: none;
 }
@@ -1649,6 +1654,206 @@ label:has(> input[type='file']:focus-visible) {
   align-items: center;
   min-height: 44px;
   min-width: 44px;
+}
+
+@layer components {
+  .templates-page .group-tabs {
+    --selected-tab-background: transparent;
+    position: relative;
+    isolation: isolate;
+  }
+
+  .templates-page .tab-slider {
+    position: absolute;
+    inset-block: 0.25rem;
+    left: 0;
+    width: 100px;
+    border-radius: var(--radius-control);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-card);
+    opacity: 0;
+    transform-origin: left center;
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  .templates-page .template-list tbody tr {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .templates-page .template-list tbody tr:hover {
+    background: transparent;
+  }
+
+  .templates-page .template-list tbody tr::before,
+  .templates-page .template-list tbody tr::after {
+    content: '';
+    position: absolute;
+    pointer-events: none;
+  }
+
+  .templates-page .template-list tbody tr::before {
+    inset: 0;
+    z-index: -1;
+    background: var(--color-accent-soft);
+    opacity: 0;
+  }
+
+  .templates-page .template-list tbody tr::after {
+    inset: 10px auto 10px 0;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--color-accent);
+    transform: scaleY(0);
+  }
+
+  .templates-page .template-list tbody tr:is(:hover, :focus-within)::before {
+    opacity: 0.45;
+  }
+
+  .templates-page .template-list tbody tr:is(:hover, :focus-within)::after {
+    transform: scaleY(1);
+  }
+
+  .templates-page .count-roll {
+    display: inline-block;
+  }
+
+  .templates-page .compact-upload {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .templates-page .template-guide summary {
+    list-style: none;
+  }
+
+  .templates-page .template-guide summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .templates-page .template-guide summary::before {
+    content: '';
+    display: inline-block;
+    margin-inline-end: 0.4em;
+    border-block: 0.3em solid transparent;
+    border-inline-start: 0.55em solid currentColor;
+  }
+
+  .templates-page .template-guide[open] summary::before {
+    transform: rotate(90deg);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    @keyframes template-row-in {
+      from {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+    }
+
+    @keyframes template-count-in {
+      from {
+        opacity: 0;
+        transform: translateY(60%);
+      }
+    }
+
+    @keyframes template-download-nudge {
+      45% {
+        transform: translateY(2px);
+      }
+    }
+
+    @keyframes template-upload-sheen {
+      to {
+        transform: translateX(110%);
+      }
+    }
+
+    .templates-page .row-enter-active,
+    .templates-page .template-empty,
+    .templates-page .template-guide[open] > div {
+      animation: template-row-in var(--duration-slow) var(--ease-out-soft) backwards;
+    }
+
+    .templates-page .row-enter-active {
+      animation-delay: calc(min(var(--i), 8) * 35ms + 80ms);
+    }
+
+    /* Keep leaving rows in the table flow so they continue to size the columns. */
+    .templates-page .row-leave-active {
+      transition:
+        opacity var(--duration-fast) ease-in,
+        transform var(--duration-fast) ease-in;
+    }
+
+    .templates-page .row-leave-to {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+
+    .templates-page .row-move,
+    .templates-page .entry-icon,
+    .templates-page .template-list tbody tr::after,
+    .templates-page .template-guide summary::before {
+      transition: transform var(--duration-base) var(--ease-out-soft);
+    }
+
+    .templates-page .template-list tbody tr::before {
+      transition: opacity var(--duration-fast) ease;
+    }
+
+    .templates-page .template-list tbody tr:is(:hover, :focus-within) .entry-icon {
+      transform: translateY(-2px) rotate(-3deg);
+    }
+
+    .templates-page .tab-slider {
+      transition: transform var(--duration-slow) var(--ease-out-soft);
+    }
+
+    .templates-page .count-roll {
+      animation: template-count-in var(--duration-base) var(--ease-out-soft) backwards;
+    }
+
+    .templates-page .download-template:hover svg {
+      animation: template-download-nudge 420ms var(--ease-out-soft);
+    }
+
+    .templates-page :is(.btn-secondary, .download-template, .compact-upload) {
+      transition: transform 90ms ease !important;
+    }
+
+    .templates-page :is(.btn-secondary, .download-template, .compact-upload):active {
+      transform: scale(0.97);
+    }
+
+    .templates-page .compact-upload::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(
+        100deg,
+        transparent 30%,
+        color-mix(in srgb, var(--color-surface) 22%, transparent) 50%,
+        transparent 70%
+      );
+      transform: translateX(-110%);
+      pointer-events: none;
+    }
+
+    .templates-page .compact-upload:hover::after {
+      animation: template-upload-sheen 640ms var(--ease-out-soft);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .templates-page .row-leave-active,
+    .templates-page .compact-upload::after {
+      display: none;
+    }
+  }
 }
 
 /* Size the two work areas by available space, including the embedded case browser. */

@@ -18,7 +18,7 @@ import type { TemplateSummary } from '@/storage'
 import { formatBytes } from '@/utils/format'
 import { displayFileName } from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -28,6 +28,8 @@ const templates = useTemplateStore()
 const session = useSessionStore()
 const keyword = ref('')
 const group = ref<CategoryGroup | ''>('')
+const groupTabs = ref<HTMLElement | null>(null)
+const tabSlider = ref<HTMLElement | null>(null)
 const feedback = ref('')
 const uploadError = ref('')
 const feedbackTone = ref<'ok' | 'warn'>('ok')
@@ -35,6 +37,30 @@ const pendingDelete = ref<TemplateSummary | null>(null)
 const deleting = ref(false)
 const replacing = ref('')
 const replacementBusy = ref(false)
+
+function positionTabSlider(animate: boolean) {
+  const selected = groupTabs.value?.querySelector<HTMLElement>('[aria-selected="true"]')
+  const slider = tabSlider.value
+  if (!selected || !slider) return
+
+  slider.style.transition = animate ? '' : 'none'
+  slider.style.transform = `translateX(${selected.offsetLeft}px) scaleX(${selected.offsetWidth / 100})`
+  slider.style.opacity = '1'
+}
+
+function resetTabSlider() {
+  positionTabSlider(false)
+}
+
+onMounted(() => {
+  resetTabSlider()
+  window.addEventListener('resize', resetTabSlider)
+})
+onUnmounted(() => window.removeEventListener('resize', resetTabSlider))
+watch(group, async () => {
+  await nextTick()
+  positionTabSlider(true)
+})
 
 const disabledReason = '需要可維護流程的權限才能上傳範本。刪除範本只有系統管理員可以操作。'
 
@@ -206,16 +232,17 @@ async function onFiles(files: File[]) {
 
     <div class="library-toolbar">
       <div
+        ref="groupTabs"
         class="group-tabs inline-flex gap-1 rounded-control bg-tone-neutral/60 p-1"
         role="tablist"
         aria-label="範本分類"
       >
+        <span ref="tabSlider" class="tab-slider" aria-hidden="true"></span>
         <button
           type="button"
           role="tab"
           :aria-selected="group === ''"
           class="focus-control rounded-control px-3 py-2 text-sm"
-          :class="{ 'bg-surface shadow-card': group === '' }"
           @click="group = ''"
         >
           全部</button
@@ -226,7 +253,6 @@ async function onFiles(files: File[]) {
           role="tab"
           :aria-selected="group === key"
           class="focus-control rounded-control px-3 py-2 text-sm"
-          :class="{ 'bg-surface shadow-card': group === key }"
           @click="group = key"
         >
           {{ label }}
@@ -262,10 +288,14 @@ async function onFiles(files: File[]) {
       />
     </div>
 
-    <p class="mb-3 text-xs text-ink-muted" role="status">顯示 {{ visible.length }} 筆</p>
+    <p class="mb-3 text-xs text-ink-muted" role="status">
+      顯示
+      <span :key="visible.length" class="count-roll tabular-nums">{{ visible.length }}</span> 筆
+    </p>
 
     <EmptyState
       v-if="templates.ready && visible.length === 0 && templates.total === 0"
+      class="template-empty"
       title="範本庫還沒有文件"
       description="具有維護權限的使用者上傳 Word 或 PDF 後，可在案件範本的工作台按「從範本庫選取」連結過來。"
     >
@@ -274,6 +304,7 @@ async function onFiles(files: File[]) {
 
     <EmptyState
       v-else-if="templates.ready && visible.length === 0"
+      class="template-empty"
       title="沒有符合的範本"
       description="請調整關鍵字或分類，或改看全部範本。"
     >
@@ -297,16 +328,25 @@ async function onFiles(files: File[]) {
             <th scope="col" class="px-4 py-3">操作</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-edge">
-          <tr v-for="item in visible" :key="item.id" class="align-top">
+        <TransitionGroup tag="tbody" name="row" class="divide-y divide-edge" appear>
+          <tr
+            v-for="(item, index) in visible"
+            :key="item.id"
+            class="align-top"
+            :style="{ '--i': index }"
+          >
             <td class="template-name max-w-64 px-4 py-4">
               <span class="entry-icon"><AppIcon /></span>
               <div>
-                <p class="break-all font-semibold text-ink">{{ displayFileName(item.fileName) }}</p>
+                <p class="font-semibold text-ink [overflow-wrap:anywhere]">
+                  {{ displayFileName(item.fileName) }}
+                </p>
                 <span class="rounded border border-edge px-1.5 text-xs">{{
                   item.kind === 'pdf' ? 'PDF' : 'Word'
                 }}</span>
-                <p class="mt-1 text-xs text-ink-muted">{{ formatBytes(item.sizeBytes) }}</p>
+                <p class="mt-1 text-xs text-ink-muted tabular-nums">
+                  {{ formatBytes(item.sizeBytes) }}
+                </p>
               </div>
             </td>
             <td class="template-fields max-w-48 px-4 py-4 text-xs leading-6 text-ink-muted">
@@ -342,7 +382,9 @@ async function onFiles(files: File[]) {
                 關聯 {{ new Set(item.usages.map((u) => u.categoryId)).size }} 個案件範本
               </span>
             </td>
-            <td class="template-date whitespace-nowrap px-4 py-4 text-xs text-ink-muted">
+            <td
+              class="template-date whitespace-nowrap px-4 py-4 text-xs text-ink-muted tabular-nums"
+            >
               {{ formatStoredDate(item.addedAt) }}
             </td>
             <td class="template-actions px-4 py-4">
@@ -393,7 +435,7 @@ async function onFiles(files: File[]) {
               </div>
             </td>
           </tr>
-        </tbody>
+        </TransitionGroup>
       </table>
     </section>
 
