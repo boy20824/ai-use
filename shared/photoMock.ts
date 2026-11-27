@@ -1,6 +1,17 @@
 import { deflateSync } from 'node:zlib'
 import type { PhotoDraft } from './photoBlockRender.ts'
 
+/** A 12 × 24 JPEG with two solid color bands. */
+export const mockJpeg = {
+  mime: 'image/jpeg',
+  width: 12,
+  height: 24,
+  bytes: Buffer.from(
+    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAYAAwDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAQG/8QAGBABAAMBAAAAAAAAAAAAAAAAABVjouH/xAAWAQEBAQAAAAAAAAAAAAAAAAAFAgP/xAAXEQEAAwAAAAAAAAAAAAAAAAAAAhES/9oADAMBAAIRAxEAPwDGC2Ptz0j7c9NWExJaAlu//9k=',
+    'base64',
+  ),
+} as const
+
 function pngChunk(type: string, payload: Uint8Array): Uint8Array {
   const result = new Uint8Array(payload.length + 12)
   const view = new DataView(result.buffer)

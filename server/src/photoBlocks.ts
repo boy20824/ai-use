@@ -46,6 +46,7 @@ export interface PhotoBlock {
   contentEnd: number
   cells: PhotoCellRange[]
   photoCellsPerPage: number
+  fields: string[]
 }
 
 function textOf(xml: string): string {
@@ -109,6 +110,7 @@ export function parsePhotoBlock(xml: string, part = 'word/document.xml'): PhotoB
   let closing: Marker | undefined
   let cellOpening: Marker | undefined
   const pairs: [Marker, Marker][] = []
+  const fields = new Set<string>()
   let imageCount = 0
   for (const marker of markers) {
     switch (marker.name) {
@@ -147,6 +149,8 @@ export function parsePhotoBlock(xml: string, part = 'word/document.xml'): PhotoB
           imageCount++
           if (marker.text.trim() !== '{{照片}}')
             fail(marker, '{{照片}} 必須獨占照片儲存格的一個段落')
+        } else {
+          fields.add(marker.name)
         }
     }
   }
@@ -232,5 +236,6 @@ export function parsePhotoBlock(xml: string, part = 'word/document.xml'): PhotoB
     contentEnd: closing.range.start,
     cells,
     photoCellsPerPage: cells.length,
+    fields: [...fields],
   }
 }

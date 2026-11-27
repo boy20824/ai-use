@@ -727,6 +727,7 @@ export function listPlaceholders(
   return names
 }
 
+/** Reads the validated photo layout and its text fields from a DOCX. */
 export function readPhotoBlock(data: ArrayBuffer | Uint8Array): PhotoBlock | null {
   const zip = safeDocx(asBytes(data), docxZipLimits)
   let block: PhotoBlock | null = null

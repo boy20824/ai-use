@@ -12,6 +12,10 @@ export function photoTemplateLabel(name: string): string | undefined {
   return photoTemplateLabels.get(name)
 }
 
+export function isPhotoTemplateName(name: string): boolean {
+  return photoTemplateLabels.has(name)
+}
+
 export function displayTemplateName(name: string): string {
   return photoTemplateLabel(name) ?? displayFileName(name)
 }

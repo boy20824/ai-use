@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { buildDeliveryPhotoTemplate } from '../../shared/deliveryPhotoTemplateFixture'
 import { buildPhotoTemplate } from '../../shared/photoTemplateFixture'
 import { buildDocx, paragraph, run, wordDocument, wordHeader } from '../../shared/docxFixture'
-import { mockPhotoDraft, mockPhotoFields } from '../../shared/photoMock'
+import { mockJpeg, mockPhotoDraft, mockPhotoFields } from '../../shared/photoMock'
 import {
   checkPhotoBytes,
   effectivePhotoValues,
@@ -40,6 +40,18 @@ function changeXml(change: (xml: string) => string) {
   zip.file('word/document.xml', change(xmlOf(template)))
   return zip.generate({ type: 'uint8array' })
 }
+
+it.each([
+  ['scene-photos-template.docx', ['照片編號', '攝影時間', '攝影地點', '攝影人', '照片說明']],
+  ['delivery-certificate-photos-template.docx', ['照片編號', '照片說明']],
+])('只列出 %s 照片格內實際使用的文字欄位', (fileName, fields) => {
+  const bytes = new Uint8Array(
+    readFileSync(new URL(`../../public/templates/${fileName}`, import.meta.url)),
+  )
+  const expected = [...fields].sort()
+  expect(parsePhotoBlock(xmlOf(bytes))?.fields.sort()).toEqual(expected)
+  expect(readPhotoBlock(bytes)?.fields.sort()).toEqual(expected)
+})
 
 describe('動態照片區塊', () => {
   it('Mock 成品可重建，作者為 Mock，通過既有安全與上傳欄位驗證', () => {
@@ -340,17 +352,7 @@ describe('送達證書黏貼照片（可插入圖片）Mock 範本', () => {
   ])('%i 張 → %i 頁，保留表頭、跳脫值並通過 ZIP 檢查', (count, pages) => {
     const draft = mockPhotoDraft(count)
     if (count >= 2) {
-      // 12 × 24 JPEG with two solid color bands.
-      draft.photos[1] = {
-        ...draft.photos[1]!,
-        mime: 'image/jpeg',
-        width: 12,
-        height: 24,
-        bytes: Buffer.from(
-          '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAAYAAwDASIAAhEBAxEB/8QAFgABAQEAAAAAAAAAAAAAAAAAAAQG/8QAGBABAAMBAAAAAAAAAAAAAAAAABVjouH/xAAWAQEBAQAAAAAAAAAAAAAAAAAFAgP/xAAXEQEAAwAAAAAAAAAAAAAAAAAAAhES/9oADAMBAAIRAxEAPwDGC2Ptz0j7c9NWExJaAlu//9k=',
-          'base64',
-        ),
-      }
+      draft.photos[1] = { ...draft.photos[1]!, ...mockJpeg }
     }
     const recipient = 'Mock <收件人> & 測試'
     const output = renderPhotoDocx(delivery, { 應受送達人: recipient }, draft)

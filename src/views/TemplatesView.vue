@@ -16,7 +16,12 @@ import { useSessionStore } from '@/stores/session'
 import { useTemplateStore } from '@/stores/templates'
 import type { TemplateSummary } from '@/storage'
 import { formatBytes } from '@/utils/format'
-import { displayFileName, displayTemplateName, photoTemplateLabel } from '@/utils/fileName'
+import {
+  displayFileName,
+  displayTemplateName,
+  isPhotoTemplateName,
+  photoTemplateLabel,
+} from '@/utils/fileName'
 import { formatStoredDate } from '@/utils/rocDate'
 import { computed, nextTick, onActivated, onMounted, onUnmounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -388,7 +393,10 @@ async function onFiles(files: File[]) {
                 <p class="font-semibold text-ink [overflow-wrap:anywhere]">
                   {{ displayTemplateName(item.fileName) }}
                 </p>
-                <p v-if="photoTemplateLabel(item.fileName)" class="mt-1 text-xs text-ink-muted">
+                <p
+                  v-if="item.usages.length && isPhotoTemplateName(item.fileName)"
+                  class="mt-1 text-xs text-ink-muted"
+                >
                   此範本可在產生文件時插入照片
                 </p>
                 <span class="rounded border border-edge px-1.5 text-xs">{{
@@ -415,9 +423,18 @@ async function onFiles(files: File[]) {
             <td
               class="template-usages max-w-64 px-4 py-4 text-xs leading-5 [overflow-wrap:anywhere]"
             >
-              <span v-if="usageGroupsByTemplate[item.id].length === 0" class="text-ink-muted">
-                尚未使用
-              </span>
+              <template v-if="usageGroupsByTemplate[item.id].length === 0">
+                <span class="text-ink-muted">尚未使用</span>
+                <div v-if="isPhotoTemplateName(item.fileName)" class="mt-1 text-ink-muted">
+                  <p>要插入照片，請到案件範本的步驟選用這份範本</p>
+                  <RouterLink
+                    to="/categories"
+                    class="focus-control font-semibold text-accent-ink hover:underline"
+                  >
+                    前往案件範本
+                  </RouterLink>
+                </div>
+              </template>
               <component
                 v-else
                 :is="usageGroupsByTemplate[item.id].length >= 3 ? 'details' : 'div'"
