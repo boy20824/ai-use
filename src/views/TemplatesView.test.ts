@@ -1,8 +1,23 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, type App } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import TemplatesView from './TemplatesView.vue'
+
+vi.mock('vue', async (importOriginal) => {
+  const vue = await importOriginal<typeof import('vue')>()
+  return {
+    ...vue,
+    TransitionGroup: vue.defineComponent({
+      props: { tag: { type: String, required: true }, name: String, appear: Boolean },
+      setup:
+        (props, { slots }) =>
+        () =>
+          vue.h(props.tag, slots.default?.()),
+    }),
+  }
+})
 
 const mocks = vi.hoisted(() => ({
   pdf: false,
@@ -83,6 +98,27 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 const rows = () => host.querySelectorAll('tbody tr')
+
+it('hides the tab slider from accessibility and announces the current result count', async () => {
+  await mount()
+  const tablist = host.querySelector('[role="tablist"]')
+  expect(tablist?.querySelector('span.tab-slider')?.getAttribute('aria-hidden')).toBe('true')
+
+  const status = host.querySelector('p[role="status"]')
+  expect(status?.querySelector('.count-roll')?.textContent).toBe('3')
+  expect(status?.textContent?.trim()).toBe('顯示 3 筆')
+
+  tablist?.querySelectorAll('button')[1]?.click()
+  await nextTick()
+  expect(status?.textContent?.trim()).toBe('顯示 1 筆')
+})
+
+it('immediately hides leaving rows and the upload sheen when reduced motion is requested', () => {
+  expect(readFileSync('src/style.css', 'utf8')).toMatch(
+    /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{\s*\.templates-page \.row-leave-active,\s*\.templates-page \.compact-upload::after\s*\{\s*display:\s*none;/,
+  )
+})
+
 it('combines real filename/field search, group tabs, and the existing route filter', async () => {
   const router = await mount()
   expect(rows()).toHaveLength(3)
