@@ -393,10 +393,7 @@ async function onFiles(files: File[]) {
                 <p class="font-semibold text-ink [overflow-wrap:anywhere]">
                   {{ displayTemplateName(item.fileName) }}
                 </p>
-                <p
-                  v-if="item.usages.length && isPhotoTemplateName(item.fileName)"
-                  class="mt-1 text-xs text-ink-muted"
-                >
+                <p v-if="isPhotoTemplateName(item.fileName)" class="mt-1 text-xs text-ink-muted">
                   此範本可在產生文件時插入照片
                 </p>
                 <span class="rounded border border-edge px-1.5 text-xs">{{

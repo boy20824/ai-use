@@ -91,6 +91,7 @@ vi.mock('@/stores/templates', () => ({
         fileName: mocks.pdf ? '作業規定（Mock）.pdf' : mocks.unusedFileName,
         kind: mocks.pdf ? 'pdf' : 'docx',
         mimeType: mocks.pdf ? 'application/pdf' : undefined,
+        origin: mocks.pdf ? 'upload' : 'sample',
         placeholders: [],
         usages: [],
       },
@@ -190,11 +191,19 @@ it('shows 尚未使用 for an unused template and lists a single category direct
   expect(cell.querySelector('a')?.textContent?.trim()).toBe('刑事類別')
 })
 
-it.each(['delivery-certificate-photos-template.docx', 'scene-photos-template.docx'])(
-  'links the unused %s template to the case template list',
-  async (fileName) => {
+it.each([
+  ['delivery-certificate-photos-template.docx', '送達證書黏貼照片（可插入圖片）'],
+  ['scene-photos-template.docx', '刑案現場照片（可插入圖片）'],
+])(
+  'labels the unused built-in %s and links it to the case template list',
+  async (fileName, label) => {
     mocks.unusedFileName = fileName
     const router = await mount()
+    const nameCell = rows()[2]!.querySelector('.template-name')!
+    expect(nameCell.querySelector('p')?.textContent?.trim()).toBe(label)
+    expect(nameCell.querySelector('p + p')?.textContent?.trim()).toBe(
+      '此範本可在產生文件時插入照片',
+    )
     const cell = usageCell(2)
     expect(cell.textContent).toContain('尚未使用')
     expect(cell.textContent).toContain('要插入照片，請到案件範本的步驟選用這份範本')

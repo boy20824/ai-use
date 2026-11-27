@@ -71,6 +71,7 @@ export interface AppConfig {
   registerGlobalLimit: number
   registerWindowMs: number
   sampleTemplatePath: string
+  builtinTemplateDir: string
   seedSampleData: boolean
   staticDir: string | undefined
   trustProxy: boolean
@@ -273,6 +274,9 @@ export function loadConfig(): AppConfig {
     registerGlobalLimit: numberEnv('REGISTER_GLOBAL_LIMIT', 30),
     registerWindowMs: numberEnv('REGISTER_WINDOW_MS', 60 * 60 * 1000),
     sampleTemplatePath: sampleTemplatePathFromEnv(),
+    builtinTemplateDir: path.resolve(
+      process.env.BUILTIN_TEMPLATE_DIR?.trim() || resolveServerPath('../public/templates'),
+    ),
     seedSampleData: seedSampleEnabled(
       nodeEnv,
       process.env.SEED_SAMPLE_DATA,
